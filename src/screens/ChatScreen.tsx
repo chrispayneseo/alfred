@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { ModelTag } from "../components/ModelTag";
+import { sendChatMessage, type ChatApiTurn } from "../integrations/llm/api";
 import { makeId } from "../lib/id";
-import { routeToModel } from "../lib/modelRouter";
-import { nextMockReply } from "../mocks/chat";
+import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type { ChatMessage } from "../types";
 
 const initialMessages: ChatMessage[] = [
@@ -10,20 +10,22 @@ const initialMessages: ChatMessage[] = [
     id: "m0",
     role: "assistant",
     text: "Morning. Anything you want me to look into, or something on your mind?",
-    model: "chatgpt",
     createdAt: new Date().toISOString(),
   },
 ];
+
+const MODEL_LABEL = { claude: "Claude", chatgpt: "ChatGPT" } as const;
 
 export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const online = useOnlineStatus();
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text) return;
+    if (!text || isThinking) return;
 
     const userMessage: ChatMessage = {
       id: makeId(),
@@ -31,22 +33,61 @@ export function ChatScreen() {
       text,
       createdAt: new Date().toISOString(),
     };
+    const history: ChatApiTurn[] = [...messages, userMessage].map((m) => ({
+      role: m.role,
+      content: m.text,
+    }));
+
     setMessages((prev) => [...prev, userMessage]);
     setDraft("");
-    setIsThinking(true);
 
-    const model = routeToModel(text);
-    window.setTimeout(() => {
-      const reply: ChatMessage = {
-        id: makeId(),
-        role: "assistant",
-        text: nextMockReply(model === "claude"),
-        model,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, reply]);
+    if (!online) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: "assistant",
+          text: "You're offline, so I can't reach Claude or ChatGPT right now — I'll be here once you're back online.",
+          isError: true,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+
+    setIsThinking(true);
+    try {
+      const result = await sendChatMessage(history);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: "assistant",
+          text: result.text,
+          model: result.model,
+          note: result.fellBack
+            ? `${MODEL_LABEL[result.intendedModel]} unavailable — answered with ${MODEL_LABEL[result.model]}`
+            : undefined,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    } catch (error) {
+      const bothDown = error instanceof Error && error.message === "both_unavailable";
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: "assistant",
+          text: bothDown
+            ? "Claude and ChatGPT are both unavailable right now. Try again in a moment."
+            : "Something went wrong reaching the assistant. Try again in a moment.",
+          isError: true,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    } finally {
       setIsThinking(false);
-    }, 500);
+    }
   }
 
   return (
@@ -65,11 +106,16 @@ export function ChatScreen() {
               className={`inline-block max-w-[85%] rounded-2xl px-4 py-2.5 text-left text-sm ${
                 message.role === "user"
                   ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                  : "bg-paper-raised text-ink dark:bg-paper-raised-dark dark:text-ink-dark"
+                  : message.isError
+                    ? "bg-paper-raised text-ink-soft dark:bg-paper-raised-dark dark:text-ink-soft-dark"
+                    : "bg-paper-raised text-ink dark:bg-paper-raised-dark dark:text-ink-dark"
               }`}
             >
               {message.text}
             </p>
+            {message.note && (
+              <p className="mt-1 text-[11px] text-ink-faint dark:text-ink-faint-dark">{message.note}</p>
+            )}
           </div>
         ))}
         {isThinking && (
@@ -86,7 +132,7 @@ export function ChatScreen() {
         />
         <button
           type="submit"
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || isThinking}
           className="rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
         >
           Send

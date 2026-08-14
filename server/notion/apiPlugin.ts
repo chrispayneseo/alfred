@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
+import { classifyWithModel } from "../llm/classify";
+import { runChat } from "../llm/chat";
+import { loadLlmEnv } from "../llm/env";
+import type { ChatTurn } from "../llm/types";
 import { createNotionClient } from "./client";
 import { loadNotionEnv } from "./env";
 import { NotionRepo } from "./queries";
@@ -26,28 +30,51 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-/** Dev-only API layer: keeps the Notion token server-side and sidesteps the
- * Notion API's lack of CORS support for browser calls. Gets replaced by
- * Supabase Edge Functions in a later step. */
+function isChatTurn(value: unknown): value is ChatTurn {
+  if (typeof value !== "object" || value === null) return false;
+  const { role, content } = value as { role?: unknown; content?: unknown };
+  return (role === "user" || role === "assistant") && typeof content === "string";
+}
+
+/** Dev-only API layer: keeps the Notion/Anthropic/OpenAI credentials server-side
+ * and sidesteps the Notion API's lack of CORS support for browser calls. Gets
+ * replaced by Supabase Edge Functions in a later step. */
 export function notionApiPlugin(): Plugin {
   return {
     name: "alfred-notion-api",
     configureServer(server) {
-      const env = loadNotionEnv();
-      const repo = env.token ? new NotionRepo(createNotionClient(env.token), env) : undefined;
+      const notionEnv = loadNotionEnv();
+      const repo = notionEnv.token ? new NotionRepo(createNotionClient(notionEnv.token), notionEnv) : undefined;
+      const llmEnv = loadLlmEnv();
 
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith("/api/")) return next();
-
-        if (!repo) {
-          sendJson(res, 503, { error: "Notion isn't configured yet — check NOTION_TOKEN and the *_DB_ID vars in .env." });
-          return;
-        }
 
         const url = new URL(req.url, "http://localhost");
         const method = req.method ?? "GET";
 
         try {
+          if (method === "POST" && url.pathname === "/api/chat") {
+            const body = await readJsonBody(req);
+            const messages = Array.isArray(body.messages) ? body.messages.filter(isChatTurn) : [];
+            if (messages.length === 0) return sendJson(res, 400, { error: "messages is required" });
+
+            try {
+              const result = await runChat(llmEnv, messages);
+              return sendJson(res, 200, result);
+            } catch (error) {
+              if (error instanceof Error && error.message === "both_unavailable") {
+                return sendJson(res, 502, { error: "both_unavailable" });
+              }
+              throw error;
+            }
+          }
+
+          if (!repo) {
+            sendJson(res, 503, { error: "Notion isn't configured yet — check NOTION_TOKEN and the *_DB_ID vars in .env." });
+            return;
+          }
+
           if (method === "POST" && url.pathname === "/api/capture") {
             const body = await readJsonBody(req);
             const text = typeof body.text === "string" ? body.text.trim() : "";
@@ -55,7 +82,8 @@ export function notionApiPlugin(): Plugin {
             if (!text) return sendJson(res, 400, { error: "text is required" });
 
             const inbox = await repo.createInboxPage(text, source);
-            const filed = await repo.classifyAndFile(inbox.id, text);
+            const classification = await classifyWithModel(llmEnv.anthropicApiKey, text);
+            const filed = await repo.fileClassifiedItem(inbox.id, text, classification);
             return sendJson(res, 200, { inbox, filed });
           }
 

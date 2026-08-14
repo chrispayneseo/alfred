@@ -1,5 +1,5 @@
 import type { Client } from "@notionhq/client";
-import { classify } from "./classify";
+import type { Classification } from "./classify";
 import type { NotionEnv } from "./env";
 import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP } from "./schema";
 
@@ -85,9 +85,13 @@ export class NotionRepo {
     return { id: page.id, text, status: INBOX_STATUS.UNTRIAGED };
   }
 
-  /** Classifies an Inbox item, files it into Tasks or Notes with a Project relation, and marks Inbox as triaged. */
-  async classifyAndFile(inboxId: string, text: string): Promise<{ kind: "task" | "note"; id: string; project: string }> {
-    const { type, project } = classify(text);
+  /** Files an already-classified Inbox item into Tasks or Notes with a Project relation, and marks Inbox as triaged. */
+  async fileClassifiedItem(
+    inboxId: string,
+    text: string,
+    classification: Classification
+  ): Promise<{ kind: "task" | "note"; id: string; project: string }> {
+    const { type, project } = classification;
     const projectId = await this.findProjectIdByName(project);
     const projectRelation = projectId ? [{ id: projectId }] : [];
 

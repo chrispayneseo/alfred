@@ -7,8 +7,8 @@ export interface Classification {
   project: string;
 }
 
-// v1: rule-based placeholder. Real routing (Claude/OpenAI) lands in Step 3 —
-// this just needs to get the Inbox -> Tasks/Notes plumbing right.
+// Rule-based fallback, used when the real model classifier (server/llm/classify.ts)
+// is unavailable — keeps captures filing correctly even if Anthropic is down.
 const TASK_KEYWORDS = [
   "todo",
   "to do",

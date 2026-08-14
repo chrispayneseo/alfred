@@ -28,5 +28,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   model?: ModelSource;
+  note?: string;
+  isError?: boolean;
   createdAt: string;
 }

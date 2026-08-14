@@ -8,13 +8,17 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test": "node --import tsx --test server/**/*.test.ts",
     "notion:setup": "tsx server/notion/setupWorkspace.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
     "@notionhq/client": "^5.25.2",
+    "openai": "^7.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.6.0"
+    "react-router-dom": "^7.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
