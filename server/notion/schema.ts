@@ -45,5 +45,9 @@ export const PROJECT_STATUS = { ACTIVE: "Active", PAUSED: "Paused", DONE: "Done"
 export const CAPTURED_VIA = { MANUAL: "manual", SHARE_TARGET: "share-target", EMAIL: "email" } as const;
 
 export const PROJECT_SEED_NAMES = ["Job", "Freelance", "Personal", "Football Coaching", "Unsorted"] as const;
+
+// The weekly digest rolls up these five — everything except "Unsorted",
+// which is a holding area rather than an active area of work.
+export const DIGEST_PROJECTS = ["Job", "Freelance", "Personal", "Football Coaching", "Side Projects"] as const;
 export const UNSORTED_PROJECT = "Unsorted";
 export const GENEALOGY_PARENT_PROJECT = "Personal";

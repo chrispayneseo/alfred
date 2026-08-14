@@ -4,6 +4,7 @@ import { AccountTag } from "../components/AccountTag";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { Nudges } from "../components/Nudges";
 import { Screen } from "../components/Screen";
+import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
 import { buildAccountColorMap } from "../lib/accountColor";
@@ -211,6 +212,8 @@ export function TodayScreen() {
           </>
         )}
       </section>
+
+      <WeeklyDigestTeaser />
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">

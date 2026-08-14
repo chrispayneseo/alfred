@@ -295,6 +295,18 @@ export class NotionRepo {
     await this.notion.pages.update({ page_id: taskId, archived: true } as never);
   }
 
+  /** Counts Tasks/Notes created in the last 7 days — feeds the weekly
+   * digest's "what got captured/filed" line. Uses Notion's own created_time
+   * filter rather than fetching everything and filtering locally. */
+  async countRecentlyCaptured(): Promise<{ tasks: number; notes: number }> {
+    const filter = { timestamp: "created_time" as const, created_time: { past_week: {} } };
+    const [taskRes, noteRes] = await Promise.all([
+      this.notion.dataSources.query({ data_source_id: this.env.tasksDbId, filter } as never),
+      this.notion.dataSources.query({ data_source_id: this.env.notesDbId, filter } as never),
+    ]);
+    return { tasks: taskRes.results.length, notes: noteRes.results.length };
+  }
+
   async setNoteProject(noteId: string, projectId: string): Promise<void> {
     await this.notion.pages.update({
       page_id: noteId,

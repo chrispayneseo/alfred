@@ -1,4 +1,5 @@
 import type { Env } from "../db.js";
+import { clearAllWeeklyDigests } from "../digest/weeklyDigest.js";
 import { removeAllAccounts, type GoogleAccountEnv } from "../google/accounts.js";
 import { clearAllEmails } from "../google/gmailStore.js";
 import { revokeToken } from "../google/oauth.js";
@@ -16,4 +17,5 @@ export async function wipeEverything(env: Env, googleAccounts: GoogleAccountEnv[
   await clearAllEmails(env);
   await clearAllPushedNudges(env);
   await clearAllSnoozedNudges(env);
+  await clearAllWeeklyDigests(env);
 }

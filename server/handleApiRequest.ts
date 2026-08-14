@@ -30,6 +30,13 @@ import { transcribeAudio } from "./llm/openai.js";
 import type { ChatTurn } from "./llm/types.js";
 import { runNudgeCheck } from "./nudges/check.js";
 import { snoozeNudge } from "./nudges/nudgeStore.js";
+import {
+  checkWeeklyDigest,
+  generateWeeklyDigestNow,
+  getDigestTriggerDay,
+  setDigestTriggerDay,
+  type DigestTriggerDay,
+} from "./digest/weeklyDigest.js";
 import { createNotionClient } from "./notion/client.js";
 import { loadNotionEnv } from "./notion/env.js";
 import { NotionRepo } from "./notion/queries.js";
@@ -257,6 +264,17 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(200, { ok: true });
     }
 
+    if (method === "GET" && pathname === "/api/digest/weekly/settings") {
+      return json(200, { triggerDay: await getDigestTriggerDay(env) });
+    }
+
+    if (method === "POST" && pathname === "/api/digest/weekly/settings") {
+      const body = await readBody();
+      const triggerDay: DigestTriggerDay = body.triggerDay === "monday" ? "monday" : "sunday";
+      await setDigestTriggerDay(env, triggerDay);
+      return json(200, { triggerDay });
+    }
+
     if (method === "GET" && pathname === "/api/settings/export") {
       const accounts = await loadGoogleAccounts(env);
       return json(200, await buildExport(env, accounts, notionEnv, loadNtfyEnv(env)));
@@ -272,6 +290,16 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
     if (!repo) {
       return json(503, { error: "Notion isn't configured yet — check NOTION_TOKEN and the *_DB_ID vars in .env." });
+    }
+
+    if (method === "GET" && pathname === "/api/digest/weekly") {
+      const accounts = await loadGoogleAccounts(env);
+      return json(200, await checkWeeklyDigest(env, llmEnv, loadNtfyEnv(env), accounts, repo));
+    }
+
+    if (method === "POST" && pathname === "/api/digest/weekly/generate") {
+      const accounts = await loadGoogleAccounts(env);
+      return json(200, await generateWeeklyDigestNow(env, llmEnv, loadNtfyEnv(env), accounts, repo));
     }
 
     if (method === "GET" && pathname === "/api/freelance/clients") {

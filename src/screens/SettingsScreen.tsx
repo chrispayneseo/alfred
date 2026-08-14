@@ -2,6 +2,7 @@ import { AppLockSettings } from "../components/AppLockSettings";
 import { DataControls } from "../components/DataControls";
 import { GoogleAccountsSettings } from "../components/GoogleAccountsSettings";
 import { Screen } from "../components/Screen";
+import { WeeklyDigestSettings } from "../components/WeeklyDigestSettings";
 
 export function SettingsScreen() {
   return (
@@ -18,6 +19,13 @@ export function SettingsScreen() {
           Google accounts
         </h2>
         <GoogleAccountsSettings />
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+          Weekly digest
+        </h2>
+        <WeeklyDigestSettings />
       </section>
 
       <section className="mb-8">

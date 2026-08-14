@@ -68,6 +68,12 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS gmail_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS pushed_nudges (task_id TEXT PRIMARY KEY, pushed_date TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS snoozed_nudges (task_id TEXT PRIMARY KEY, snoozed_until TIMESTAMPTZ NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS weekly_digest (
+    week_key TEXT PRIMARY KEY,
+    summary TEXT NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
   `CREATE TABLE IF NOT EXISTS sync_job (
     id TEXT PRIMARY KEY DEFAULT 'singleton',
     running BOOLEAN NOT NULL DEFAULT false,

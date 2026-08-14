@@ -8,6 +8,7 @@ import { getDailyLandingRoute } from "./lib/dailyLanding";
 import { BrowseScreen } from "./screens/BrowseScreen";
 import { CaptureScreen } from "./screens/CaptureScreen";
 import { ChatScreen } from "./screens/ChatScreen";
+import { DigestScreen } from "./screens/DigestScreen";
 import { FreelanceClientScreen } from "./screens/FreelanceClientScreen";
 import { FreelanceScreen } from "./screens/FreelanceScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/browse" element={<BrowseScreen />} />
         <Route path="/freelance" element={<FreelanceScreen />} />
         <Route path="/freelance/:client" element={<FreelanceClientScreen />} />
+        <Route path="/digest" element={<DigestScreen />} />
         <Route path="/settings" element={<SettingsScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
