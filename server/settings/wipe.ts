@@ -2,7 +2,7 @@ import type { Env } from "../db.js";
 import { removeAllAccounts, type GoogleAccountEnv } from "../google/accounts.js";
 import { clearAllEmails } from "../google/gmailStore.js";
 import { revokeToken } from "../google/oauth.js";
-import { clearAllPushedNudges } from "../nudges/nudgeStore.js";
+import { clearAllPushedNudges, clearAllSnoozedNudges } from "../nudges/nudgeStore.js";
 
 /** "Delete everything / disconnect": revokes every connected Google
  * account's OAuth grant, clears every local cache, and leaves the app in a
@@ -15,4 +15,5 @@ export async function wipeEverything(env: Env, googleAccounts: GoogleAccountEnv[
   await removeAllAccounts(env);
   await clearAllEmails(env);
   await clearAllPushedNudges(env);
+  await clearAllSnoozedNudges(env);
 }

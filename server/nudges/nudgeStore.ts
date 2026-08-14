@@ -49,3 +49,36 @@ export async function clearAllPushedNudges(env: Env): Promise<void> {
   const sql = await db(env);
   await sql.query("DELETE FROM pushed_nudges");
 }
+
+const SNOOZE_MS = 24 * 60 * 60 * 1000;
+
+/** Task ids currently snoozed (snoozed_until still in the future) — one
+ * query, used to filter the overdue list before nudges are built/pushed, so
+ * a snoozed task is invisible to both the in-app list and ntfy in one place.
+ * Not Notion data: this is purely "don't bother me about this one for a
+ * day," independent of the task's real status, which stays in Notion. */
+export async function getSnoozedTaskIds(env: Env): Promise<Set<string>> {
+  const sql = await db(env);
+  const rows = (await sql.query("SELECT task_id FROM snoozed_nudges WHERE snoozed_until > now()")) as {
+    task_id: string;
+  }[];
+  return new Set(rows.map((r) => r.task_id));
+}
+
+/** Snoozes a nudge for a fixed 1 day — simple by design, no date picker. */
+export async function snoozeNudge(env: Env, taskId: string): Promise<void> {
+  const sql = await db(env);
+  const until = new Date(Date.now() + SNOOZE_MS).toISOString();
+  await sql.query(
+    `INSERT INTO snoozed_nudges (task_id, snoozed_until) VALUES ($1, $2)
+     ON CONFLICT (task_id) DO UPDATE SET snoozed_until = excluded.snoozed_until`,
+    [taskId, until]
+  );
+}
+
+/** Wipes all snooze state — used by the settings "delete everything /
+ * disconnect" flow, same as the push-throttle table. */
+export async function clearAllSnoozedNudges(env: Env): Promise<void> {
+  const sql = await db(env);
+  await sql.query("DELETE FROM snoozed_nudges");
+}

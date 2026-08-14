@@ -67,6 +67,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_gmail_emails_account ON gmail_emails(account_email)`,
   `CREATE TABLE IF NOT EXISTS gmail_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS pushed_nudges (task_id TEXT PRIMARY KEY, pushed_date TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS snoozed_nudges (task_id TEXT PRIMARY KEY, snoozed_until TIMESTAMPTZ NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS sync_job (
     id TEXT PRIMARY KEY DEFAULT 'singleton',
     running BOOLEAN NOT NULL DEFAULT false,

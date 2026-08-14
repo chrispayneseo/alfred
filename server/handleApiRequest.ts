@@ -19,6 +19,7 @@ import { loadLlmEnv } from "./llm/env.js";
 import { transcribeAudio } from "./llm/openai.js";
 import type { ChatTurn } from "./llm/types.js";
 import { runNudgeCheck } from "./nudges/check.js";
+import { snoozeNudge } from "./nudges/nudgeStore.js";
 import { createNotionClient } from "./notion/client.js";
 import { loadNotionEnv } from "./notion/env.js";
 import { NotionRepo } from "./notion/queries.js";
@@ -235,6 +236,14 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     if (method === "POST" && pathname === "/api/nudges/check") {
       if (!repo) return json(503, { error: "Notion isn't configured yet." });
       return json(200, await runNudgeCheck(env, llmEnv, loadNtfyEnv(env), repo));
+    }
+
+    if (method === "POST" && pathname === "/api/nudges/snooze") {
+      const body = await readBody();
+      const taskId = typeof body.taskId === "string" ? body.taskId : "";
+      if (!taskId) return json(400, { error: "taskId is required" });
+      await snoozeNudge(env, taskId);
+      return json(200, { ok: true });
     }
 
     if (method === "GET" && pathname === "/api/settings/export") {

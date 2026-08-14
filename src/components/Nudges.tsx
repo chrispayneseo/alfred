@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { checkNudges, type Nudge } from "../integrations/nudges/api";
+import { checkNudges, snoozeNudge, type Nudge } from "../integrations/nudges/api";
 
 type NudgesState = "loading" | "ready" | "error";
 
@@ -20,6 +20,16 @@ export function Nudges() {
       })
       .catch(() => setState("error"));
   }, []);
+
+  async function handleSnooze(taskId: string) {
+    const prev = nudges;
+    setNudges((n) => n.filter((nudge) => nudge.taskId !== taskId));
+    try {
+      await snoozeNudge(taskId);
+    } catch {
+      setNudges(prev);
+    }
+  }
 
   if (state === "loading") {
     return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Checking for overdue tasks…</p>;
@@ -48,9 +58,17 @@ export function Nudges() {
               )}
             </div>
             <p className="text-xs text-ink-soft dark:text-ink-soft-dark">{nudge.message}</p>
-            {nudge.projectName && (
-              <p className="mt-0.5 text-[11px] text-ink-faint dark:text-ink-faint-dark">{nudge.projectName}</p>
-            )}
+            <div className="mt-1 flex items-center gap-3">
+              {nudge.projectName && (
+                <p className="text-[11px] text-ink-faint dark:text-ink-faint-dark">{nudge.projectName}</p>
+              )}
+              <button
+                onClick={() => handleSnooze(nudge.taskId)}
+                className="text-[11px] text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
+              >
+                Snooze 1 day
+              </button>
+            </div>
           </li>
         ))}
       </ul>
