@@ -7,7 +7,8 @@ import { Screen } from "../components/Screen";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
 import { buildAccountColorMap } from "../lib/accountColor";
-import { mockNotes, mockTasks } from "../mocks/today";
+import { mockNotes } from "../mocks/today";
+import { deleteTask, fetchTasks, updateTaskStatus, type ApiTask } from "../integrations/notion/api";
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
 
@@ -61,13 +62,15 @@ function EventList({
 }
 
 export function TodayScreen() {
-  const openTasks = mockTasks.filter((task) => !task.done);
   const [calendarState, setCalendarState] = useState<CalendarState>("loading");
   const [todayEvents, setTodayEvents] = useState<CalendarApiEvent[]>([]);
   const [tomorrowEvents, setTomorrowEvents] = useState<CalendarApiEvent[]>([]);
   const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
   const [failedAccounts, setFailedAccounts] = useState<string[]>([]);
   const [oauthNotice, setOauthNotice] = useState<string>();
+  const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(true);
+  const [tasksError, setTasksError] = useState<string>();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -96,6 +99,34 @@ export function TodayScreen() {
       });
   }, [oauthNotice]);
 
+  useEffect(() => {
+    fetchTasks()
+      .then(setTasks)
+      .catch((err) => setTasksError(err instanceof Error ? err.message : "Couldn't load tasks."))
+      .finally(() => setTasksLoading(false));
+  }, []);
+
+  async function toggleTask(task: ApiTask) {
+    const done = !task.done;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done } : t)));
+    try {
+      await updateTaskStatus(task.id, done);
+    } catch {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: !done } : t)));
+    }
+  }
+
+  async function removeTask(task: ApiTask) {
+    const prev = tasks;
+    setTasks((p) => p.filter((t) => t.id !== task.id));
+    try {
+      await deleteTask(task.id);
+    } catch {
+      setTasks(prev);
+    }
+  }
+
+  const openTasks = tasks.filter((task) => !task.done);
   const accountColorMap = buildAccountColorMap(accounts);
   const showAccountTags = accounts.length > 1;
 
@@ -194,20 +225,44 @@ export function TodayScreen() {
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
           Open tasks
         </h2>
-        <ul className="space-y-2.5">
-          {openTasks.map((task) => (
-            <li key={task.id} className="flex items-start gap-3">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-faint dark:bg-ink-faint-dark" />
-              <div>
-                <p className="text-sm text-ink dark:text-ink-dark">{task.title}</p>
-                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
-                  {task.due}
-                  {task.project ? ` · ${task.project}` : ""}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        {tasksLoading && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading tasks…</p>}
+        {tasksError && <p className="text-sm text-claude">{tasksError}</p>}
+        {!tasksLoading && !tasksError && (
+          <ul className="space-y-2.5">
+            {openTasks.length === 0 && (
+              <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing open.</p>
+            )}
+            {openTasks.map((task) => (
+              <li key={task.id} className="flex items-start gap-3">
+                <button
+                  onClick={() => toggleTask(task)}
+                  aria-label="Mark as done"
+                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-ink-faint transition-colors hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
+                >
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-ink dark:text-ink-dark">{task.title}</p>
+                  <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
+                    {task.due ?? "No due date"}
+                    {task.projectName ? ` · ${task.projectName}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={() => removeTask(task)}
+                  aria-label="Remove task"
+                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+                >
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section>
