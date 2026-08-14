@@ -177,6 +177,19 @@ export function searchEmailsLocal(query: string, limit = 5): EmailRecord[] {
   return rows.map(toRecord);
 }
 
+/** All cached email metadata, for the data export — same fields as everywhere
+ * else in this store (metadata only, never raw bodies). */
+export function getAllEmails(): EmailRecord[] {
+  const rows = getDb().prepare(`SELECT * FROM emails ORDER BY date DESC`).all();
+  return rows.map(toRecord);
+}
+
+/** Wipes the entire local Gmail cache — used by the settings "delete
+ * everything / disconnect" flow. Does not touch Gmail or Notion themselves. */
+export function clearAllEmails(): void {
+  getDb().exec(`DELETE FROM emails; DELETE FROM meta;`);
+}
+
 export function getMeta(key: string): string | undefined {
   const row = getDb().prepare(`SELECT value FROM meta WHERE key = ?`).get(key) as { value: string } | undefined;
   return row?.value;

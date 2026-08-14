@@ -17,6 +17,8 @@ import { createNotionClient } from "./notion/client";
 import { loadNotionEnv } from "./notion/env";
 import { NotionRepo } from "./notion/queries";
 import { loadNtfyEnv } from "./notify/env";
+import { buildExport } from "./settings/export";
+import { wipeEverything } from "./settings/wipe";
 
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -186,6 +188,17 @@ export function apiPlugin(): Plugin {
           if (method === "POST" && url.pathname === "/api/nudges/check") {
             if (!repo) return sendJson(res, 503, { error: "Notion isn't configured yet." });
             return sendJson(res, 200, await runNudgeCheck(llmEnv, loadNtfyEnv(), repo));
+          }
+
+          if (method === "GET" && url.pathname === "/api/settings/export") {
+            return sendJson(res, 200, buildExport(loadGoogleEnv(), notionEnv, loadNtfyEnv()));
+          }
+
+          if (method === "POST" && url.pathname === "/api/settings/wipe") {
+            const body = await readJsonBody(req);
+            if (body.confirm !== "delete") return sendJson(res, 400, { error: "Type \"delete\" to confirm." });
+            await wipeEverything(loadGoogleEnv());
+            return sendJson(res, 200, { ok: true });
           }
 
           if (!repo) {

@@ -4,7 +4,7 @@ A proactive personal assistant PWA — captures, organizes, and briefs, using Cl
 
 ## Status
 
-Step 6 of 8: Nudges — proactive reminders for overdue Tasks, delivered both in-app and as a real phone push via [ntfy.sh](https://ntfy.sh). The Today screen has a "Nudges" section that checks Notion for open Tasks past their due date, phrases a calm reminder for each with the routed model, and shows a soft count/badge — no big banner. The same check pushes to your phone via ntfy, throttled to once per task per day so reopening the app doesn't re-ping you for something you already know about.
+Step 7 of 8: Security hardening — an app-level lock and settings-level data controls, since Alfred now holds email content, calendar data, and freelance client details. A gear icon on the Today screen opens Settings, with three things: App Lock (biometric via WebAuthn, PIN fallback, re-locks after the app's been backgrounded a while), Export my data (a single JSON download of everything Alfred caches locally, not Notion itself), and Delete everything / disconnect (revokes Google's OAuth grant and clears local caches, type-to-confirm, never touches Notion).
 
 **Alfred never sends email.** Only `gmail.readonly` and `gmail.compose` are requested — never `gmail.send` — and the code only ever calls `gmail.users.drafts.create`; nothing in `server/` calls `messages.send` or `drafts.send`. See [Gmail](#gmail) below for the full safety model.
 
@@ -31,21 +31,24 @@ Run `npm test` to run the standalone router unit tests (`server/llm/router.test.
 
 ## Folder structure
 
-- `src/screens` — the four top-level screens
-- `src/components` — shared UI (tab bar, FAB, offline banner, model tag)
+- `src/screens` — the five top-level screens (Today/Chat/Capture/Browse plus Settings, reached via the gear icon rather than the tab bar)
+- `src/components` — shared UI (tab bar, FAB, offline banner, model tag, `LockScreen`, `AppLockSettings`, `DataControls`)
+- `src/hooks/useLockGate.ts` — cold-start + re-lock-on-resume logic for the app lock
 - `src/mocks` — stand-in data still used by Today's tasks/notes; everything else uses the `src/integrations/*` API clients
-- `src/lib` — routing/storage helpers not tied to a specific vendor
+- `src/lib` — routing/storage helpers not tied to a specific vendor, plus the client-only lock primitives: `webauthn.ts` (biometric register/verify), `pin.ts` (salted-hash PIN fallback), `lock.ts` (enabled/configured state)
 - `src/integrations/notion` — frontend fetch wrappers around the `/api/{capture,tasks,notes,projects}` routes
 - `src/integrations/llm` — frontend fetch wrapper around `/api/chat`
 - `src/integrations/google-calendar` — frontend fetch wrappers around `/api/calendar/*` and `/api/google/status`
 - `src/integrations/gmail` — frontend fetch wrappers around `/api/gmail/*` (status, sync, scan, flagged list)
 - `src/integrations/nudges` — frontend fetch wrapper around `/api/nudges/check`
+- `src/integrations/settings` — frontend fetch wrappers around `/api/settings/{export,wipe}`
 - `src/integrations/{supabase,anthropic,openai}` — empty stubs reserved for later steps (the actual Anthropic/OpenAI/Google calls live server-side, never in the browser)
 - `server/notion` — Notion SDK client, query layer, rule-based classifier (now a fallback), workspace setup script, `searchTasksAndNotes` for Q&A grounding, `listOverdueTasks` for nudges
 - `server/llm` — routing function (`router.ts`, with tests), Anthropic/OpenAI client wrappers (chat + single-turn `*Complete` variants), `routedComplete.ts` (Step 3's routing/fallback reused for structured tasks), chat fallback orchestration, real capture classifier, `emailScan.ts` (action-item classification + draft generation), `nudgeMessage.ts` (overdue-task nudge phrasing), `queryTerms.ts` (derives a Gmail search query from a chat message), `notionContext.ts` / `emailContext.ts` (Q&A grounding)
-- `server/google` — OAuth flow (`oauth.ts`), authenticated client factory (`client.ts`), typed error hierarchy (`errors.ts`), calendar service (`calendar.ts`), Gmail service (`gmail.ts` — the safety-critical file, see [Gmail](#gmail)), sync job (`gmailSync.ts`), and local metadata cache (`gmailStore.ts`, SQLite via `node:sqlite`)
+- `server/google` — OAuth flow (`oauth.ts`, now also `revokeToken`), authenticated client factory (`client.ts`), typed error hierarchy (`errors.ts`), calendar service (`calendar.ts`), Gmail service (`gmail.ts` — the safety-critical file, see [Gmail](#gmail)), sync job (`gmailSync.ts`), and local metadata cache (`gmailStore.ts`, SQLite via `node:sqlite`)
 - `server/notify` — `notify(topic, message)`, a reusable ntfy.sh push sender (`ntfy.ts`) plus its env loader; meant to be reused for the daily briefing later
 - `server/nudges` — nudge orchestration (`check.ts` — the one entry point, `runNudgeCheck(llmEnv, ntfyEnv, repo)`, written to be callable from a real scheduler later) and the push-throttle store (`nudgeStore.ts`, SQLite via `node:sqlite`)
+- `server/settings` — `export.ts` (`buildExport`, assembles the data-export payload) and `wipe.ts` (`wipeEverything`, the disconnect flow)
 - `server/apiPlugin.ts` — the Vite dev-server API plugin wiring all of the above into `/api/*`
 - `src/sw.ts` — custom service worker (offline shell caching + Web Share Target handling)
 
@@ -89,3 +92,13 @@ Read-only (`calendar.readonly`), one account, OAuth 2.0 with `access_type: offli
 **Push delivery.** `server/notify/ntfy.ts` exports `notify(topic, message)` — one `POST` to `https://ntfy.sh/<topic>`, no server URL or account needed beyond picking a topic name. It's intentionally generic (not nudge-specific) so the daily briefing can reuse it later. Delivery degrades gracefully: with `NTFY_TOPIC` unset, nudges still show in-app, they just don't push.
 
 **Push throttling.** Since nudges have no dismissed state, the in-app list is always live — but that also means opening Today five times in a day would otherwise fire five phone pushes for the same still-overdue task. `server/nudges/nudgeStore.ts` is a tiny SQLite table (`.data/nudges.db`) recording only "was this task's push already sent today" — it throttles the *push*, not the in-app display, and resets naturally at midnight since it's keyed by date.
+
+## Security (App Lock, export, wipe)
+
+**App Lock.** WebAuthn (`src/lib/webauthn.ts`), verified entirely client-side — no server round-trip, no signature verification against a stored public key. This is a deliberate call, not an oversight: Alfred has no real multi-user backend to protect a remote identity against, so the threat model is someone picking up your already-unlocked device, not a network attacker forging a login. A successful `navigator.credentials.get()` can only happen via the OS's secure hardware actually matching your biometric — that's the property this design leans on. If biometrics aren't available or fail, `src/lib/pin.ts` is the fallback (a salted SHA-256 hash, never the PIN itself, stored via `crypto.subtle`) — the lock can't be turned on without a PIN set first, so there's no way to end up locked out with no way back in. `src/hooks/useLockGate.ts` locks on every cold start and re-locks after the app's been backgrounded for more than 60 seconds (`RELOCK_AFTER_MS` in `src/lib/lock.ts`) — a brief app-switch doesn't force a re-unlock, leaving it backgrounded for real does. WebAuthn requires a secure context; `localhost` counts, but a real deployment needs HTTPS for this to work at all.
+
+**Export.** `GET /api/settings/export` (`server/settings/export.ts`) packages everything Alfred caches locally — Gmail metadata cache, nudge push-throttle history — plus a summary of which integrations are connected and the exact Google scopes requested. It deliberately excludes Notion content (already the source of truth, exportable from Notion directly) and every credential (Notion token, Anthropic/OpenAI keys, Google client secret/refresh token) — those are Alfred's own operating credentials, not "your data." The Settings screen downloads it client-side as a single `alfred-export-<date>.json`.
+
+**Wipe.** `POST /api/settings/wipe` (`server/settings/wipe.ts`) — scoped to exactly what the settings copy promises: revokes the Google OAuth grant with Google directly (`oauth.ts`'s `revokeToken`, not just deleting the local copy), clears the Gmail and nudge SQLite caches, and leaves Notion, the LLM API keys, and the ntfy topic untouched. Requires typing "delete" in the UI, and the server independently re-checks `confirm === "delete"` before doing anything. After a wipe the app looks freshly installed — Today's Schedule/Flagged sections fall back to their "not connected"/"sync your inbox" empty states automatically, since those already keyed off `GoogleNotConnectedError` and an empty cache.
+
+**Scope review.** Re-checked while building this step: `calendar.readonly`, `gmail.readonly`, `gmail.compose` — unchanged since Step 5, and still the narrowest scopes available for what each feature does (no `calendar` write access, no `gmail.modify`, no `gmail.send`). Nothing broader than necessary is requested.

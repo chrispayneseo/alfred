@@ -46,3 +46,17 @@ export async function exchangeCodeForRefreshToken(env: GoogleEnv, code: string):
   }
   return tokens.refresh_token;
 }
+
+/** Revokes the stored refresh token with Google directly (not just deleting
+ * it locally) — used by the settings "delete everything / disconnect" flow.
+ * Best-effort: an already-invalid token still counts as successfully
+ * disconnected from Alfred's point of view. */
+export async function revokeToken(env: GoogleEnv): Promise<void> {
+  if (!env.refreshToken) return;
+  const client = createOAuth2Client(env);
+  try {
+    await client.revokeToken(env.refreshToken);
+  } catch (error) {
+    console.error("[oauth] token revocation failed (continuing — token will still be cleared locally):", error);
+  }
+}

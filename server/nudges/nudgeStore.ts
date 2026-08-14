@@ -39,3 +39,21 @@ export function recordPush(taskId: string, todayIso: string): void {
     )
     .run(taskId, todayIso);
 }
+
+export interface PushedNudgeRecord {
+  taskId: string;
+  pushedDate: string;
+}
+
+/** All push-throttle rows, for the data export. */
+export function getAllPushedNudges(): PushedNudgeRecord[] {
+  const rows = getDb().prepare(`SELECT task_id as taskId, pushed_date as pushedDate FROM pushed_nudges`).all();
+  return rows as unknown as PushedNudgeRecord[];
+}
+
+/** Wipes the push-throttle state — used by the settings "delete everything /
+ * disconnect" flow. Doesn't affect anything in Notion; nudges themselves are
+ * always re-derived live from Notion's current task status. */
+export function clearAllPushedNudges(): void {
+  getDb().exec(`DELETE FROM pushed_nudges;`);
+}
