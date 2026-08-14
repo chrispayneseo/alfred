@@ -323,6 +323,19 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(200, { triggerDay });
     }
 
+    // Read-only presence checks for the Permissions & Trust settings
+    // section — never used to gate any actual capability, just to show
+    // the user an honest picture of what's currently configured.
+    if (method === "GET" && pathname === "/api/settings/integration-status") {
+      return json(200, {
+        notion: Boolean(notionEnv.token),
+        anthropic: Boolean(llmEnv.anthropicApiKey),
+        openai: Boolean(llmEnv.openaiApiKey),
+        coachplan: isCoachPlanConfigured(coachPlanEnv),
+        ntfy: Boolean(loadNtfyEnv(env).topic),
+      });
+    }
+
     if (method === "GET" && pathname === "/api/settings/export") {
       const accounts = await loadGoogleAccounts(env);
       return json(200, await buildExport(env, accounts, notionEnv, loadNtfyEnv(env)));

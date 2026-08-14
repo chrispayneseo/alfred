@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PermissionsTrust } from "./PermissionsTrust";
 import { fetchExport, wipeEverything } from "../integrations/settings/api";
 
 function downloadJson(data: unknown, filename: string) {
@@ -108,6 +109,16 @@ function WipeControl() {
 export function DataControls() {
   return (
     <div>
+      <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-faint/80 dark:text-ink-faint-dark/80">
+        What Alfred can do
+      </h3>
+      <div className="mb-6">
+        <PermissionsTrust />
+      </div>
+
+      <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-faint/80 dark:text-ink-faint-dark/80">
+        Your data
+      </h3>
       <ExportControl />
       <WipeControl />
     </div>
