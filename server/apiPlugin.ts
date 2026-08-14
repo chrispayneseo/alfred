@@ -1,12 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
-import { classifyWithModel } from "../llm/classify";
-import { runChat } from "../llm/chat";
-import { loadLlmEnv } from "../llm/env";
-import type { ChatTurn } from "../llm/types";
-import { createNotionClient } from "./client";
-import { loadNotionEnv } from "./env";
-import { NotionRepo } from "./queries";
+import { updateEnvFile } from "./envFile";
+import { getTodayEvents, getTomorrowEvents } from "./google/calendar";
+import { loadGoogleEnv } from "./google/env";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors";
+import { exchangeCodeForRefreshToken, getAuthUrl, isValidState } from "./google/oauth";
+import { runChat } from "./llm/chat";
+import { classifyWithModel } from "./llm/classify";
+import { loadLlmEnv } from "./llm/env";
+import type { ChatTurn } from "./llm/types";
+import { createNotionClient } from "./notion/client";
+import { loadNotionEnv } from "./notion/env";
+import { NotionRepo } from "./notion/queries";
 
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -30,18 +35,34 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+function sendRedirect(res: ServerResponse, location: string): void {
+  res.statusCode = 302;
+  res.setHeader("Location", location);
+  res.end();
+}
+
 function isChatTurn(value: unknown): value is ChatTurn {
   if (typeof value !== "object" || value === null) return false;
   const { role, content } = value as { role?: unknown; content?: unknown };
   return (role === "user" || role === "assistant") && typeof content === "string";
 }
 
-/** Dev-only API layer: keeps the Notion/Anthropic/OpenAI credentials server-side
- * and sidesteps the Notion API's lack of CORS support for browser calls. Gets
- * replaced by Supabase Edge Functions in a later step. */
-export function notionApiPlugin(): Plugin {
+async function sendCalendarEvents(res: ServerResponse, fetchEvents: () => ReturnType<typeof getTodayEvents>) {
+  try {
+    return sendJson(res, 200, await fetchEvents());
+  } catch (error) {
+    if (error instanceof GoogleNotConnectedError) return sendJson(res, 409, { error: "not_connected" });
+    if (error instanceof GoogleReconnectRequiredError) return sendJson(res, 409, { error: "reconnect_required" });
+    throw error;
+  }
+}
+
+/** Dev-only API layer: keeps the Notion/Anthropic/OpenAI/Google credentials
+ * server-side and sidesteps the Notion API's lack of CORS support for browser
+ * calls. Gets replaced by Supabase Edge Functions in a later step. */
+export function apiPlugin(): Plugin {
   return {
-    name: "alfred-notion-api",
+    name: "alfred-api",
     configureServer(server) {
       const notionEnv = loadNotionEnv();
       const repo = notionEnv.token ? new NotionRepo(createNotionClient(notionEnv.token), notionEnv) : undefined;
@@ -60,7 +81,7 @@ export function notionApiPlugin(): Plugin {
             if (messages.length === 0) return sendJson(res, 400, { error: "messages is required" });
 
             try {
-              const result = await runChat(llmEnv, messages);
+              const result = await runChat(llmEnv, loadGoogleEnv(), messages);
               return sendJson(res, 200, result);
             } catch (error) {
               if (error instanceof Error && error.message === "both_unavailable") {
@@ -68,6 +89,53 @@ export function notionApiPlugin(): Plugin {
               }
               throw error;
             }
+          }
+
+          // Google Calendar: env is re-read per request (not hoisted at server
+          // start) so a freshly-written refresh token is picked up immediately
+          // after the OAuth callback, no server restart required.
+          if (method === "GET" && url.pathname === "/api/google/status") {
+            const googleEnv = loadGoogleEnv();
+            return sendJson(res, 200, { connected: Boolean(googleEnv.refreshToken) });
+          }
+
+          if (method === "GET" && url.pathname === "/api/google/auth/start") {
+            const googleEnv = loadGoogleEnv();
+            if (!googleEnv.clientId || !googleEnv.clientSecret) {
+              return sendJson(res, 503, {
+                error: "Google OAuth isn't configured yet — check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.",
+              });
+            }
+            return sendRedirect(res, getAuthUrl(googleEnv));
+          }
+
+          if (method === "GET" && url.pathname === "/api/google/oauth/callback") {
+            const googleEnv = loadGoogleEnv();
+            const error = url.searchParams.get("error");
+            if (error) return sendRedirect(res, `/today?calendar=denied`);
+
+            const code = url.searchParams.get("code");
+            const state = url.searchParams.get("state");
+            if (!code || !isValidState(state)) return sendRedirect(res, `/today?calendar=error`);
+
+            try {
+              const refreshToken = await exchangeCodeForRefreshToken(googleEnv, code);
+              updateEnvFile(process.cwd() + "/.env", { GOOGLE_REFRESH_TOKEN: refreshToken });
+              return sendRedirect(res, `/today?calendar=connected`);
+            } catch (exchangeError) {
+              console.error(exchangeError);
+              return sendRedirect(res, `/today?calendar=error`);
+            }
+          }
+
+          if (method === "GET" && url.pathname === "/api/calendar/today") {
+            const googleEnv = loadGoogleEnv();
+            return await sendCalendarEvents(res, () => getTodayEvents(googleEnv));
+          }
+
+          if (method === "GET" && url.pathname === "/api/calendar/tomorrow") {
+            const googleEnv = loadGoogleEnv();
+            return await sendCalendarEvents(res, () => getTomorrowEvents(googleEnv));
           }
 
           if (!repo) {

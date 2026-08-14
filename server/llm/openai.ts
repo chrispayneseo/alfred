@@ -11,12 +11,13 @@ function getOpenAiClient(apiKey: string): OpenAI {
 const CHAT_SYSTEM_PROMPT =
   "You are Alfred, a calm and concise personal-assistant chat surface. Keep replies short and direct — a sentence or two for simple questions, more only when the question genuinely needs it.";
 
-export async function chatGptChat(apiKey: string, model: string, messages: ChatTurn[]): Promise<string> {
+export async function chatGptChat(apiKey: string, model: string, messages: ChatTurn[], extraContext?: string): Promise<string> {
   const openai = getOpenAiClient(apiKey);
+  const systemContent = extraContext ? `${CHAT_SYSTEM_PROMPT}\n\n${extraContext}` : CHAT_SYSTEM_PROMPT;
   const response = await openai.chat.completions.create({
     model,
     max_completion_tokens: 1024,
-    messages: [{ role: "system", content: CHAT_SYSTEM_PROMPT }, ...messages],
+    messages: [{ role: "system", content: systemContent }, ...messages],
   });
 
   const text = response.choices[0]?.message?.content;

@@ -9,7 +9,7 @@ import path from "node:path";
 import type { Client } from "@notionhq/client";
 import { createNotionClient } from "./client";
 import { loadNotionEnv } from "./env";
-import { updateEnvFile } from "./envFile";
+import { updateEnvFile } from "../envFile";
 import {
   GENEALOGY_PARENT_PROJECT,
   INBOX_PROPS,

@@ -1,4 +1,6 @@
+import type { GoogleEnv } from "../google/env";
 import { claudeChat } from "./anthropic";
+import { buildCalendarContext, needsCalendarContext } from "./calendarContext";
 import type { LlmEnv } from "./env";
 import { chatGptChat } from "./openai";
 import { routeToModel, type ModelChoice } from "./router";
@@ -11,8 +13,10 @@ export interface ChatResult {
   fellBack: boolean;
 }
 
-async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[]): Promise<string> {
-  return model === "claude" ? claudeChat(env.anthropicApiKey, messages) : chatGptChat(env.openaiApiKey, env.openaiModel, messages);
+async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], extraContext?: string): Promise<string> {
+  return model === "claude"
+    ? claudeChat(env.anthropicApiKey, messages, extraContext)
+    : chatGptChat(env.openaiApiKey, env.openaiModel, messages, extraContext);
 }
 
 /**
@@ -20,19 +24,25 @@ async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[]):
  * auth, hitting a spend cap), retries the same request against the other
  * model so a single provider outage doesn't take out Chat entirely. Throws
  * "both_unavailable" only when neither model could answer.
+ *
+ * If the message looks calendar-related, fetches real events first and gives
+ * them to the model as context — rather than letting it guess at the answer.
  */
-export async function runChat(env: LlmEnv, messages: ChatTurn[]): Promise<ChatResult> {
+export async function runChat(env: LlmEnv, googleEnv: GoogleEnv, messages: ChatTurn[]): Promise<ChatResult> {
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
-  const intended = routeToModel(lastUserMessage?.content ?? "");
+  const lastText = lastUserMessage?.content ?? "";
+  const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
+  const extraContext = needsCalendarContext(lastText) ? await buildCalendarContext(googleEnv) : undefined;
+
   try {
-    const text = await callModel(intended, env, messages);
+    const text = await callModel(intended, env, messages, extraContext);
     return { text, model: intended, intendedModel: intended, fellBack: false };
   } catch (primaryError) {
     console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
     try {
-      const text = await callModel(fallback, env, messages);
+      const text = await callModel(fallback, env, messages, extraContext);
       return { text, model: fallback, intendedModel: intended, fellBack: true };
     } catch (fallbackError) {
       console.error(`[chat] ${fallback} fallback also failed:`, fallbackError);
