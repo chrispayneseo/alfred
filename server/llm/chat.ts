@@ -1,7 +1,10 @@
 import type { GoogleEnv } from "../google/env";
+import type { NotionRepo } from "../notion/queries";
 import { claudeChat } from "./anthropic";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext";
+import { buildEmailContext, needsEmailContext } from "./emailContext";
 import type { LlmEnv } from "./env";
+import { buildNotionContext, needsNotionContext } from "./notionContext";
 import { chatGptChat } from "./openai";
 import { routeToModel, type ModelChoice } from "./router";
 import type { ChatTurn } from "./types";
@@ -19,22 +22,41 @@ async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], 
     : chatGptChat(env.openaiApiKey, env.openaiModel, messages, extraContext);
 }
 
+/** Gathers whichever context sources (calendar, Notion, email) the question
+ * actually looks like it needs, and concatenates them into one context block —
+ * the same injection mechanism Step 4 introduced for calendar, just fed by
+ * more than one source now. */
+async function buildContext(lastText: string, googleEnv: GoogleEnv, notionRepo: NotionRepo | undefined): Promise<string | undefined> {
+  const blocks: string[] = [];
+
+  if (needsCalendarContext(lastText)) blocks.push(await buildCalendarContext(googleEnv));
+  if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(googleEnv, lastText));
+  if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
+
+  return blocks.length > 0 ? blocks.join("\n\n---\n\n") : undefined;
+}
+
 /**
  * Routes to the intended model; if that call fails for any reason (network,
  * auth, hitting a spend cap), retries the same request against the other
  * model so a single provider outage doesn't take out Chat entirely. Throws
  * "both_unavailable" only when neither model could answer.
  *
- * If the message looks calendar-related, fetches real events first and gives
- * them to the model as context — rather than letting it guess at the answer.
+ * If the message looks like it needs calendar, email, or Notion data, fetches
+ * it first and gives it to the model as context — rather than letting it guess.
  */
-export async function runChat(env: LlmEnv, googleEnv: GoogleEnv, messages: ChatTurn[]): Promise<ChatResult> {
+export async function runChat(
+  env: LlmEnv,
+  googleEnv: GoogleEnv,
+  notionRepo: NotionRepo | undefined,
+  messages: ChatTurn[]
+): Promise<ChatResult> {
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
   const lastText = lastUserMessage?.content ?? "";
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = needsCalendarContext(lastText) ? await buildCalendarContext(googleEnv) : undefined;
+  const extraContext = await buildContext(lastText, googleEnv, notionRepo);
 
   try {
     const text = await callModel(intended, env, messages, extraContext);

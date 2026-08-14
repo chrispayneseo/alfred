@@ -1,7 +1,7 @@
 import { calendar_v3 } from "googleapis";
 import { createAuthenticatedClient } from "./client";
 import type { GoogleEnv } from "./env";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./errors";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors";
 
 export interface CalendarEventRecord {
   id: string;
@@ -56,12 +56,6 @@ function mapEvent(event: calendar_v3.Schema$Event): CalendarEventRecord | undefi
   };
 }
 
-function isAuthError(error: unknown): boolean {
-  const response = (error as { response?: { status?: number; data?: { error?: string } } }).response;
-  if (!response) return false;
-  return response.status === 401 || response.status === 400 || response.data?.error === "invalid_grant";
-}
-
 /**
  * Lists events on the primary calendar between two dates (inclusive start,
  * exclusive end). This is the one entry point later steps — cross-referencing
@@ -84,7 +78,7 @@ export async function listEvents(env: GoogleEnv, range: DateRange): Promise<Cale
     });
     return (res.data.items ?? []).map(mapEvent).filter((e): e is CalendarEventRecord => e !== undefined);
   } catch (error) {
-    if (isAuthError(error)) throw new GoogleReconnectRequiredError(error);
+    if (isGoogleAuthError(error)) throw new GoogleReconnectRequiredError(error);
     throw error;
   }
 }

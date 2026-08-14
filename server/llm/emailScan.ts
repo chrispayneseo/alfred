@@ -1,0 +1,152 @@
+import { z } from "zod";
+import type { GoogleEnv } from "../google/env";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError, toGoogleErrorCode } from "../google/errors";
+import { createDraftReply, getMessageBody, getReplyHeaders, gmailThreadUrl } from "../google/gmail";
+import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gmailStore";
+import type { NotionRepo } from "../notion/queries";
+import { PROJECT_SEED_NAMES } from "../notion/schema";
+import type { LlmEnv } from "./env";
+import { routedComplete } from "./routedComplete";
+
+const AUTOMATED_SENDER_PATTERN = /(no-?reply|do-?not-?reply|notifications?|mailer-daemon|newsletter|marketing)@/i;
+
+/** Cheap pre-filter so obvious bulk/automated mail never costs an LLM call. */
+export function looksAutomated(email: { senderEmail: string }): boolean {
+  return AUTOMATED_SENDER_PATTERN.test(email.senderEmail);
+}
+
+const EmailActionSchema = z.object({
+  actionable: z.boolean(),
+  needsReply: z.boolean(),
+  hasDeadline: z.boolean(),
+  deadlineDate: z.string().nullable(),
+  itemType: z.enum(["task", "note", "none"]),
+  project: z.enum(PROJECT_SEED_NAMES),
+  summary: z.string(),
+});
+export type EmailAction = z.infer<typeof EmailActionSchema>;
+
+const CLASSIFY_SYSTEM_PROMPT = `You triage inbox email for a personal assistant app. Given an email's sender, subject, and preview snippet, decide:
+- actionable: does this email need the person's attention (a reply, a decision, tracking a deadline) — as opposed to something to skim or ignore (newsletters, receipts, automated notices)?
+- needsReply: does this specifically expect a reply from the person?
+- hasDeadline: does it mention a date/deadline the person should track?
+- deadlineDate: that date in YYYY-MM-DD if known, else null.
+- itemType: "task" if actionable and something to DO, "note" if actionable but just informational to keep, "none" if not actionable.
+- project: which of Job, Freelance, Personal, or Football Coaching it most likely relates to. If none clearly fits, use "Unsorted".
+- summary: a short one-line summary (under 12 words) suitable as a task/note title.
+
+Respond with ONLY a single JSON object, no markdown fences, no other text, in exactly this shape:
+{"actionable": boolean, "needsReply": boolean, "hasDeadline": boolean, "deadlineDate": string|null, "itemType": "task"|"note"|"none", "project": "Job"|"Freelance"|"Personal"|"Football Coaching"|"Unsorted", "summary": string}`;
+
+function parseJsonLoose(text: string): unknown {
+  const cleaned = text
+    .trim()
+    .replace(/^```(json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+  return JSON.parse(cleaned);
+}
+
+export async function classifyEmailAction(
+  env: LlmEnv,
+  email: { sender: string; subject: string; snippet: string }
+): Promise<EmailAction> {
+  const userText = `Sender: ${email.sender}\nSubject: ${email.subject}\nSnippet: ${email.snippet}`;
+  const text = await routedComplete(env, `${email.subject} ${email.snippet}`, CLASSIFY_SYSTEM_PROMPT, userText, 300);
+  return EmailActionSchema.parse(parseJsonLoose(text));
+}
+
+const DRAFT_SYSTEM_PROMPT = `You draft a suggested reply to an email on behalf of a person, for them to review and edit before sending — you never send anything yourself. Write a concise, natural, appropriately-toned plain-text reply based only on what's in the email. Do not invent facts, commitments, dates, or details not present in the original message. If a specific detail is needed that you don't have (e.g. exact availability), leave a clear placeholder like [confirm date] rather than guessing. No subject line, no signature — just the reply body.`;
+
+export async function generateReplyDraft(env: LlmEnv, email: { sender: string; subject: string }, fullBody: string): Promise<string> {
+  const userText = `Original email from ${email.sender}, subject "${email.subject}":\n\n${fullBody.slice(0, 4000)}`;
+  return routedComplete(env, `${email.subject} ${fullBody}`, DRAFT_SYSTEM_PROMPT, userText, 500);
+}
+
+export interface ScanStatus {
+  running: boolean;
+  processed: number;
+  total: number;
+  error?: string;
+}
+
+// Single in-memory job, same pattern as gmailSync.ts.
+let job: ScanStatus = { running: false, processed: 0, total: 0 };
+
+export function getScanStatus(): ScanStatus {
+  return { ...job };
+}
+
+/** Scans up to `limit` unscanned emails: classifies each with the routed
+ * model (Step 3's routing/fallback), files actionable ones into Notion, and
+ * creates a Gmail draft (never sends) for anything needing a reply. Runs in
+ * the background — call getScanStatus() to poll progress. */
+export function startScan(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionRepo, limit: number): ScanStatus {
+  if (job.running) return getScanStatus();
+  const batch = getUnscannedEmails(limit);
+  job = { running: true, processed: 0, total: batch.length };
+
+  void runScan(llmEnv, googleEnv, notionRepo, batch).catch((error) => {
+    console.error("[emailScan] scan failed:", error);
+    job = { ...job, running: false, error: toGoogleErrorCode(error) };
+  });
+
+  return getScanStatus();
+}
+
+async function runScan(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionRepo, batch: EmailRecord[]): Promise<void> {
+  for (const email of batch) {
+    try {
+      await scanOne(llmEnv, googleEnv, notionRepo, email);
+    } catch (error) {
+      // A Google auth error means every remaining email will fail the same
+      // way — stop the batch and surface "reconnect" rather than grinding
+      // through the rest marking each one as a generic failure.
+      if (error instanceof GoogleNotConnectedError || error instanceof GoogleReconnectRequiredError) throw error;
+      console.error(`[emailScan] failed to scan ${email.id}:`, error);
+      markScanned(email.id, { actionable: false, needsReply: false, hasDeadline: false });
+    }
+    job = { ...job, processed: job.processed + 1 };
+  }
+  job = { ...job, running: false };
+}
+
+async function scanOne(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionRepo, email: EmailRecord): Promise<void> {
+  if (looksAutomated(email)) {
+    markScanned(email.id, { actionable: false, needsReply: false, hasDeadline: false });
+    return;
+  }
+
+  const action = await classifyEmailAction(llmEnv, email);
+  let notionPageId: string | undefined;
+  let draftId: string | undefined;
+  const emailLink = gmailThreadUrl(email.threadId);
+
+  if (action.actionable && action.itemType !== "none") {
+    const itemType: "task" | "note" = action.itemType;
+    const title = action.summary || email.subject;
+    const inbox = await notionRepo.createInboxPage(title, "email", emailLink);
+    const filed = await notionRepo.fileClassifiedItem(inbox.id, title, { type: itemType, project: action.project }, emailLink);
+    notionPageId = filed.id;
+  }
+
+  if (action.needsReply) {
+    const [fullBody, replyHeaders] = await Promise.all([
+      getMessageBody(googleEnv, email.id),
+      getReplyHeaders(googleEnv, email.id),
+    ]);
+    const draftText = await generateReplyDraft(llmEnv, email, fullBody);
+    draftId = await createDraftReply(googleEnv, { threadId: email.threadId, replyHeaders, bodyText: draftText });
+  }
+
+  markScanned(email.id, {
+    actionable: action.actionable,
+    needsReply: action.needsReply,
+    hasDeadline: action.hasDeadline,
+    deadlineDate: action.deadlineDate ?? undefined,
+    project: action.actionable ? action.project : undefined,
+    itemType: action.itemType !== "none" ? action.itemType : undefined,
+    notionPageId,
+    draftId,
+  });
+}

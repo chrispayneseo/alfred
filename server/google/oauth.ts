@@ -3,6 +3,16 @@ import { createOAuth2Client } from "./client";
 import type { GoogleEnv } from "./env";
 
 export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+// Read is separate from compose so the reconnect story stays honest about what
+// each grants. gmail.compose is Google's narrowest scope that allows draft
+// creation — its own scope description says "Manage drafts and send emails",
+// meaning the OAuth grant itself technically permits sending. Alfred's code
+// never calls the send endpoints (see server/google/gmail.ts) — that's where
+// the "never sends automatically" guarantee actually lives, not in the scope.
+export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+
+const SCOPES = [CALENDAR_READONLY_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE];
 
 // Single-user local dev flow — an in-memory pending state is enough to guard
 // against CSRF on the callback without needing a session store.
@@ -13,8 +23,8 @@ export function getAuthUrl(env: GoogleEnv): string {
   pendingState = crypto.randomBytes(16).toString("hex");
   return client.generateAuthUrl({
     access_type: "offline",
-    scope: [CALENDAR_READONLY_SCOPE],
-    prompt: "consent", // guarantees a refresh_token even on a reconnect
+    scope: SCOPES,
+    prompt: "consent", // guarantees a refresh_token even on a reconnect, and re-prompts for newly added scopes
     state: pendingState,
   });
 }

@@ -73,27 +73,35 @@ export class NotionRepo {
     return projects.find((p) => p.name.toLowerCase() === name.toLowerCase())?.id;
   }
 
-  async createInboxPage(text: string, capturedVia: "manual" | "share-target"): Promise<InboxRecord> {
+  async createInboxPage(
+    text: string,
+    capturedVia: "manual" | "share-target" | "email",
+    sourceUrl?: string
+  ): Promise<InboxRecord> {
     const page = await this.notion.pages.create({
       parent: { type: "data_source_id", data_source_id: this.env.inboxDbId },
       properties: {
         [TITLE_PROP]: { title: richText(text) },
         [INBOX_PROPS.status]: { select: { name: INBOX_STATUS.UNTRIAGED } },
         [INBOX_PROPS.capturedVia]: { select: { name: capturedVia } },
+        ...(sourceUrl ? { [INBOX_PROPS.emailLink]: { url: sourceUrl } } : {}),
       },
     } as never);
     return { id: page.id, text, status: INBOX_STATUS.UNTRIAGED };
   }
 
-  /** Files an already-classified Inbox item into Tasks or Notes with a Project relation, and marks Inbox as triaged. */
+  /** Files an already-classified Inbox item into Tasks or Notes with a Project relation,
+   * marks Inbox as triaged, and — for email-derived captures — links back to the thread. */
   async fileClassifiedItem(
     inboxId: string,
     text: string,
-    classification: Classification
+    classification: Classification,
+    sourceUrl?: string
   ): Promise<{ kind: "task" | "note"; id: string; project: string }> {
     const { type, project } = classification;
     const projectId = await this.findProjectIdByName(project);
     const projectRelation = projectId ? [{ id: projectId }] : [];
+    const emailLinkProp = sourceUrl ? { url: sourceUrl } : undefined;
 
     if (type === "task") {
       const page = await this.notion.pages.create({
@@ -103,6 +111,7 @@ export class NotionRepo {
           [TASKS_PROPS.status]: { select: { name: TASK_STATUS.OPEN } },
           [TASKS_PROPS.project]: { relation: projectRelation },
           [TASKS_PROPS.fromInbox]: { relation: [{ id: inboxId }] },
+          ...(emailLinkProp ? { [TASKS_PROPS.emailLink]: emailLinkProp } : {}),
         },
       } as never);
       await this.markInboxTriaged(inboxId);
@@ -115,6 +124,7 @@ export class NotionRepo {
         [TITLE_PROP]: { title: richText(text) },
         [NOTES_PROPS.project]: { relation: projectRelation },
         [NOTES_PROPS.fromInbox]: { relation: [{ id: inboxId }] },
+        ...(emailLinkProp ? { [NOTES_PROPS.emailLink]: emailLinkProp } : {}),
       },
     } as never);
     await this.markInboxTriaged(inboxId);
@@ -179,6 +189,45 @@ export class NotionRepo {
         updatedAt: page.last_edited_time,
       };
     });
+  }
+
+  /** Title-contains search across Tasks and Notes, for Q&A retrieval (Step 5). */
+  async searchTasksAndNotes(query: string, limit = 5): Promise<{ tasks: TaskRecord[]; notes: NoteRecord[] }> {
+    const trimmed = query.trim();
+    if (!trimmed) return { tasks: [], notes: [] };
+
+    const filter = { property: TITLE_PROP, title: { contains: trimmed } };
+    const [taskRes, noteRes, projects] = await Promise.all([
+      this.notion.dataSources.query({ data_source_id: this.env.tasksDbId, filter, page_size: limit } as never),
+      this.notion.dataSources.query({ data_source_id: this.env.notesDbId, filter, page_size: limit } as never),
+      this.listProjects(),
+    ]);
+    const projectById = new Map(projects.map((p) => [p.id, p.name]));
+
+    const tasks = (taskRes.results as AnyPage[]).map((page) => {
+      const [projId] = getRelationIds(page, TASKS_PROPS.project);
+      return {
+        id: page.id,
+        title: getTitle(page),
+        done: getSelect(page, TASKS_PROPS.status) === TASK_STATUS.DONE,
+        due: getDate(page, TASKS_PROPS.dueDate),
+        projectId: projId,
+        projectName: projId ? projectById.get(projId) : undefined,
+      };
+    });
+
+    const notes = (noteRes.results as AnyPage[]).map((page) => {
+      const [projId] = getRelationIds(page, NOTES_PROPS.project);
+      return {
+        id: page.id,
+        title: getTitle(page),
+        projectId: projId,
+        projectName: projId ? projectById.get(projId) : undefined,
+        updatedAt: page.last_edited_time,
+      };
+    });
+
+    return { tasks, notes };
   }
 
   async updateTaskStatus(taskId: string, done: boolean): Promise<void> {

@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "node --import tsx --test server/**/*.test.ts",
-    "notion:setup": "tsx server/notion/setupWorkspace.ts"
+    "notion:setup": "tsx server/notion/setupWorkspace.ts",
+    "notion:add-email-fields": "tsx server/notion/addEmailFields.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

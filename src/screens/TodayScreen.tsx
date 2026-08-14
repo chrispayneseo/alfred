@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { GmailFlagged } from "../components/GmailFlagged";
 import { Screen } from "../components/Screen";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { mockNotes, mockTasks } from "../mocks/today";
@@ -121,6 +122,13 @@ export function TodayScreen() {
             </div>
           </>
         )}
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+          Flagged
+        </h2>
+        <GmailFlagged />
       </section>
 
       <section className="mb-8">

@@ -5,6 +5,9 @@ import { getTodayEvents, getTomorrowEvents } from "./google/calendar";
 import { loadGoogleEnv } from "./google/env";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors";
 import { exchangeCodeForRefreshToken, getAuthUrl, isValidState } from "./google/oauth";
+import { getSyncStatus, startSync } from "./google/gmailSync";
+import { countFlagged, countTotal, countUnscanned, getFlaggedEmails, getMeta } from "./google/gmailStore";
+import { getScanStatus, startScan } from "./llm/emailScan";
 import { runChat } from "./llm/chat";
 import { classifyWithModel } from "./llm/classify";
 import { loadLlmEnv } from "./llm/env";
@@ -81,7 +84,7 @@ export function apiPlugin(): Plugin {
             if (messages.length === 0) return sendJson(res, 400, { error: "messages is required" });
 
             try {
-              const result = await runChat(llmEnv, loadGoogleEnv(), messages);
+              const result = await runChat(llmEnv, loadGoogleEnv(), repo, messages);
               return sendJson(res, 200, result);
             } catch (error) {
               if (error instanceof Error && error.message === "both_unavailable") {
@@ -91,9 +94,9 @@ export function apiPlugin(): Plugin {
             }
           }
 
-          // Google Calendar: env is re-read per request (not hoisted at server
-          // start) so a freshly-written refresh token is picked up immediately
-          // after the OAuth callback, no server restart required.
+          // Google Calendar/Gmail: env is re-read per request (not hoisted at
+          // server start) so a freshly-written refresh token is picked up
+          // immediately after the OAuth callback, no server restart required.
           if (method === "GET" && url.pathname === "/api/google/status") {
             const googleEnv = loadGoogleEnv();
             return sendJson(res, 200, { connected: Boolean(googleEnv.refreshToken) });
@@ -136,6 +139,46 @@ export function apiPlugin(): Plugin {
           if (method === "GET" && url.pathname === "/api/calendar/tomorrow") {
             const googleEnv = loadGoogleEnv();
             return await sendCalendarEvents(res, () => getTomorrowEvents(googleEnv));
+          }
+
+          if (method === "GET" && url.pathname === "/api/gmail/status") {
+            const googleEnv = loadGoogleEnv();
+            return sendJson(res, 200, {
+              connected: Boolean(googleEnv.refreshToken),
+              lastSyncAt: getMeta("lastSyncAt"),
+              totalEmails: countTotal(),
+              unscannedCount: countUnscanned(),
+              flaggedCount: countFlagged(),
+            });
+          }
+
+          if (method === "POST" && url.pathname === "/api/gmail/sync/start") {
+            const googleEnv = loadGoogleEnv();
+            if (!googleEnv.refreshToken) return sendJson(res, 409, { error: "not_connected" });
+            const body = await readJsonBody(req);
+            const days = typeof body.days === "number" && body.days > 0 ? Math.min(body.days, 90) : 30;
+            return sendJson(res, 200, startSync(googleEnv, days));
+          }
+
+          if (method === "GET" && url.pathname === "/api/gmail/sync/status") {
+            return sendJson(res, 200, getSyncStatus());
+          }
+
+          if (method === "POST" && url.pathname === "/api/gmail/scan/start") {
+            const googleEnv = loadGoogleEnv();
+            if (!googleEnv.refreshToken) return sendJson(res, 409, { error: "not_connected" });
+            if (!repo) return sendJson(res, 503, { error: "Notion isn't configured yet." });
+            const body = await readJsonBody(req);
+            const limit = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 100) : 20;
+            return sendJson(res, 200, startScan(llmEnv, googleEnv, repo, limit));
+          }
+
+          if (method === "GET" && url.pathname === "/api/gmail/scan/status") {
+            return sendJson(res, 200, getScanStatus());
+          }
+
+          if (method === "GET" && url.pathname === "/api/gmail/flagged") {
+            return sendJson(res, 200, getFlaggedEmails());
           }
 
           if (!repo) {
