@@ -8,9 +8,9 @@
 // permits sending; see server/google/oauth.ts for why that scope is still
 // the right choice). Step 5's verification pass greps this constraint.
 import { gmail_v1 } from "googleapis";
-import { createAuthenticatedClient } from "./client";
-import type { GoogleAccountEnv } from "./accounts";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors";
+import { createAuthenticatedClient } from "./client.js";
+import type { GoogleAccountEnv } from "./accounts.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors.js";
 
 /** Deep link back to the thread in the Gmail web UI. Takes the account's
  * email (Step 8) rather than assuming /u/0/ — the browser's first-signed-in

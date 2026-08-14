@@ -1,8 +1,8 @@
 import { calendar_v3 } from "googleapis";
-import type { Env } from "../db";
-import { createAuthenticatedClient } from "./client";
-import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "./accounts";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors";
+import type { Env } from "../db.js";
+import { createAuthenticatedClient } from "./client.js";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "./accounts.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors.js";
 
 export interface CalendarEventRecord {
   id: string;

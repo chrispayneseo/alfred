@@ -1,7 +1,7 @@
-import { claudeComplete } from "./anthropic";
-import type { LlmEnv } from "./env";
-import { chatGptComplete } from "./openai";
-import { routeToModel, type ModelChoice } from "./router";
+import { claudeComplete } from "./anthropic.js";
+import type { LlmEnv } from "./env.js";
+import { chatGptComplete } from "./openai.js";
+import { routeToModel, type ModelChoice } from "./router.js";
 
 async function callModel(
   model: ModelChoice,

@@ -8,9 +8,9 @@
 import path from "node:path";
 import { loadEnv } from "vite";
 import type { Client } from "@notionhq/client";
-import { createNotionClient } from "./client";
-import { loadNotionEnv } from "./env";
-import { updateEnvFile } from "../envFile";
+import { createNotionClient } from "./client.js";
+import { loadNotionEnv } from "./env.js";
+import { updateEnvFile } from "../envFile.js";
 import {
   GENEALOGY_PARENT_PROJECT,
   INBOX_PROPS,
@@ -23,7 +23,7 @@ import {
   TASKS_PROPS,
   TASK_STATUS,
   TITLE_PROP,
-} from "./schema";
+} from "./schema.js";
 
 const title = (content: string) => [{ type: "text" as const, text: { content } }];
 

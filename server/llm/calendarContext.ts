@@ -1,7 +1,7 @@
-import type { Env } from "../db";
-import type { GoogleAccountEnv } from "../google/accounts";
-import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type CalendarEventRecord } from "../google/calendar";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors";
+import type { Env } from "../db.js";
+import type { GoogleAccountEnv } from "../google/accounts.js";
+import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type CalendarEventRecord } from "../google/calendar.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors.js";
 
 const CALENDAR_KEYWORDS = [
   "calendar",

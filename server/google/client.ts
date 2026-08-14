@@ -1,5 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
-import type { GoogleEnv } from "./env";
+import type { GoogleEnv } from "./env.js";
 
 /** Bare OAuth2 client for the auth flow itself (no refresh token yet). */
 export function createOAuth2Client(env: GoogleEnv): OAuth2Client {

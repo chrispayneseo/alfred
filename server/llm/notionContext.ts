@@ -1,5 +1,5 @@
-import type { NotionRepo } from "../notion/queries";
-import { deriveSearchQuery } from "./queryTerms";
+import type { NotionRepo } from "../notion/queries.js";
+import { deriveSearchQuery } from "./queryTerms.js";
 
 const NOTION_KEYWORDS = ["task", "tasks", "note", "notes", "project", "notion", "todo", "to-do", "reminder"];
 

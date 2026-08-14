@@ -3,9 +3,9 @@
 // Run with: npm run notion:add-email-fields
 import { loadEnv } from "vite";
 import type { Client } from "@notionhq/client";
-import { createNotionClient } from "./client";
-import { loadNotionEnv } from "./env";
-import { CAPTURED_VIA, INBOX_PROPS, NOTES_PROPS, TASKS_PROPS } from "./schema";
+import { createNotionClient } from "./client.js";
+import { loadNotionEnv } from "./env.js";
+import { CAPTURED_VIA, INBOX_PROPS, NOTES_PROPS, TASKS_PROPS } from "./schema.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDataSource = any;

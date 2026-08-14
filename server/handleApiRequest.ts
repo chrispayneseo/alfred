@@ -4,26 +4,26 @@
 // Node.js serverless function, production). Neither adapter contains any
 // routing logic of its own; they just normalize their platform's request
 // into an ApiRequest and turn an ApiResult back into a real response.
-import type { Env } from "./db";
-import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts";
-import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type MultiAccountEvents } from "./google/calendar";
-import { loadGoogleEnv } from "./google/env";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors";
-import { exchangeCodeForRefreshToken, getAuthUrl, isValidState, revokeToken } from "./google/oauth";
-import { getSyncStatus, startSync } from "./google/gmailSync";
-import { clearEmailsForAccount, countFlagged, countTotal, countUnscanned, getFlaggedEmails, getMeta } from "./google/gmailStore";
-import { getScanStatus, startScan } from "./llm/emailScan";
-import { runChat } from "./llm/chat";
-import { classifyWithModel } from "./llm/classify";
-import { loadLlmEnv } from "./llm/env";
-import type { ChatTurn } from "./llm/types";
-import { runNudgeCheck } from "./nudges/check";
-import { createNotionClient } from "./notion/client";
-import { loadNotionEnv } from "./notion/env";
-import { NotionRepo } from "./notion/queries";
-import { loadNtfyEnv } from "./notify/env";
-import { buildExport } from "./settings/export";
-import { wipeEverything } from "./settings/wipe";
+import type { Env } from "./db.js";
+import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts.js";
+import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type MultiAccountEvents } from "./google/calendar.js";
+import { loadGoogleEnv } from "./google/env.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors.js";
+import { exchangeCodeForRefreshToken, getAuthUrl, isValidState, revokeToken } from "./google/oauth.js";
+import { getSyncStatus, startSync } from "./google/gmailSync.js";
+import { clearEmailsForAccount, countFlagged, countTotal, countUnscanned, getFlaggedEmails, getMeta } from "./google/gmailStore.js";
+import { getScanStatus, startScan } from "./llm/emailScan.js";
+import { runChat } from "./llm/chat.js";
+import { classifyWithModel } from "./llm/classify.js";
+import { loadLlmEnv } from "./llm/env.js";
+import type { ChatTurn } from "./llm/types.js";
+import { runNudgeCheck } from "./nudges/check.js";
+import { createNotionClient } from "./notion/client.js";
+import { loadNotionEnv } from "./notion/env.js";
+import { NotionRepo } from "./notion/queries.js";
+import { loadNtfyEnv } from "./notify/env.js";
+import { buildExport } from "./settings/export.js";
+import { wipeEverything } from "./settings/wipe.js";
 
 export interface ApiRequest {
   method: string;

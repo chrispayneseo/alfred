@@ -1,14 +1,14 @@
-import type { Env } from "../db";
-import type { GoogleAccountEnv } from "../google/accounts";
-import type { NotionRepo } from "../notion/queries";
-import { claudeChat } from "./anthropic";
-import { buildCalendarContext, needsCalendarContext } from "./calendarContext";
-import { buildEmailContext, needsEmailContext } from "./emailContext";
-import type { LlmEnv } from "./env";
-import { buildNotionContext, needsNotionContext } from "./notionContext";
-import { chatGptChat } from "./openai";
-import { routeToModel, type ModelChoice } from "./router";
-import type { ChatTurn } from "./types";
+import type { Env } from "../db.js";
+import type { GoogleAccountEnv } from "../google/accounts.js";
+import type { NotionRepo } from "../notion/queries.js";
+import { claudeChat } from "./anthropic.js";
+import { buildCalendarContext, needsCalendarContext } from "./calendarContext.js";
+import { buildEmailContext, needsEmailContext } from "./emailContext.js";
+import type { LlmEnv } from "./env.js";
+import { buildNotionContext, needsNotionContext } from "./notionContext.js";
+import { chatGptChat } from "./openai.js";
+import { routeToModel, type ModelChoice } from "./router.js";
+import type { ChatTurn } from "./types.js";
 
 export interface ChatResult {
   text: string;

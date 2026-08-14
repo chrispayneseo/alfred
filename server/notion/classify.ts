@@ -1,4 +1,4 @@
-import { UNSORTED_PROJECT } from "./schema";
+import { UNSORTED_PROJECT } from "./schema.js";
 
 export type CaptureType = "task" | "note";
 

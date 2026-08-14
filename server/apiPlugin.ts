@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 import { loadEnv } from "vite";
-import { handleApiRequest } from "./handleApiRequest";
+import { handleApiRequest } from "./handleApiRequest.js";
 
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { ChatTurn } from "./types";
+import type { ChatTurn } from "./types.js";
 
 let client: OpenAI | undefined;
 

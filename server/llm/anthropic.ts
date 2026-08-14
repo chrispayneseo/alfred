@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ChatTurn } from "./types";
+import type { ChatTurn } from "./types.js";
 
 let client: Anthropic | undefined;
 

@@ -1,6 +1,6 @@
-import type { TaskRecord } from "../notion/queries";
-import type { LlmEnv } from "./env";
-import { routedComplete } from "./routedComplete";
+import type { TaskRecord } from "../notion/queries.js";
+import type { LlmEnv } from "./env.js";
+import { routedComplete } from "./routedComplete.js";
 
 const NUDGE_SYSTEM_PROMPT = `You write a single short, gentle nudge reminding someone about an overdue task in their personal assistant app. Calm and warm, never alarmist or guilt-inducing — a soft reminder, not a scold. One sentence, under 25 words, no greeting, no sign-off, plain text only.`;
 

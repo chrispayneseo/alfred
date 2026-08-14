@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { createOAuth2Client } from "./client";
-import type { GoogleEnv } from "./env";
+import { createOAuth2Client } from "./client.js";
+import type { GoogleEnv } from "./env.js";
 
 export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 // Read is separate from compose so the reconnect story stays honest about what

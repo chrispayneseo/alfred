@@ -1,7 +1,7 @@
 import type { Client } from "@notionhq/client";
-import type { Classification } from "./classify";
-import type { NotionEnv } from "./env";
-import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP } from "./schema";
+import type { Classification } from "./classify.js";
+import type { NotionEnv } from "./env.js";
+import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP } from "./schema.js";
 
 // The API returns a deep discriminated-union PageObjectResponse per property
 // type; these helpers pull out plain values without fighting that union for

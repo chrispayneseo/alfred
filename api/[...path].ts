@@ -5,7 +5,7 @@
 // (process.env here vs. Vite's loadEnv() locally).
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { waitUntil } from "@vercel/functions";
-import { handleApiRequest } from "../server/handleApiRequest";
+import { handleApiRequest } from "../server/handleApiRequest.js";
 
 // Vercel's Node.js runtime adds `body` (auto-parsed for application/json,
 // which every POST in this app sends) and `query` on top of the raw

@@ -1,10 +1,10 @@
-import type { Env } from "../db";
-import type { GoogleAccountEnv } from "../google/accounts";
-import { CALENDAR_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_READONLY_SCOPE, USERINFO_EMAIL_SCOPE } from "../google/oauth";
-import { getAllEmails, getMeta } from "../google/gmailStore";
-import { getAllPushedNudges } from "../nudges/nudgeStore";
-import type { NotionEnv } from "../notion/env";
-import type { NtfyEnv } from "../notify/env";
+import type { Env } from "../db.js";
+import type { GoogleAccountEnv } from "../google/accounts.js";
+import { CALENDAR_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_READONLY_SCOPE, USERINFO_EMAIL_SCOPE } from "../google/oauth.js";
+import { getAllEmails, getMeta } from "../google/gmailStore.js";
+import { getAllPushedNudges } from "../nudges/nudgeStore.js";
+import type { NotionEnv } from "../notion/env.js";
+import type { NtfyEnv } from "../notify/env.js";
 
 /** Everything Alfred holds a local copy or cache of — deliberately excludes
  * every credential (Notion token, Anthropic/OpenAI keys, Google client

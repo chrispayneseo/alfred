@@ -1,8 +1,8 @@
-import { getMessageMetadata, listInboxMessageIds } from "./gmail";
-import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "./accounts";
-import { GoogleReconnectRequiredError, toGoogleErrorCode } from "./errors";
-import { countTotal, setMeta, upsertEmailMetadata } from "./gmailStore";
-import { ensureSchema, getSql, type Env } from "../db";
+import { getMessageMetadata, listInboxMessageIds } from "./gmail.js";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "./accounts.js";
+import { GoogleReconnectRequiredError, toGoogleErrorCode } from "./errors.js";
+import { countTotal, setMeta, upsertEmailMetadata } from "./gmailStore.js";
+import { ensureSchema, getSql, type Env } from "../db.js";
 
 export interface SyncStatus {
   running: boolean;

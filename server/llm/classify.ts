@@ -1,8 +1,8 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { classify as ruleBasedClassify, type Classification } from "../notion/classify";
-import { PROJECT_SEED_NAMES, UNSORTED_PROJECT } from "../notion/schema";
-import { getAnthropicClient } from "./anthropic";
+import { classify as ruleBasedClassify, type Classification } from "../notion/classify.js";
+import { PROJECT_SEED_NAMES, UNSORTED_PROJECT } from "../notion/schema.js";
+import { getAnthropicClient } from "./anthropic.js";
 
 const ClassificationSchema = z.object({
   type: z.enum(["task", "note"]),

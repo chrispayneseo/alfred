@@ -1,10 +1,10 @@
-import type { Env } from "../db";
-import type { LlmEnv } from "../llm/env";
-import { phraseNudge } from "../llm/nudgeMessage";
-import type { NotionRepo } from "../notion/queries";
-import type { NtfyEnv } from "../notify/env";
-import { notify } from "../notify/ntfy";
-import { recordPush, shouldPush } from "./nudgeStore";
+import type { Env } from "../db.js";
+import type { LlmEnv } from "../llm/env.js";
+import { phraseNudge } from "../llm/nudgeMessage.js";
+import type { NotionRepo } from "../notion/queries.js";
+import type { NtfyEnv } from "../notify/env.js";
+import { notify } from "../notify/ntfy.js";
+import { recordPush, shouldPush } from "./nudgeStore.js";
 
 export interface NudgeItem {
   taskId: string;

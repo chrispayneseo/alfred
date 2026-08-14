@@ -7,9 +7,9 @@
 // google_accounts Postgres table (server/db.ts) — one database for local dev
 // and production, so this file behaves identically in both.
 import { oauth2_v2 } from "googleapis";
-import { ensureSchema, getSql, type Env } from "../db";
-import { createOAuth2Client } from "./client";
-import { loadGoogleEnv, type GoogleEnv } from "./env";
+import { ensureSchema, getSql, type Env } from "../db.js";
+import { createOAuth2Client } from "./client.js";
+import { loadGoogleEnv, type GoogleEnv } from "./env.js";
 
 export interface GoogleAccountEnv extends GoogleEnv {
   email: string;

@@ -1,7 +1,7 @@
 // Metadata cache for Gmail — sender/subject/date/snippet/threadId only,
 // never raw bodies (those are fetched on demand, see gmail.ts). Postgres
 // (server/db.ts), same database as the accounts table and nudge store.
-import { ensureSchema, getSql, type Env } from "../db";
+import { ensureSchema, getSql, type Env } from "../db.js";
 
 export interface EmailRecord {
   id: string;

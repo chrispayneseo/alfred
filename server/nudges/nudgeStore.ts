@@ -3,7 +3,7 @@
 // live from Notion; this store exists solely to stop repeated Today-screen
 // opens from re-pinging the phone for the same still-overdue task on the
 // same day. Postgres (server/db.ts) — same database as the Gmail cache.
-import { ensureSchema, getSql, type Env } from "../db";
+import { ensureSchema, getSql, type Env } from "../db.js";
 
 async function db(env: Env) {
   await ensureSchema(env);

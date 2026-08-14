@@ -1,8 +1,8 @@
-import type { Env } from "../db";
-import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors";
-import { getMessageBody, searchMessages, type EmailMetadata } from "../google/gmail";
-import { deriveSearchQuery } from "./queryTerms";
+import type { Env } from "../db.js";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors.js";
+import { getMessageBody, searchMessages, type EmailMetadata } from "../google/gmail.js";
+import { deriveSearchQuery } from "./queryTerms.js";
 
 const EMAIL_KEYWORDS = [
   "email",

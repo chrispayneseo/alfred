@@ -1,13 +1,13 @@
 import { z } from "zod";
-import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError, toGoogleErrorCode } from "../google/errors";
-import { createDraftReply, getMessageBody, getReplyHeaders, gmailThreadUrl } from "../google/gmail";
-import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gmailStore";
-import type { NotionRepo } from "../notion/queries";
-import { PROJECT_SEED_NAMES } from "../notion/schema";
-import { ensureSchema, getSql, type Env } from "../db";
-import type { LlmEnv } from "./env";
-import { routedComplete } from "./routedComplete";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError, toGoogleErrorCode } from "../google/errors.js";
+import { createDraftReply, getMessageBody, getReplyHeaders, gmailThreadUrl } from "../google/gmail.js";
+import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gmailStore.js";
+import type { NotionRepo } from "../notion/queries.js";
+import { PROJECT_SEED_NAMES } from "../notion/schema.js";
+import { ensureSchema, getSql, type Env } from "../db.js";
+import type { LlmEnv } from "./env.js";
+import { routedComplete } from "./routedComplete.js";
 
 const AUTOMATED_SENDER_PATTERN = /(no-?reply|do-?not-?reply|notifications?|mailer-daemon|newsletter|marketing)@/i;
 
