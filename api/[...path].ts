@@ -3,31 +3,31 @@
 // server/handleApiRequest.ts, shared with local dev's server/apiPlugin.ts;
 // this file only adapts Vercel's request/response shapes and env source
 // (process.env here vs. Vite's loadEnv() locally).
-import type { IncomingMessage, ServerResponse } from "node:http";
+//
+// Uses the Web Standard Request/Response signature — Vercel's current
+// documented convention for non-Next.js Functions (the older Node-style
+// `(req, res)` callback export doesn't reliably route nested /api/* paths
+// through a [...path] catch-all; confirmed live: single-segment paths like
+// /api/tasks worked, multi-segment ones like /api/google/accounts 404'd at
+// Vercel's routing layer before ever reaching the function).
 import { waitUntil } from "@vercel/functions";
 import { handleApiRequest } from "../server/handleApiRequest.js";
 
-// Vercel's Node.js runtime adds `body` (auto-parsed for application/json,
-// which every POST in this app sends) and `query` on top of the raw
-// IncomingMessage — hand-typed here rather than depending on @vercel/node
-// just for these two fields (that package pulls in a large, largely
-// unrelated build-tooling dependency tree).
-interface VercelRequest extends IncomingMessage {
-  body?: unknown;
-}
-
-export default async function handler(req: VercelRequest, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? "/", `https://${req.headers.host ?? "localhost"}`);
-  const method = req.method ?? "GET";
+export default async function handler(request: Request): Promise<Response> {
+  const url = new URL(request.url);
 
   const result = await handleApiRequest({
-    method,
+    method: request.method,
     pathname: url.pathname,
     searchParams: url.searchParams,
-    // Vercel has already parsed the JSON body before this handler runs —
-    // re-reading req as a stream (what the local dev adapter does) would
-    // hang, since the stream is already consumed.
-    readBody: async () => (req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {}),
+    readBody: async () => {
+      if (request.method === "GET" || request.method === "HEAD") return {};
+      try {
+        return (await request.json()) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    },
     env: process.env,
     // Lets a route (Gmail sync/scan) return its initial response immediately
     // while the actual work continues for up to the function's maxDuration
@@ -38,13 +38,11 @@ export default async function handler(req: VercelRequest, res: ServerResponse): 
   });
 
   if (result.kind === "redirect") {
-    res.statusCode = 302;
-    res.setHeader("Location", result.location);
-    res.end();
-    return;
+    return new Response(null, { status: 302, headers: { Location: result.location } });
   }
 
-  res.statusCode = result.status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(result.body));
+  return new Response(JSON.stringify(result.body), {
+    status: result.status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
