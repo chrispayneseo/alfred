@@ -1,8 +1,10 @@
+import type { CoachPlanEnv } from "../coachplan/env.js";
 import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
 import type { NotionRepo } from "../notion/queries.js";
 import { claudeChat } from "./anthropic.js";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext.js";
+import { buildCoachPlanContext, needsCoachPlanContext } from "./coachPlanContext.js";
 import { buildEmailContext, needsEmailContext } from "./emailContext.js";
 import type { LlmEnv } from "./env.js";
 import { buildNotionContext, needsNotionContext } from "./notionContext.js";
@@ -62,13 +64,15 @@ async function buildContext(
   dbEnv: Env,
   lastText: string,
   googleAccounts: GoogleAccountEnv[],
-  notionRepo: NotionRepo | undefined
+  notionRepo: NotionRepo | undefined,
+  coachPlanEnv: CoachPlanEnv
 ): Promise<string> {
   const blocks: string[] = [];
 
   if (needsCalendarContext(lastText)) blocks.push(await buildCalendarContext(dbEnv, googleAccounts));
   if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(dbEnv, googleAccounts, lastText));
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
+  if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
 
   return [...blocks, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }
@@ -87,6 +91,7 @@ export async function runChat(
   dbEnv: Env,
   googleAccounts: GoogleAccountEnv[],
   notionRepo: NotionRepo | undefined,
+  coachPlanEnv: CoachPlanEnv,
   messages: ChatTurn[]
 ): Promise<ChatResult> {
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
@@ -94,7 +99,7 @@ export async function runChat(
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = await buildContext(dbEnv, lastText, googleAccounts, notionRepo);
+  const extraContext = await buildContext(dbEnv, lastText, googleAccounts, notionRepo, coachPlanEnv);
 
   try {
     const raw = await callModel(intended, env, messages, extraContext);

@@ -4,6 +4,8 @@
 // Node.js serverless function, production). Neither adapter contains any
 // routing logic of its own; they just normalize their platform's request
 // into an ApiRequest and turn an ApiResult back into a real response.
+import { getUpcomingMatches, getUpcomingSessions } from "./coachplan/coachplan.js";
+import { isCoachPlanConfigured, loadCoachPlanEnv } from "./coachplan/env.js";
 import type { Env } from "./db.js";
 import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts.js";
 import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type MultiAccountEvents } from "./google/calendar.js";
@@ -103,6 +105,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     const notionEnv = loadNotionEnv(env);
     const llmEnv = loadLlmEnv(env);
     const repo = notionEnv.token ? new NotionRepo(createNotionClient(notionEnv.token), notionEnv) : undefined;
+    const coachPlanEnv = loadCoachPlanEnv(env);
 
     if (method === "POST" && pathname === "/api/chat") {
       const body = await readBody();
@@ -111,13 +114,24 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
       try {
         const accounts = await loadGoogleAccounts(env);
-        const result = await runChat(llmEnv, env, accounts, repo, messages);
+        const result = await runChat(llmEnv, env, accounts, repo, coachPlanEnv, messages);
         return json(200, result);
       } catch (error) {
         if (error instanceof Error && error.message === "both_unavailable") {
           return json(502, { error: "both_unavailable" });
         }
         throw error;
+      }
+    }
+
+    if (method === "GET" && pathname === "/api/coachplan/upcoming") {
+      if (!isCoachPlanConfigured(coachPlanEnv)) return json(200, { configured: false, sessions: [], matches: [] });
+      try {
+        const [sessions, matches] = await Promise.all([getUpcomingSessions(coachPlanEnv), getUpcomingMatches(coachPlanEnv)]);
+        return json(200, { configured: true, sessions, matches });
+      } catch (error) {
+        console.error("[coachplan] upcoming query failed:", error);
+        return json(502, { error: "Couldn't reach CoachPlan right now." });
       }
     }
 

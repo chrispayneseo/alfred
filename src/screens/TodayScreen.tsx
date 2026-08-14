@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AccountTag } from "../components/AccountTag";
+import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { Nudges } from "../components/Nudges";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
@@ -275,6 +276,8 @@ export function TodayScreen() {
           </ul>
         )}
       </section>
+
+      <CoachPlanTeaser />
 
       <section>
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">

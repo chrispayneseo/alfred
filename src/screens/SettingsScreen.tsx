@@ -47,6 +47,10 @@ export function SettingsScreen() {
             Gmail — read-only, plus creating drafts for your review, on every connected account. Alfred never sends
             email on your behalf.
           </li>
+          <li>
+            CoachPlan — read-only, scoped to your team's upcoming training sessions and matches. Alfred never writes
+            back to CoachPlan.
+          </li>
         </ul>
       </section>
 
