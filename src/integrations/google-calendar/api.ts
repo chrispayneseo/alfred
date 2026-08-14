@@ -47,3 +47,27 @@ export async function fetchCalendarStatus(): Promise<CalendarStatus> {
   if (!res.ok) return { connected: false };
   return res.json();
 }
+
+export interface CreateEventInput {
+  title: string;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  account: string;
+}
+
+/** Always called after the user has explicitly confirmed a proposal Chat
+ * showed them — never call this from anything the user hasn't approved. */
+export async function createCalendarEvent(input: CreateEventInput): Promise<CalendarApiEvent> {
+  const res = await fetch("/api/calendar/create-event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (body.error === "not_connected" || body.error === "reconnect_required") throw new Error(body.error);
+    throw new Error(typeof body.error === "string" ? body.error : `Request failed (${res.status})`);
+  }
+  return res.json();
+}

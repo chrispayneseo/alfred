@@ -1,4 +1,4 @@
-import type { Confidence, ModelSource } from "../../types";
+import type { Confidence, EventProposal, ModelSource } from "../../types";
 
 export interface ChatApiTurn {
   role: "user" | "assistant";
@@ -11,6 +11,7 @@ export interface ChatApiResult {
   intendedModel: ModelSource;
   fellBack: boolean;
   confidence: Confidence;
+  eventProposal?: EventProposal;
 }
 
 export async function sendChatMessage(messages: ChatApiTurn[]): Promise<ChatApiResult> {

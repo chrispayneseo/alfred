@@ -1,6 +1,6 @@
 import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
-import { CALENDAR_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_READONLY_SCOPE, USERINFO_EMAIL_SCOPE } from "../google/oauth.js";
+import { CALENDAR_EVENTS_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_READONLY_SCOPE, USERINFO_EMAIL_SCOPE } from "../google/oauth.js";
 import { getAllEmails, getMeta } from "../google/gmailStore.js";
 import { getAllPushedNudges } from "../nudges/nudgeStore.js";
 import type { NotionEnv } from "../notion/env.js";
@@ -20,7 +20,7 @@ export async function buildExport(env: Env, googleAccounts: GoogleAccountEnv[], 
       google: {
         connected: googleAccounts.length > 0,
         accounts: googleAccounts.map((a) => a.email),
-        scopes: [CALENDAR_READONLY_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE],
+        scopes: [CALENDAR_EVENTS_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE],
       },
       ntfy: { topic: ntfyEnv.topic || null },
     },

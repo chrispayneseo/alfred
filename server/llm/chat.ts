@@ -1,6 +1,7 @@
 import type { CoachPlanEnv } from "../coachplan/env.js";
 import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
+import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
 import type { NotionRepo } from "../notion/queries.js";
 import { claudeChat } from "./anthropic.js";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext.js";
@@ -14,12 +15,23 @@ import type { ChatTurn } from "./types.js";
 
 export type Confidence = "direct" | "inferred";
 
+export interface EventProposal {
+  title: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** HH:MM — absent means an all-day event. */
+  startTime?: string;
+  endTime?: string;
+  account: string;
+}
+
 export interface ChatResult {
   text: string;
   model: ModelChoice;
   intendedModel: ModelChoice;
   fellBack: boolean;
   confidence: Confidence;
+  eventProposal?: EventProposal;
 }
 
 // Asked of every answer, not just ones with injected context — a plain
@@ -47,6 +59,53 @@ function extractConfidence(rawText: string): { text: string; confidence: Confide
   };
 }
 
+// No per-account-preference infrastructure exists (single-user app) — same
+// reasoning as calendar.ts's DEFAULT_TIME_ZONE. The model is told to use
+// this account unless the user names the other one explicitly.
+const DEFAULT_CALENDAR_ACCOUNT = "cpayneer@gmail.com";
+
+// Chat cannot create a calendar event itself — this only ever produces a
+// *proposal*, which the frontend renders as an explicit confirm/cancel
+// card (never auto-created). The actual write happens in
+// /api/calendar/create-event, and only after that confirmation.
+const EVENT_PROPOSAL_INSTRUCTION = `If the user is asking you to add, create, schedule, or book something on their calendar, you cannot create it directly — you can only propose it for their confirmation. If you have enough detail (at minimum a title and a date; assume 1 hour for a timed event with no stated end time; treat it as all-day if no time is given at all; default to the account "${DEFAULT_CALENDAR_ACCOUNT}" unless the user names the other connected account explicitly), write one short sentence proposing it (e.g. "Want me to add this to your calendar?"), then — after that sentence, and before the final confidence line — output exactly this block:
+[[CALENDAR_EVENT_PROPOSAL]]
+{"title": "...", "date": "YYYY-MM-DD", "startTime": "HH:MM" or null, "endTime": "HH:MM" or null, "account": "..."}
+[[/CALENDAR_EVENT_PROPOSAL]]
+If you're missing the title or date, ask a clarifying question instead — do not output this block until you actually have enough detail to propose a specific event. Never output it for any reason other than genuinely proposing an event the user just asked for.`;
+
+const EVENT_PROPOSAL_RE = /\[\[CALENDAR_EVENT_PROPOSAL\]\]\s*([\s\S]*?)\s*\[\[\/CALENDAR_EVENT_PROPOSAL\]\]/;
+
+/** Strips the [[CALENDAR_EVENT_PROPOSAL]] block (if present) and parses it.
+ * Silently drops a malformed block rather than leaking raw JSON/tags into
+ * the visible reply — a parse failure here just means no proposal card is
+ * shown, not an error. */
+function extractEventProposal(text: string): { text: string; eventProposal?: EventProposal } {
+  const match = text.match(EVENT_PROPOSAL_RE);
+  if (!match) return { text };
+
+  const cleanText = (text.slice(0, match.index) + text.slice(match.index! + match[0].length)).trim();
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (typeof parsed.title !== "string" || typeof parsed.date !== "string" || typeof parsed.account !== "string") {
+      return { text: cleanText };
+    }
+    return {
+      text: cleanText,
+      eventProposal: {
+        title: parsed.title,
+        date: parsed.date,
+        startTime: typeof parsed.startTime === "string" ? parsed.startTime : undefined,
+        endTime: typeof parsed.endTime === "string" ? parsed.endTime : undefined,
+        account: parsed.account,
+      },
+    };
+  } catch (error) {
+    console.error("[chat] couldn't parse event proposal JSON:", error, match[1]);
+    return { text: cleanText };
+  }
+}
+
 async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], extraContext?: string): Promise<string> {
   return model === "claude"
     ? claudeChat(env.anthropicApiKey, messages, extraContext)
@@ -60,6 +119,13 @@ async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], 
  * The confidence-tagging instruction is always appended, regardless of
  * whether any of those sources apply — it's a general Q&A capability, not
  * tied to any one context type. */
+function todayGrounding(): string {
+  const now = new Date();
+  const weekday = now.toLocaleDateString("en-GB", { weekday: "long", timeZone: DEFAULT_TIME_ZONE });
+  const dateStr = now.toLocaleDateString("en-CA", { timeZone: DEFAULT_TIME_ZONE }); // en-CA gives YYYY-MM-DD
+  return `Today's date is ${dateStr} (${weekday}) — resolve "today"/"tomorrow"/"next Friday" etc. against this, not your own training cutoff.`;
+}
+
 async function buildContext(
   dbEnv: Env,
   lastText: string,
@@ -67,14 +133,14 @@ async function buildContext(
   notionRepo: NotionRepo | undefined,
   coachPlanEnv: CoachPlanEnv
 ): Promise<string> {
-  const blocks: string[] = [];
+  const blocks: string[] = [todayGrounding()];
 
   if (needsCalendarContext(lastText)) blocks.push(await buildCalendarContext(dbEnv, googleAccounts));
   if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(dbEnv, googleAccounts, lastText));
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
   if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
 
-  return [...blocks, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
+  return [...blocks, EVENT_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }
 
 /**
@@ -103,14 +169,16 @@ export async function runChat(
 
   try {
     const raw = await callModel(intended, env, messages, extraContext);
-    const { text, confidence } = extractConfidence(raw);
-    return { text, model: intended, intendedModel: intended, fellBack: false, confidence };
+    const { text: afterConfidence, confidence } = extractConfidence(raw);
+    const { text, eventProposal } = extractEventProposal(afterConfidence);
+    return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal };
   } catch (primaryError) {
     console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
     try {
       const raw = await callModel(fallback, env, messages, extraContext);
-      const { text, confidence } = extractConfidence(raw);
-      return { text, model: fallback, intendedModel: intended, fellBack: true, confidence };
+      const { text: afterConfidence, confidence } = extractConfidence(raw);
+      const { text, eventProposal } = extractEventProposal(afterConfidence);
+      return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal };
     } catch (fallbackError) {
       console.error(`[chat] ${fallback} fallback also failed:`, fallbackError);
       throw new Error("both_unavailable");

@@ -1,9 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { ModelTag } from "../components/ModelTag";
+import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { sendChatMessage, type ChatApiTurn } from "../integrations/llm/api";
 import { makeId } from "../lib/id";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, EventProposal } from "../types";
+
+function formatEventProposal(p: EventProposal): string {
+  const d = new Date(`${p.date}T00:00:00`);
+  const dateLabel = Number.isNaN(d.getTime())
+    ? p.date
+    : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  if (!p.startTime) return `${dateLabel} · All day`;
+  return `${dateLabel} · ${p.startTime}${p.endTime ? `–${p.endTime}` : ""}`;
+}
 
 const initialMessages: ChatMessage[] = [
   {
@@ -20,6 +30,7 @@ export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const [submittingEventId, setSubmittingEventId] = useState<string>();
   const online = useOnlineStatus();
 
   async function handleSubmit(event: FormEvent) {
@@ -69,6 +80,8 @@ export function ChatScreen() {
           note: result.fellBack
             ? `${MODEL_LABEL[result.intendedModel]} unavailable — answered with ${MODEL_LABEL[result.model]}`
             : undefined,
+          eventProposal: result.eventProposal,
+          eventProposalStatus: result.eventProposal ? "pending" : undefined,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -89,6 +102,37 @@ export function ChatScreen() {
     } finally {
       setIsThinking(false);
     }
+  }
+
+  async function handleConfirmEvent(messageId: string, proposal: EventProposal) {
+    setSubmittingEventId(messageId);
+    try {
+      await createCalendarEvent(proposal);
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, eventProposalStatus: "created" } : m)));
+    } catch (error) {
+      const needsReconnect = error instanceof Error && (error.message === "reconnect_required" || error.message === "not_connected");
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                eventProposalStatus: "error",
+                eventProposalError: needsReconnect
+                  ? `${proposal.account} needs reconnecting in Settings before Alfred can add events.`
+                  : error instanceof Error
+                    ? error.message
+                    : "Couldn't add that to your calendar.",
+              }
+            : m
+        )
+      );
+    } finally {
+      setSubmittingEventId(undefined);
+    }
+  }
+
+  function handleCancelEvent(messageId: string) {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, eventProposalStatus: "cancelled" } : m)));
   }
 
   return (
@@ -121,6 +165,53 @@ export function ChatScreen() {
             </p>
             {message.note && (
               <p className="mt-1 text-[11px] text-ink-faint dark:text-ink-faint-dark">{message.note}</p>
+            )}
+            {message.eventProposal && (
+              <div className="mt-2 inline-block w-full max-w-[85%] rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
+                <p className="text-sm text-ink dark:text-ink-dark">{message.eventProposal.title}</p>
+                <p className="mt-0.5 text-xs text-ink-faint dark:text-ink-faint-dark">
+                  {formatEventProposal(message.eventProposal)} · {message.eventProposal.account}
+                </p>
+
+                {message.eventProposalStatus === "created" && (
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">Added to calendar.</p>
+                )}
+                {message.eventProposalStatus === "cancelled" && (
+                  <p className="mt-2 text-xs text-ink-faint dark:text-ink-faint-dark">Not added.</p>
+                )}
+                {message.eventProposalStatus === "error" && (
+                  <>
+                    <p className="mt-2 text-xs text-claude">{message.eventProposalError}</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <button
+                        onClick={() => handleConfirmEvent(message.id, message.eventProposal!)}
+                        disabled={submittingEventId === message.id}
+                        className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  </>
+                )}
+                {message.eventProposalStatus === "pending" && (
+                  <div className="mt-2 flex items-center gap-3">
+                    <button
+                      onClick={() => handleConfirmEvent(message.id, message.eventProposal!)}
+                      disabled={submittingEventId === message.id}
+                      className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                    >
+                      {submittingEventId === message.id ? "Adding…" : "Add to calendar"}
+                    </button>
+                    <button
+                      onClick={() => handleCancelEvent(message.id)}
+                      disabled={submittingEventId === message.id}
+                      className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft disabled:opacity-50 dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         ))}

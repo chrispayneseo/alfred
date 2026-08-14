@@ -42,7 +42,10 @@ export function SettingsScreen() {
         </h2>
         <ul className="space-y-1.5 text-xs text-ink-soft dark:text-ink-soft-dark">
           <li>Notion — your workspace is the source of truth; Alfred reads and writes Tasks, Notes, and Inbox there.</li>
-          <li>Google Calendar — read-only, on every connected account.</li>
+          <li>
+            Google Calendar — read on every connected account, plus creating events when you explicitly ask Chat
+            to and confirm the proposed details. Alfred never creates an event without that confirmation.
+          </li>
           <li>
             Gmail — read-only, plus creating drafts for your review, on every connected account. Alfred never sends
             email on your behalf.

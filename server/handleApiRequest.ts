@@ -8,7 +8,7 @@ import { getUpcomingMatches, getUpcomingSessions } from "./coachplan/coachplan.j
 import { isCoachPlanConfigured, loadCoachPlanEnv } from "./coachplan/env.js";
 import type { Env } from "./db.js";
 import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts.js";
-import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type MultiAccountEvents } from "./google/calendar.js";
+import { createEvent, getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type MultiAccountEvents } from "./google/calendar.js";
 import { loadGoogleEnv } from "./google/env.js";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors.js";
 import { exchangeCodeForRefreshToken, getAuthUrl, isValidState, revokeToken } from "./google/oauth.js";
@@ -222,6 +222,33 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     if (method === "GET" && pathname === "/api/calendar/tomorrow") {
       const accounts = await loadGoogleAccounts(env);
       return await calendarEventsResult(() => getTomorrowEventsAllAccounts(env, accounts));
+    }
+
+    // Only ever called after the user explicitly confirms a proposal Chat
+    // showed them (see server/llm/chat.ts's EVENT_PROPOSAL_INSTRUCTION) —
+    // this route has no confirmation step of its own, it trusts the
+    // frontend already got a yes.
+    if (method === "POST" && pathname === "/api/calendar/create-event") {
+      const body = await readBody();
+      const title = typeof body.title === "string" ? body.title.trim() : "";
+      const date = typeof body.date === "string" ? body.date : "";
+      const accountEmail = typeof body.account === "string" ? body.account : "";
+      const startTime = typeof body.startTime === "string" ? body.startTime : undefined;
+      const endTime = typeof body.endTime === "string" ? body.endTime : undefined;
+      if (!title || !date || !accountEmail) return json(400, { error: "title, date, and account are required" });
+
+      const accounts = await loadGoogleAccounts(env);
+      const account = accounts.find((a) => a.email === accountEmail);
+      if (!account) return json(404, { error: `${accountEmail} isn't a connected account.` });
+
+      try {
+        const created = await createEvent(account, { title, date, startTime, endTime });
+        return json(200, created);
+      } catch (error) {
+        if (error instanceof GoogleReconnectRequiredError) return json(409, { error: "reconnect_required" });
+        if (error instanceof GoogleNotConnectedError) return json(409, { error: "not_connected" });
+        throw error;
+      }
     }
 
     if (method === "GET" && pathname === "/api/gmail/status") {

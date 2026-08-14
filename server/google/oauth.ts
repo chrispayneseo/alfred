@@ -2,7 +2,16 @@ import crypto from "node:crypto";
 import { createOAuth2Client } from "./client.js";
 import type { GoogleEnv } from "./env.js";
 
-export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+// Was calendar.readonly through Step 8; upgraded to calendar.events (read +
+// write events, but not calendar settings/ACLs — still the narrowest scope
+// that covers both listing events and creating them) once Chat gained the
+// ability to propose and create calendar events. Existing connections made
+// before this change only hold the old readonly grant, so a write attempt
+// against one fails with Google's insufficient-scope 403 — already handled
+// as GoogleReconnectRequiredError by isGoogleAuthError (errors.ts), same as
+// any other stale grant, so accounts self-heal via the normal reconnect
+// flow rather than needing special-case handling.
+export const CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 // Read is separate from compose so the reconnect story stays honest about what
 // each grants. gmail.compose is Google's narrowest scope that allows draft
 // creation — its own scope description says "Manage drafts and send emails",
@@ -17,7 +26,7 @@ export const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compos
 // than asking the user to name it (server/google/accounts.ts).
 export const USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
 
-const SCOPES = [CALENDAR_READONLY_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE];
+const SCOPES = [CALENDAR_EVENTS_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE];
 
 // Stateless CSRF protection for the OAuth flow: a timestamp + random nonce,
 // HMAC-signed with the app's own GOOGLE_CLIENT_SECRET (already a private
