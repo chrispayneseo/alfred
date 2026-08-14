@@ -11,6 +11,9 @@ import {
   type ScanStatus,
   type SyncStatus,
 } from "../integrations/gmail/api";
+import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
+import { buildAccountColorMap } from "../lib/accountColor";
+import { AccountTag } from "./AccountTag";
 
 type PanelState = "loading" | "not_connected" | "ready" | "error";
 
@@ -18,8 +21,8 @@ const SYNC_DAYS = 30;
 const SCAN_BATCH_SIZE = 20;
 const POLL_MS = 1000;
 
-function gmailThreadUrl(threadId: string): string {
-  return `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
+function gmailThreadUrl(threadId: string, accountEmail: string): string {
+  return `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/#inbox/${threadId}`;
 }
 
 function formatEmailDate(iso: string): string {
@@ -38,7 +41,15 @@ function ProgressBar({ processed, total }: { processed: number; total?: number }
   );
 }
 
-function FlaggedItem({ email }: { email: FlaggedEmail }) {
+function FlaggedItem({
+  email,
+  colorMap,
+  showAccountTag,
+}: {
+  email: FlaggedEmail;
+  colorMap: ReturnType<typeof buildAccountColorMap>;
+  showAccountTag: boolean;
+}) {
   const reasons = [
     email.needsReply ? "Reply needed" : undefined,
     email.hasDeadline ? `Deadline${email.deadlineDate ? ` · ${email.deadlineDate}` : ""}` : undefined,
@@ -48,7 +59,7 @@ function FlaggedItem({ email }: { email: FlaggedEmail }) {
     <li className="border-b border-line pb-3 last:border-0 dark:border-line-dark">
       <div className="flex items-baseline justify-between gap-2">
         <a
-          href={gmailThreadUrl(email.threadId)}
+          href={gmailThreadUrl(email.threadId, email.accountEmail)}
           target="_blank"
           rel="noreferrer"
           className="text-sm text-ink hover:underline dark:text-ink-dark"
@@ -60,12 +71,13 @@ function FlaggedItem({ email }: { email: FlaggedEmail }) {
         </span>
       </div>
       <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{email.sender}</p>
-      <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-ink-soft dark:text-ink-soft-dark">
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[11px] text-ink-soft dark:text-ink-soft-dark">
         {reasons.map((reason) => (
           <span key={reason}>{reason}</span>
         ))}
         {email.project && <span>Filed · {email.project}</span>}
         {email.draftId && <span>Draft ready in Gmail</span>}
+        {showAccountTag && <AccountTag email={email.accountEmail} color={colorMap.get(email.accountEmail) ?? "a"} />}
       </div>
     </li>
   );
@@ -77,13 +89,15 @@ export function GmailFlagged() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>();
   const [scanStatus, setScanStatus] = useState<ScanStatus>();
   const [flagged, setFlagged] = useState<FlaggedEmail[]>([]);
+  const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
   const [actionError, setActionError] = useState<string>();
   const pollRef = useRef<number | undefined>(undefined);
 
   async function refresh() {
     try {
-      const s = await fetchGmailStatus();
+      const [s, accts] = await Promise.all([fetchGmailStatus(), fetchGoogleAccounts()]);
       setStatus(s);
+      setAccounts(accts);
       setState(s.connected ? "ready" : "not_connected");
       setFlagged(s.flaggedCount > 0 ? await fetchFlaggedEmails() : []);
     } catch {
@@ -157,6 +171,8 @@ export function GmailFlagged() {
   const jobError = syncStatus?.error ?? scanStatus?.error;
   const needsReconnect = jobError === "reconnect_required";
   const apiDisabled = jobError === "api_disabled";
+  const accountColorMap = buildAccountColorMap(accounts);
+  const showAccountTags = accounts.length > 1;
 
   return (
     <div>
@@ -244,7 +260,13 @@ export function GmailFlagged() {
             <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing flagged right now.</p>
           )}
 
-          {flagged.length > 0 && <ul className="space-y-3">{flagged.map((email) => <FlaggedItem key={email.id} email={email} />)}</ul>}
+          {flagged.length > 0 && (
+            <ul className="space-y-3">
+              {flagged.map((email) => (
+                <FlaggedItem key={`${email.accountEmail}:${email.id}`} email={email} colorMap={accountColorMap} showAccountTag={showAccountTags} />
+              ))}
+            </ul>
+          )}
         </>
       )}
     </div>

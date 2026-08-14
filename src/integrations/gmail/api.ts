@@ -23,6 +23,7 @@ export interface ScanStatus {
 
 export interface FlaggedEmail {
   id: string;
+  accountEmail: string;
   threadId: string;
   sender: string;
   senderEmail: string;

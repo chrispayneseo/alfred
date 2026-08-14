@@ -1,4 +1,4 @@
-import type { GoogleEnv } from "../google/env";
+import type { GoogleAccountEnv } from "../google/accounts";
 import type { NotionRepo } from "../notion/queries";
 import { claudeChat } from "./anthropic";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext";
@@ -25,12 +25,12 @@ async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], 
 /** Gathers whichever context sources (calendar, Notion, email) the question
  * actually looks like it needs, and concatenates them into one context block —
  * the same injection mechanism Step 4 introduced for calendar, just fed by
- * more than one source now. */
-async function buildContext(lastText: string, googleEnv: GoogleEnv, notionRepo: NotionRepo | undefined): Promise<string | undefined> {
+ * more than one source (and, as of Step 8, more than one Google account) now. */
+async function buildContext(lastText: string, googleAccounts: GoogleAccountEnv[], notionRepo: NotionRepo | undefined): Promise<string | undefined> {
   const blocks: string[] = [];
 
-  if (needsCalendarContext(lastText)) blocks.push(await buildCalendarContext(googleEnv));
-  if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(googleEnv, lastText));
+  if (needsCalendarContext(lastText)) blocks.push(await buildCalendarContext(googleAccounts));
+  if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(googleAccounts, lastText));
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
 
   return blocks.length > 0 ? blocks.join("\n\n---\n\n") : undefined;
@@ -47,7 +47,7 @@ async function buildContext(lastText: string, googleEnv: GoogleEnv, notionRepo: 
  */
 export async function runChat(
   env: LlmEnv,
-  googleEnv: GoogleEnv,
+  googleAccounts: GoogleAccountEnv[],
   notionRepo: NotionRepo | undefined,
   messages: ChatTurn[]
 ): Promise<ChatResult> {
@@ -56,7 +56,7 @@ export async function runChat(
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = await buildContext(lastText, googleEnv, notionRepo);
+  const extraContext = await buildContext(lastText, googleAccounts, notionRepo);
 
   try {
     const text = await callModel(intended, env, messages, extraContext);

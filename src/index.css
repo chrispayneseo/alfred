@@ -21,6 +21,11 @@
 
   --color-claude: #b5673c;
   --color-chatgpt: #3c7e6b;
+
+  /* Google account attribution (Step 8) — muted, distinct from the
+     claude/chatgpt tags above since those mean something different. */
+  --color-account-a: #5b7a9d;
+  --color-account-b: #9d6b8f;
 }
 
 html {

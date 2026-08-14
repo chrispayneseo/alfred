@@ -1,6 +1,7 @@
 import { calendar_v3 } from "googleapis";
 import { createAuthenticatedClient } from "./client";
-import type { GoogleEnv } from "./env";
+import type { GoogleAccountEnv } from "./accounts";
+import { markAccountNeedsReconnect, markAccountOk } from "./accountStatus";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors";
 
 export interface CalendarEventRecord {
@@ -11,6 +12,8 @@ export interface CalendarEventRecord {
   end: string;
   allDay: boolean;
   location?: string;
+  /** Which connected account this event came from — Step 8 (multi-account). */
+  accountEmail: string;
 }
 
 export interface DateRange {
@@ -40,7 +43,7 @@ export function getTomorrowRange(): DateRange {
   return { start, end: addDays(start, 1) };
 }
 
-function mapEvent(event: calendar_v3.Schema$Event): CalendarEventRecord | undefined {
+function mapEvent(event: calendar_v3.Schema$Event, accountEmail: string): CalendarEventRecord | undefined {
   if (!event.id || event.status === "cancelled") return undefined;
   const start = event.start?.dateTime ?? event.start?.date;
   const end = event.end?.dateTime ?? event.end?.date;
@@ -53,16 +56,17 @@ function mapEvent(event: calendar_v3.Schema$Event): CalendarEventRecord | undefi
     end,
     allDay: !event.start?.dateTime,
     location: event.location ?? undefined,
+    accountEmail,
   };
 }
 
 /**
- * Lists events on the primary calendar between two dates (inclusive start,
- * exclusive end). This is the one entry point later steps — cross-referencing
- * calendar with email and Notion — should call; everything else in this file
- * is a convenience wrapper around it.
+ * Lists events on one account's primary calendar between two dates (inclusive
+ * start, exclusive end). Everything else in this file is either a
+ * convenience wrapper around this for a single account, or a multi-account
+ * merge built on top of it.
  */
-export async function listEvents(env: GoogleEnv, range: DateRange): Promise<CalendarEventRecord[]> {
+export async function listEvents(env: GoogleAccountEnv, range: DateRange): Promise<CalendarEventRecord[]> {
   if (!env.refreshToken) throw new GoogleNotConnectedError();
 
   const auth = createAuthenticatedClient(env);
@@ -76,17 +80,65 @@ export async function listEvents(env: GoogleEnv, range: DateRange): Promise<Cale
       singleEvents: true,
       orderBy: "startTime",
     });
-    return (res.data.items ?? []).map(mapEvent).filter((e): e is CalendarEventRecord => e !== undefined);
+    return (res.data.items ?? []).map((e) => mapEvent(e, env.email)).filter((e): e is CalendarEventRecord => e !== undefined);
   } catch (error) {
     if (isGoogleAuthError(error)) throw new GoogleReconnectRequiredError(error);
     throw error;
   }
 }
 
-export function getTodayEvents(env: GoogleEnv): Promise<CalendarEventRecord[]> {
+export function getTodayEvents(env: GoogleAccountEnv): Promise<CalendarEventRecord[]> {
   return listEvents(env, getTodayRange());
 }
 
-export function getTomorrowEvents(env: GoogleEnv): Promise<CalendarEventRecord[]> {
+export function getTomorrowEvents(env: GoogleAccountEnv): Promise<CalendarEventRecord[]> {
   return listEvents(env, getTomorrowRange());
+}
+
+export interface MultiAccountEvents {
+  events: CalendarEventRecord[];
+  /** Emails of connected accounts that need reconnecting — the merged
+   * `events` above still include everything from the accounts that worked. */
+  failedAccounts: string[];
+}
+
+/** Merges events across every connected account, sorted by start time. If a
+ * specific account's token needs reconnecting, its events are simply left
+ * out (and it's reported in failedAccounts) rather than failing the whole
+ * request — so one stale token doesn't take down a still-working account.
+ * Only throws GoogleReconnectRequiredError if EVERY connected account fails,
+ * matching the single-account "reconnect" screen when nothing works at all. */
+export async function listEventsAllAccounts(accounts: GoogleAccountEnv[], range: DateRange): Promise<MultiAccountEvents> {
+  if (accounts.length === 0) throw new GoogleNotConnectedError();
+
+  const failedAccounts: string[] = [];
+  const perAccount = await Promise.all(
+    accounts.map(async (account) => {
+      try {
+        const events = await listEvents(account, range);
+        markAccountOk(account.email);
+        return events;
+      } catch (error) {
+        if (error instanceof GoogleReconnectRequiredError) {
+          markAccountNeedsReconnect(account.email);
+          failedAccounts.push(account.email);
+          return [];
+        }
+        throw error;
+      }
+    })
+  );
+
+  if (failedAccounts.length === accounts.length) throw new GoogleReconnectRequiredError();
+
+  const events = perAccount.flat().sort((a, b) => a.start.localeCompare(b.start));
+  return { events, failedAccounts };
+}
+
+export function getTodayEventsAllAccounts(accounts: GoogleAccountEnv[]): Promise<MultiAccountEvents> {
+  return listEventsAllAccounts(accounts, getTodayRange());
+}
+
+export function getTomorrowEventsAllAccounts(accounts: GoogleAccountEnv[]): Promise<MultiAccountEvents> {
+  return listEventsAllAccounts(accounts, getTomorrowRange());
 }

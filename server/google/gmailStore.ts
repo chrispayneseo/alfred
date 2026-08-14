@@ -8,6 +8,7 @@ import path from "node:path";
 
 export interface EmailRecord {
   id: string;
+  accountEmail: string;
   threadId: string;
   sender: string;
   senderEmail: string;
@@ -30,13 +31,29 @@ const DB_PATH = path.join(DATA_DIR, "gmail.db");
 
 let db: DatabaseSync | undefined;
 
+function rowKey(accountEmail: string, id: string): string {
+  return `${accountEmail}:${id}`;
+}
+
 function getDb(): DatabaseSync {
   if (db) return db;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   db = new DatabaseSync(DB_PATH);
+
+  // Step 5's schema keyed emails by Gmail message id alone, which is only
+  // guaranteed unique within one account's mailbox. Step 8 (multi-account)
+  // needs (accountEmail, id) instead. This is a cache, not source of truth
+  // (see Step 5/7), so upgrading in place just rebuilds the table — a re-sync
+  // repopulates it — rather than writing a real column migration.
+  const columns = db.prepare(`PRAGMA table_info(emails)`).all() as { name: string }[];
+  const hasOldSchema = columns.length > 0 && !columns.some((c) => c.name === "accountEmail");
+  if (hasOldSchema) db.exec(`DROP TABLE emails;`);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS emails (
-      id TEXT PRIMARY KEY,
+      rowKey TEXT PRIMARY KEY,
+      accountEmail TEXT NOT NULL,
+      id TEXT NOT NULL,
       threadId TEXT NOT NULL,
       sender TEXT NOT NULL,
       senderEmail TEXT NOT NULL,
@@ -56,6 +73,7 @@ function getDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_emails_scanned ON emails(scanned);
     CREATE INDEX IF NOT EXISTS idx_emails_actionable ON emails(actionable);
     CREATE INDEX IF NOT EXISTS idx_emails_date ON emails(date);
+    CREATE INDEX IF NOT EXISTS idx_emails_account ON emails(accountEmail);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
   return db;
@@ -65,6 +83,7 @@ function getDb(): DatabaseSync {
 function toRecord(row: any): EmailRecord {
   return {
     id: row.id,
+    accountEmail: row.accountEmail,
     threadId: row.threadId,
     sender: row.sender,
     senderEmail: row.senderEmail,
@@ -85,6 +104,7 @@ function toRecord(row: any): EmailRecord {
 
 export interface EmailMetadataInput {
   id: string;
+  accountEmail: string;
   threadId: string;
   sender: string;
   senderEmail: string;
@@ -93,17 +113,18 @@ export interface EmailMetadataInput {
   snippet: string;
 }
 
-/** Inserts new email metadata; a message already stored (by id) is left untouched
- * (its scan state shouldn't be reset by re-running sync over overlapping ranges). */
+/** Inserts new email metadata; a message already stored (by account + id) is
+ * left untouched (its scan state shouldn't be reset by re-running sync over
+ * overlapping ranges). */
 export function upsertEmailMetadata(records: EmailMetadataInput[]): void {
   if (records.length === 0) return;
   const stmt = getDb().prepare(`
-    INSERT INTO emails (id, threadId, sender, senderEmail, subject, date, snippet)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO NOTHING
+    INSERT INTO emails (rowKey, accountEmail, id, threadId, sender, senderEmail, subject, date, snippet)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(rowKey) DO NOTHING
   `);
   for (const r of records) {
-    stmt.run(r.id, r.threadId, r.sender, r.senderEmail, r.subject, r.date, r.snippet);
+    stmt.run(rowKey(r.accountEmail, r.id), r.accountEmail, r.id, r.threadId, r.sender, r.senderEmail, r.subject, r.date, r.snippet);
   }
 }
 
@@ -147,10 +168,10 @@ export interface ScanResult {
   draftId?: string;
 }
 
-export function markScanned(id: string, result: ScanResult): void {
+export function markScanned(accountEmail: string, id: string, result: ScanResult): void {
   getDb()
     .prepare(
-      `UPDATE emails SET scanned = 1, actionable = ?, needsReply = ?, hasDeadline = ?, deadlineDate = ?, project = ?, itemType = ?, notionPageId = ?, draftId = ? WHERE id = ?`
+      `UPDATE emails SET scanned = 1, actionable = ?, needsReply = ?, hasDeadline = ?, deadlineDate = ?, project = ?, itemType = ?, notionPageId = ?, draftId = ? WHERE rowKey = ?`
     )
     .run(
       result.actionable ? 1 : 0,
@@ -161,7 +182,7 @@ export function markScanned(id: string, result: ScanResult): void {
       result.itemType ?? null,
       result.notionPageId ?? null,
       result.draftId ?? null,
-      id
+      rowKey(accountEmail, id)
     );
 }
 
@@ -188,6 +209,12 @@ export function getAllEmails(): EmailRecord[] {
  * everything / disconnect" flow. Does not touch Gmail or Notion themselves. */
 export function clearAllEmails(): void {
   getDb().exec(`DELETE FROM emails; DELETE FROM meta;`);
+}
+
+/** Clears just one account's cached emails — used when disconnecting a
+ * single account (Step 8) rather than the full wipe. */
+export function clearEmailsForAccount(accountEmail: string): void {
+  getDb().prepare(`DELETE FROM emails WHERE accountEmail = ?`).run(accountEmail);
 }
 
 export function getMeta(key: string): string | undefined {

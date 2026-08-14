@@ -6,13 +6,23 @@ export interface CalendarApiEvent {
   end: string;
   allDay: boolean;
   location?: string;
+  /** Which connected Google account this event is from (Step 8). */
+  accountEmail: string;
+}
+
+export interface MultiAccountEvents {
+  events: CalendarApiEvent[];
+  /** Emails of connected accounts whose events couldn't be included this
+   * time (needs reconnecting) — the events above are still from whichever
+   * accounts did work. */
+  failedAccounts: string[];
 }
 
 export interface CalendarStatus {
   connected: boolean;
 }
 
-async function fetchEvents(path: string): Promise<CalendarApiEvent[]> {
+async function fetchEvents(path: string): Promise<MultiAccountEvents> {
   const res = await fetch(path);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -24,11 +34,11 @@ async function fetchEvents(path: string): Promise<CalendarApiEvent[]> {
   return res.json();
 }
 
-export function fetchTodayEvents(): Promise<CalendarApiEvent[]> {
+export function fetchTodayEvents(): Promise<MultiAccountEvents> {
   return fetchEvents("/api/calendar/today");
 }
 
-export function fetchTomorrowEvents(): Promise<CalendarApiEvent[]> {
+export function fetchTomorrowEvents(): Promise<MultiAccountEvents> {
   return fetchEvents("/api/calendar/tomorrow");
 }
 

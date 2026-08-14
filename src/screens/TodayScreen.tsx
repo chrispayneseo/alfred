@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { AccountTag } from "../components/AccountTag";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { Nudges } from "../components/Nudges";
 import { Screen } from "../components/Screen";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
+import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
+import { buildAccountColorMap } from "../lib/accountColor";
 import { mockNotes, mockTasks } from "../mocks/today";
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
@@ -23,20 +26,33 @@ const OAUTH_NOTICE: Record<string, string> = {
   error: "Something went wrong connecting your calendar — try again.",
 };
 
-function EventList({ events }: { events: CalendarApiEvent[] }) {
+function EventList({
+  events,
+  colorMap,
+  showAccountTags,
+}: {
+  events: CalendarApiEvent[];
+  colorMap: ReturnType<typeof buildAccountColorMap>;
+  showAccountTags: boolean;
+}) {
   if (events.length === 0) {
     return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing scheduled.</p>;
   }
   return (
     <ul className="space-y-3">
       {events.map((event) => (
-        <li key={event.id} className="flex items-baseline gap-3">
+        <li key={`${event.accountEmail}:${event.id}`} className="flex items-baseline gap-3">
           <span className="w-14 shrink-0 text-xs tabular-nums text-ink-soft dark:text-ink-soft-dark">
             {formatEventTime(event)}
           </span>
           <div>
             <p className="text-sm text-ink dark:text-ink-dark">{event.title}</p>
-            {event.location && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{event.location}</p>}
+            <div className="flex items-center gap-2">
+              {event.location && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{event.location}</p>}
+              {showAccountTags && (
+                <AccountTag email={event.accountEmail} color={colorMap.get(event.accountEmail) ?? "a"} />
+              )}
+            </div>
           </div>
         </li>
       ))}
@@ -49,6 +65,8 @@ export function TodayScreen() {
   const [calendarState, setCalendarState] = useState<CalendarState>("loading");
   const [todayEvents, setTodayEvents] = useState<CalendarApiEvent[]>([]);
   const [tomorrowEvents, setTomorrowEvents] = useState<CalendarApiEvent[]>([]);
+  const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
+  const [failedAccounts, setFailedAccounts] = useState<string[]>([]);
   const [oauthNotice, setOauthNotice] = useState<string>();
 
   useEffect(() => {
@@ -61,10 +79,12 @@ export function TodayScreen() {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchTodayEvents(), fetchTomorrowEvents()])
-      .then(([today, tomorrow]) => {
-        setTodayEvents(today);
-        setTomorrowEvents(tomorrow);
+    Promise.all([fetchTodayEvents(), fetchTomorrowEvents(), fetchGoogleAccounts()])
+      .then(([today, tomorrow, accts]) => {
+        setTodayEvents(today.events);
+        setTomorrowEvents(tomorrow.events);
+        setFailedAccounts([...new Set([...today.failedAccounts, ...tomorrow.failedAccounts])]);
+        setAccounts(accts);
         setCalendarState("ok");
       })
       .catch((error) => {
@@ -75,6 +95,9 @@ export function TodayScreen() {
         }
       });
   }, [oauthNotice]);
+
+  const accountColorMap = buildAccountColorMap(accounts);
+  const showAccountTags = accounts.length > 1;
 
   return (
     <Screen
@@ -133,13 +156,22 @@ export function TodayScreen() {
 
         {calendarState === "ok" && (
           <>
-            <EventList events={todayEvents} />
+            <EventList events={todayEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} />
             <div className="mt-5">
               <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-faint/80 dark:text-ink-faint-dark/80">
                 Tomorrow
               </h3>
-              <EventList events={tomorrowEvents} />
+              <EventList events={tomorrowEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} />
             </div>
+            {failedAccounts.length > 0 && (
+              <p className="mt-4 text-xs text-ink-faint dark:text-ink-faint-dark">
+                {failedAccounts.join(", ")} needs reconnecting —{" "}
+                <Link to="/settings" className="underline">
+                  see Settings
+                </Link>
+                .
+              </p>
+            )}
           </>
         )}
       </section>

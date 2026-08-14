@@ -9,13 +9,16 @@
 // the right choice). Step 5's verification pass greps this constraint.
 import { gmail_v1 } from "googleapis";
 import { createAuthenticatedClient } from "./client";
-import type { GoogleEnv } from "./env";
+import type { GoogleAccountEnv } from "./accounts";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors";
 
-/** Deep link back to the thread in the Gmail web UI, stored on Notion pages
- * filed from email so the user can jump straight to the original message. */
-export function gmailThreadUrl(threadId: string): string {
-  return `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
+/** Deep link back to the thread in the Gmail web UI. Takes the account's
+ * email (Step 8) rather than assuming /u/0/ — the browser's first-signed-in
+ * Google account is unrelated to which of Alfred's connected accounts a
+ * given thread actually belongs to, so a hardcoded /u/0/ can silently open
+ * the wrong mailbox once more than one account is connected. */
+export function gmailThreadUrl(threadId: string, accountEmail: string): string {
+  return `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/#inbox/${threadId}`;
 }
 
 export interface GmailMessageRef {
@@ -32,6 +35,8 @@ export interface EmailMetadata {
   date: string; // ISO
   snippet: string;
   labelIds: string[];
+  /** Which connected account this message belongs to — Step 8 (multi-account). */
+  accountEmail: string;
 }
 
 export interface ReplyHeaders {
@@ -41,7 +46,7 @@ export interface ReplyHeaders {
   references?: string;
 }
 
-function getClient(env: GoogleEnv): gmail_v1.Gmail {
+function getClient(env: GoogleAccountEnv): gmail_v1.Gmail {
   if (!env.refreshToken) throw new GoogleNotConnectedError();
   return new gmail_v1.Gmail({ auth: createAuthenticatedClient(env) });
 }
@@ -68,7 +73,7 @@ async function withAuthErrorMapping<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Lists message refs in the inbox after a given date (paginated). */
 export async function listInboxMessageIds(
-  env: GoogleEnv,
+  env: GoogleAccountEnv,
   options: { afterDate: Date; pageToken?: string; pageSize?: number }
 ): Promise<{ refs: GmailMessageRef[]; nextPageToken?: string; resultSizeEstimate?: number }> {
   const gmail = getClient(env);
@@ -94,7 +99,7 @@ export async function listInboxMessageIds(
 }
 
 /** Cheap metadata-only fetch — no body. */
-export async function getMessageMetadata(env: GoogleEnv, id: string): Promise<EmailMetadata> {
+export async function getMessageMetadata(env: GoogleAccountEnv, id: string): Promise<EmailMetadata> {
   const gmail = getClient(env);
   return withAuthErrorMapping(async () => {
     const res = await gmail.users.messages.get({
@@ -116,12 +121,13 @@ export async function getMessageMetadata(env: GoogleEnv, id: string): Promise<Em
       date: dateHeader ? new Date(dateHeader).toISOString() : new Date().toISOString(),
       snippet: res.data.snippet ?? "",
       labelIds: res.data.labelIds ?? [],
+      accountEmail: env.email,
     };
   });
 }
 
 /** Headers needed to compose a threaded reply — fetched on demand at draft time. */
-export async function getReplyHeaders(env: GoogleEnv, id: string): Promise<ReplyHeaders> {
+export async function getReplyHeaders(env: GoogleAccountEnv, id: string): Promise<ReplyHeaders> {
   const gmail = getClient(env);
   return withAuthErrorMapping(async () => {
     const res = await gmail.users.messages.get({
@@ -172,7 +178,7 @@ function extractPlainText(part: gmail_v1.Schema$MessagePart | undefined): string
 
 /** Fetches the full body on demand — never stored, only used transiently
  * (action-item scanning, Q&A grounding). */
-export async function getMessageBody(env: GoogleEnv, id: string): Promise<string> {
+export async function getMessageBody(env: GoogleAccountEnv, id: string): Promise<string> {
   const gmail = getClient(env);
   return withAuthErrorMapping(async () => {
     const res = await gmail.users.messages.get({ userId: "me", id, format: "full" });
@@ -181,7 +187,7 @@ export async function getMessageBody(env: GoogleEnv, id: string): Promise<string
 }
 
 /** Live Gmail search (not the local metadata cache) — for Q&A grounding. */
-export async function searchMessages(env: GoogleEnv, query: string, maxResults: number): Promise<EmailMetadata[]> {
+export async function searchMessages(env: GoogleAccountEnv, query: string, maxResults: number): Promise<EmailMetadata[]> {
   const gmail = getClient(env);
   return withAuthErrorMapping(async () => {
     const res = await gmail.users.messages.list({ userId: "me", q: query, maxResults });
@@ -208,9 +214,10 @@ function buildRawMimeMessage(headers: ReplyHeaders, bodyText: string): string {
 /**
  * Creates a Gmail draft reply in the original thread. DRAFT ONLY — this calls
  * users.drafts.create and nothing else; the user sends it themselves from Gmail.
+ * `env` must be the SAME account the original message belongs to.
  */
 export async function createDraftReply(
-  env: GoogleEnv,
+  env: GoogleAccountEnv,
   args: { threadId: string; replyHeaders: ReplyHeaders; bodyText: string }
 ): Promise<string> {
   const gmail = getClient(env);

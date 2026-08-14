@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { GoogleEnv } from "../google/env";
+import type { GoogleAccountEnv } from "../google/accounts";
+import { markAccountNeedsReconnect, markAccountOk } from "../google/accountStatus";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError, toGoogleErrorCode } from "../google/errors";
 import { createDraftReply, getMessageBody, getReplyHeaders, gmailThreadUrl } from "../google/gmail";
 import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gmailStore";
@@ -26,6 +27,10 @@ const EmailActionSchema = z.object({
 });
 export type EmailAction = z.infer<typeof EmailActionSchema>;
 
+// Deliberately no mention of which account an email arrived on — a
+// work-relevant email should file under Job even if it happened to land in
+// the personal inbox, and vice versa (Step 8). The classifier only ever sees
+// sender/subject/snippet, so account origin was never part of its signal.
 const CLASSIFY_SYSTEM_PROMPT = `You triage inbox email for a personal assistant app. Given an email's sender, subject, and preview snippet, decide:
 - actionable: does this email need the person's attention (a reply, a decision, tracking a deadline) — as opposed to something to skim or ignore (newsletters, receipts, automated notices)?
 - needsReply: does this specifically expect a reply from the person?
@@ -79,16 +84,18 @@ export function getScanStatus(): ScanStatus {
   return { ...job };
 }
 
-/** Scans up to `limit` unscanned emails: classifies each with the routed
- * model (Step 3's routing/fallback), files actionable ones into Notion, and
- * creates a Gmail draft (never sends) for anything needing a reply. Runs in
- * the background — call getScanStatus() to poll progress. */
-export function startScan(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionRepo, limit: number): ScanStatus {
+/** Scans up to `limit` unscanned emails, regardless of which connected
+ * account they came from: classifies each with the routed model (Step 3's
+ * routing/fallback), files actionable ones into Notion, and creates a Gmail
+ * draft (never sends) for anything needing a reply — using the SAME account
+ * the email arrived on. Runs in the background — call getScanStatus() to
+ * poll progress. */
+export function startScan(llmEnv: LlmEnv, accounts: GoogleAccountEnv[], notionRepo: NotionRepo, limit: number): ScanStatus {
   if (job.running) return getScanStatus();
   const batch = getUnscannedEmails(limit);
   job = { running: true, processed: 0, total: batch.length };
 
-  void runScan(llmEnv, googleEnv, notionRepo, batch).catch((error) => {
+  void runScan(llmEnv, accounts, notionRepo, batch).catch((error) => {
     console.error("[emailScan] scan failed:", error);
     job = { ...job, running: false, error: toGoogleErrorCode(error) };
   });
@@ -96,33 +103,55 @@ export function startScan(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: Noti
   return getScanStatus();
 }
 
-async function runScan(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionRepo, batch: EmailRecord[]): Promise<void> {
+async function runScan(llmEnv: LlmEnv, accounts: GoogleAccountEnv[], notionRepo: NotionRepo, batch: EmailRecord[]): Promise<void> {
+  const accountByEmail = new Map(accounts.map((a) => [a.email, a]));
+  // If an account's token turns out to need reconnecting mid-batch, don't
+  // keep retrying Gmail calls against it for every remaining email from that
+  // account — just skip them (still marked scanned, as "nothing found",
+  // same as any other per-email failure) and keep processing the other
+  // account's emails normally (Step 8: one stale token shouldn't stall both).
+  const brokenAccounts = new Set<string>();
+
   for (const email of batch) {
+    const account = accountByEmail.get(email.accountEmail);
     try {
-      await scanOne(llmEnv, googleEnv, notionRepo, email);
+      if (!account || brokenAccounts.has(email.accountEmail)) {
+        markScanned(email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
+      } else {
+        await scanOne(llmEnv, account, notionRepo, email);
+        markAccountOk(account.email);
+      }
     } catch (error) {
-      // A Google auth error means every remaining email will fail the same
-      // way — stop the batch and surface "reconnect" rather than grinding
-      // through the rest marking each one as a generic failure.
-      if (error instanceof GoogleNotConnectedError || error instanceof GoogleReconnectRequiredError) throw error;
-      console.error(`[emailScan] failed to scan ${email.id}:`, error);
-      markScanned(email.id, { actionable: false, needsReply: false, hasDeadline: false });
+      if (error instanceof GoogleNotConnectedError || error instanceof GoogleReconnectRequiredError) {
+        console.error(`[emailScan] account ${email.accountEmail} needs reconnecting — skipping its remaining emails this batch`);
+        markAccountNeedsReconnect(email.accountEmail);
+        brokenAccounts.add(email.accountEmail);
+      } else {
+        console.error(`[emailScan] failed to scan ${email.id}:`, error);
+      }
+      markScanned(email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
     }
     job = { ...job, processed: job.processed + 1 };
   }
-  job = { ...job, running: false };
+
+  // Only surface a job-level error if every account hit in this batch was
+  // broken — a partial failure just quietly processes fewer emails, visible
+  // per-account in Settings rather than blocking the whole scan.
+  const accountsInBatch = new Set(batch.map((e) => e.accountEmail));
+  const allFailed = accountsInBatch.size > 0 && [...accountsInBatch].every((email) => brokenAccounts.has(email));
+  job = { ...job, running: false, error: allFailed ? "reconnect_required" : undefined };
 }
 
-async function scanOne(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionRepo, email: EmailRecord): Promise<void> {
+async function scanOne(llmEnv: LlmEnv, account: GoogleAccountEnv, notionRepo: NotionRepo, email: EmailRecord): Promise<void> {
   if (looksAutomated(email)) {
-    markScanned(email.id, { actionable: false, needsReply: false, hasDeadline: false });
+    markScanned(email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
     return;
   }
 
   const action = await classifyEmailAction(llmEnv, email);
   let notionPageId: string | undefined;
   let draftId: string | undefined;
-  const emailLink = gmailThreadUrl(email.threadId);
+  const emailLink = gmailThreadUrl(email.threadId, email.accountEmail);
 
   if (action.actionable && action.itemType !== "none") {
     const itemType: "task" | "note" = action.itemType;
@@ -134,14 +163,14 @@ async function scanOne(llmEnv: LlmEnv, googleEnv: GoogleEnv, notionRepo: NotionR
 
   if (action.needsReply) {
     const [fullBody, replyHeaders] = await Promise.all([
-      getMessageBody(googleEnv, email.id),
-      getReplyHeaders(googleEnv, email.id),
+      getMessageBody(account, email.id),
+      getReplyHeaders(account, email.id),
     ]);
     const draftText = await generateReplyDraft(llmEnv, email, fullBody);
-    draftId = await createDraftReply(googleEnv, { threadId: email.threadId, replyHeaders, bodyText: draftText });
+    draftId = await createDraftReply(account, { threadId: email.threadId, replyHeaders, bodyText: draftText });
   }
 
-  markScanned(email.id, {
+  markScanned(email.accountEmail, email.id, {
     actionable: action.actionable,
     needsReply: action.needsReply,
     hasDeadline: action.hasDeadline,
