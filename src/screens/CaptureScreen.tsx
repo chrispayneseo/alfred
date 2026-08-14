@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Screen } from "../components/Screen";
 import { submitCapture } from "../integrations/notion/api";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
+import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
 interface RecentCapture {
   id: string;
@@ -19,6 +20,14 @@ export function CaptureScreen() {
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleTranscribed = useCallback((transcript: string) => {
+    const trimmed = transcript.trim();
+    if (!trimmed) return;
+    setText((prev) => (prev.trim() ? `${prev.trim()}\n${trimmed}` : trimmed));
+    inputRef.current?.focus();
+  }, []);
+  const voice = useVoiceRecorder(handleTranscribed);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -85,15 +94,35 @@ export function CaptureScreen() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled
-            aria-disabled
-            title="Voice capture — coming soon"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-line text-ink-faint opacity-50 dark:border-line-dark dark:text-ink-faint-dark"
+            onClick={voice.state === "recording" ? voice.stop : voice.start}
+            disabled={voice.state === "transcribing" || voice.state === "unsupported"}
+            aria-label={
+              voice.state === "recording"
+                ? "Stop recording"
+                : voice.state === "transcribing"
+                  ? "Transcribing…"
+                  : "Start voice capture"
+            }
+            title={voice.state === "unsupported" ? "Voice capture isn't supported in this browser" : undefined}
+            className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+              voice.state === "recording"
+                ? "border-claude bg-claude/10 text-claude"
+                : "border-line text-ink-faint hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
+            }`}
           >
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-              <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3" strokeLinecap="round" />
-            </svg>
+            {voice.state === "recording" && (
+              <span className="absolute inset-0 animate-ping rounded-full bg-claude/30" aria-hidden="true" />
+            )}
+            {voice.state === "transcribing" ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" className="relative" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3" strokeLinecap="round" />
+              </svg>
+            )}
           </button>
           <button
             type="button"
@@ -118,6 +147,14 @@ export function CaptureScreen() {
             {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
           </button>
         </div>
+
+        {voice.state === "recording" && (
+          <p className="text-xs text-claude">Recording… tap the mic again to stop.</p>
+        )}
+        {voice.state === "transcribing" && (
+          <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Transcribing…</p>
+        )}
+        {voice.error && <p className="text-xs text-claude">{voice.error}</p>}
 
         {error && <p className="text-xs text-claude">{error}</p>}
 

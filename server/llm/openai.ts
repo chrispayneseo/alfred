@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import type { ChatTurn } from "./types.js";
 
 let client: OpenAI | undefined;
@@ -23,6 +23,25 @@ export async function chatGptChat(apiKey: string, model: string, messages: ChatT
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error("ChatGPT returned no text content");
   return text;
+}
+
+function extensionForMimeType(mimeType: string): string {
+  if (mimeType.includes("webm")) return "webm";
+  if (mimeType.includes("mp4") || mimeType.includes("m4a")) return "mp4";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
+}
+
+/** Transcribes a short voice-capture recording via Whisper. Used only for
+ * the Capture screen's voice input — the returned text is shown to the user
+ * to review/edit before it enters the normal capture pipeline, never filed
+ * automatically. */
+export async function transcribeAudio(apiKey: string, audio: Buffer, mimeType: string): Promise<string> {
+  const openai = getOpenAiClient(apiKey);
+  const file = await toFile(audio, `capture.${extensionForMimeType(mimeType)}`, { type: mimeType });
+  const response = await openai.audio.transcriptions.create({ file, model: "whisper-1" });
+  return response.text;
 }
 
 /** Single-turn completion with a caller-supplied system prompt — no Alfred

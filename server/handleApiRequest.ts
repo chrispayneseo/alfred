@@ -16,6 +16,7 @@ import { getScanStatus, startScan } from "./llm/emailScan.js";
 import { runChat } from "./llm/chat.js";
 import { classifyWithModel } from "./llm/classify.js";
 import { loadLlmEnv } from "./llm/env.js";
+import { transcribeAudio } from "./llm/openai.js";
 import type { ChatTurn } from "./llm/types.js";
 import { runNudgeCheck } from "./nudges/check.js";
 import { createNotionClient } from "./notion/client.js";
@@ -47,6 +48,11 @@ function json(status: number, body: unknown): ApiResult {
 function redirect(location: string): ApiResult {
   return { kind: "redirect", location };
 }
+
+// Generous ceiling for a base64-encoded short voice-capture clip (a few
+// minutes at most) — well under Vercel's request body limits, just a sanity
+// check against something going wrong client-side.
+const MAX_AUDIO_BASE64_CHARS = 15_000_000;
 
 function isChatTurn(value: unknown): value is ChatTurn {
   if (typeof value !== "object" || value === null) return false;
@@ -86,6 +92,26 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
           return json(502, { error: "both_unavailable" });
         }
         throw error;
+      }
+    }
+
+    if (method === "POST" && pathname === "/api/capture/transcribe") {
+      if (!llmEnv.openaiApiKey) {
+        return json(503, { error: "Voice capture isn't configured yet — OPENAI_API_KEY is missing." });
+      }
+      const body = await readBody();
+      const audioBase64 = typeof body.audio === "string" ? body.audio : "";
+      const mimeType = typeof body.mimeType === "string" ? body.mimeType : "audio/webm";
+      if (!audioBase64) return json(400, { error: "No audio was recorded." });
+      if (audioBase64.length > MAX_AUDIO_BASE64_CHARS) return json(413, { error: "Recording is too long." });
+
+      try {
+        const buffer = Buffer.from(audioBase64, "base64");
+        const text = await transcribeAudio(llmEnv.openaiApiKey, buffer, mimeType);
+        return json(200, { text: text.trim() });
+      } catch (error) {
+        console.error("[capture] transcription failed:", error);
+        return json(500, { error: "Couldn't transcribe that recording. Try again." });
       }
     }
 
