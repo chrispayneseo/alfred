@@ -39,24 +39,29 @@ function EventList({
   if (events.length === 0) {
     return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing scheduled.</p>;
   }
+  const now = Date.now();
+
   return (
     <ul className="space-y-3">
-      {events.map((event) => (
-        <li key={`${event.accountEmail}:${event.id}`} className="flex items-baseline gap-3">
-          <span className="w-14 shrink-0 text-xs tabular-nums text-ink-soft dark:text-ink-soft-dark">
-            {formatEventTime(event)}
-          </span>
-          <div>
-            <p className="text-sm text-ink dark:text-ink-dark">{event.title}</p>
-            <div className="flex items-center gap-2">
-              {event.location && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{event.location}</p>}
-              {showAccountTags && (
-                <AccountTag email={event.accountEmail} color={colorMap.get(event.accountEmail) ?? "a"} />
-              )}
+      {events.map((event) => {
+        const isPast = !event.allDay && new Date(event.end).getTime() < now;
+        return (
+          <li key={`${event.accountEmail}:${event.id}`} className={`flex items-baseline gap-3 ${isPast ? "opacity-40" : ""}`}>
+            <span className="w-14 shrink-0 text-xs tabular-nums text-ink-soft dark:text-ink-soft-dark">
+              {formatEventTime(event)}
+            </span>
+            <div>
+              <p className="text-sm text-ink dark:text-ink-dark">{event.title}</p>
+              <div className="flex items-center gap-2">
+                {event.location && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{event.location}</p>}
+                {showAccountTags && (
+                  <AccountTag email={event.accountEmail} color={colorMap.get(event.accountEmail) ?? "a"} />
+                )}
+              </div>
             </div>
-          </div>
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }

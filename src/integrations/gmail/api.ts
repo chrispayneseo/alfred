@@ -81,3 +81,7 @@ export async function fetchFlaggedEmails(): Promise<FlaggedEmail[]> {
   if (!res.ok) return [];
   return res.json();
 }
+
+export function dismissFlaggedEmail(accountEmail: string, id: string): Promise<void> {
+  return postJson("/api/gmail/flagged/dismiss", { accountEmail, id });
+}

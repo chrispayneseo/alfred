@@ -112,6 +112,15 @@ export async function getFlaggedEmails(env: Env, limit = 50): Promise<EmailRecor
   return rows.map(toRecord);
 }
 
+/** Removes an email from the Flagged list without touching the actual
+ * Gmail message, any draft already created for it, or any Notion page it
+ * was filed to — those are separately manageable (Gmail directly, Browse's
+ * task/note remove). Just tells Alfred to stop surfacing this one. */
+export async function dismissFlaggedEmail(env: Env, accountEmail: string, id: string): Promise<void> {
+  const sql = await db(env);
+  await sql.query("UPDATE gmail_emails SET actionable = false WHERE row_key = $1", [rowKey(accountEmail, id)]);
+}
+
 export interface ScanResult {
   actionable: boolean;
   needsReply: boolean;

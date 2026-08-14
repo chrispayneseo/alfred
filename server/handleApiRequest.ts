@@ -11,7 +11,7 @@ import { loadGoogleEnv } from "./google/env.js";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors.js";
 import { exchangeCodeForRefreshToken, getAuthUrl, isValidState, revokeToken } from "./google/oauth.js";
 import { getSyncStatus, startSync } from "./google/gmailSync.js";
-import { clearEmailsForAccount, countFlagged, countTotal, countUnscanned, getFlaggedEmails, getMeta } from "./google/gmailStore.js";
+import { clearEmailsForAccount, countFlagged, countTotal, countUnscanned, dismissFlaggedEmail, getFlaggedEmails, getMeta } from "./google/gmailStore.js";
 import { getScanStatus, startScan } from "./llm/emailScan.js";
 import { runChat } from "./llm/chat.js";
 import { classifyWithModel } from "./llm/classify.js";
@@ -196,6 +196,14 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
     if (method === "GET" && pathname === "/api/gmail/flagged") {
       return json(200, await getFlaggedEmails(env));
+    }
+
+    if (method === "POST" && pathname === "/api/gmail/flagged/dismiss") {
+      const body = await readBody();
+      if (typeof body.accountEmail === "string" && typeof body.id === "string") {
+        await dismissFlaggedEmail(env, body.accountEmail, body.id);
+      }
+      return json(200, { ok: true });
     }
 
     if (method === "POST" && pathname === "/api/nudges/check") {

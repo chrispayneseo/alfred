@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  dismissFlaggedEmail,
   fetchFlaggedEmails,
   fetchGmailScanStatus,
   fetchGmailStatus,
@@ -45,10 +46,12 @@ function FlaggedItem({
   email,
   colorMap,
   showAccountTag,
+  onDismiss,
 }: {
   email: FlaggedEmail;
   colorMap: ReturnType<typeof buildAccountColorMap>;
   showAccountTag: boolean;
+  onDismiss: (email: FlaggedEmail) => void;
 }) {
   const reasons = [
     email.needsReply ? "Reply needed" : undefined,
@@ -66,8 +69,17 @@ function FlaggedItem({
         >
           {email.subject}
         </a>
-        <span className="shrink-0 text-[11px] text-ink-faint dark:text-ink-faint-dark">
-          {formatEmailDate(email.date)}
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-[11px] text-ink-faint dark:text-ink-faint-dark">{formatEmailDate(email.date)}</span>
+          <button
+            onClick={() => onDismiss(email)}
+            aria-label="Remove from flagged"
+            className="flex h-4 w-4 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+          >
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
         </span>
       </div>
       <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{email.sender}</p>
@@ -141,6 +153,16 @@ export function GmailFlagged() {
       pollUntilDone(fetchGmailScanStatus, setScanStatus);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Couldn't start scan.");
+    }
+  }
+
+  async function handleDismiss(email: FlaggedEmail) {
+    const prev = flagged;
+    setFlagged((f) => f.filter((e) => !(e.accountEmail === email.accountEmail && e.id === email.id)));
+    try {
+      await dismissFlaggedEmail(email.accountEmail, email.id);
+    } catch {
+      setFlagged(prev);
     }
   }
 
@@ -263,7 +285,13 @@ export function GmailFlagged() {
           {flagged.length > 0 && (
             <ul className="space-y-3">
               {flagged.map((email) => (
-                <FlaggedItem key={`${email.accountEmail}:${email.id}`} email={email} colorMap={accountColorMap} showAccountTag={showAccountTags} />
+                <FlaggedItem
+                  key={`${email.accountEmail}:${email.id}`}
+                  email={email}
+                  colorMap={accountColorMap}
+                  showAccountTag={showAccountTags}
+                  onDismiss={handleDismiss}
+                />
               ))}
             </ul>
           )}
