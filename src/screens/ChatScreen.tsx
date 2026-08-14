@@ -65,6 +65,7 @@ export function ChatScreen() {
           role: "assistant",
           text: result.text,
           model: result.model,
+          confidence: result.confidence,
           note: result.fellBack
             ? `${MODEL_LABEL[result.intendedModel]} unavailable — answered with ${MODEL_LABEL[result.model]}`
             : undefined,
@@ -98,8 +99,13 @@ export function ChatScreen() {
         {messages.map((message) => (
           <div key={message.id} className={message.role === "user" ? "text-right" : ""}>
             {message.role === "assistant" && message.model && (
-              <div className="mb-1">
+              <div className="mb-1 flex items-center gap-2">
                 <ModelTag model={message.model} />
+                {message.confidence === "inferred" && (
+                  <span className="text-[11px] text-ink-faint dark:text-ink-faint-dark">
+                    · Best guess based on past pattern
+                  </span>
+                )}
               </div>
             )}
             <p

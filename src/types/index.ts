@@ -1,4 +1,5 @@
 export type ModelSource = "claude" | "chatgpt";
+export type Confidence = "direct" | "inferred";
 
 export interface TaskItem {
   id: string;
@@ -20,6 +21,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   model?: ModelSource;
+  confidence?: Confidence;
   note?: string;
   isError?: boolean;
   createdAt: string;
