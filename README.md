@@ -10,7 +10,7 @@ All 8 planned steps are complete (multi-account Google, above, was the last of t
 
 ## Stack
 
-React + Vite + TypeScript + Tailwind CSS v4, installable PWA (manifest + service worker + Web Share Target). The backend logic lives in one shared handler (`server/handleApiRequest.ts`) driven by two adapters: `server/apiPlugin.ts` (a Vite dev-server plugin, local `npm run dev`) and `api/[...path].ts` (a Vercel Node.js serverless function, production) — so the Notion/Anthropic/OpenAI/Google credentials never ship to the browser and CORS isn't an issue, in both environments. Persistent state (Google OAuth tokens, the Gmail metadata cache, nudge push-history, sync/scan job status) lives in Postgres (Neon), the same database for local dev and production.
+React + Vite + TypeScript + Tailwind CSS v4, installable PWA (manifest + service worker + Web Share Target). The backend logic lives in one shared handler (`server/handleApiRequest.ts`) driven by two adapters: `server/apiPlugin.ts` (a Vite dev-server plugin, local `npm run dev`) and `api/index.ts` (a Vercel Node.js serverless function, production, reached via an explicit rewrite — see [Deployment](#deployment)) — so the Notion/Anthropic/OpenAI/Google credentials never ship to the browser and CORS isn't an issue, in both environments. Persistent state (Google OAuth tokens, the Gmail metadata cache, nudge push-history, sync/scan job status) lives in Postgres (Neon), the same database for local dev and production.
 
 ## Develop
 
@@ -55,8 +55,8 @@ Run `npm test` to run the standalone router unit tests (`server/llm/router.test.
 - `server/settings` — `export.ts` (`buildExport`, assembles the data-export payload) and `wipe.ts` (`wipeEverything`, the disconnect flow)
 - `server/handleApiRequest.ts` — the one place all `/api/*` routing/business logic lives, transport-agnostic (see [Deployment](#deployment))
 - `server/apiPlugin.ts` — thin Vite dev-server adapter over `handleApiRequest.ts` (local `npm run dev`)
-- `api/[...path].ts` — thin Vercel Node.js serverless adapter over the same `handleApiRequest.ts` (production)
-- `vercel.json` — function `maxDuration` + the SPA fallback rewrite `BrowserRouter` needs
+- `api/index.ts` — thin Vercel Node.js serverless adapter over the same `handleApiRequest.ts` (production), reached via an explicit rewrite rather than file-based routing (see [Deployment](#deployment))
+- `vercel.json` — function `maxDuration`, the `/api/*` rewrite, and the SPA fallback rewrite `BrowserRouter` needs
 - `src/sw.ts` — custom service worker (offline shell caching + Web Share Target handling)
 
 ## Notion workspace shape
@@ -130,9 +130,13 @@ Read-only (`calendar.readonly`), one or more accounts (see [Multiple Google acco
 
 **Two adapters, one handler.** `server/handleApiRequest.ts` is the actual `/api/*` logic — the same big route-matching function that used to live directly inside `apiPlugin.ts`'s middleware closure, now transport-agnostic: it takes `{method, pathname, searchParams, readBody, env, backgroundTask}` and returns a JSON or redirect result, with no assumptions about Node's raw request/response or Vercel's. Two thin adapters drive it:
 - `server/apiPlugin.ts` — unchanged local dev experience, still a Vite plugin, still `npm run dev`.
-- `api/[...path].ts` — a Vercel Node.js serverless catch-all, all `/api/*` in production.
+- `api/index.ts` — a single Vercel Node.js serverless function handling every `/api/*` route in production.
 
 Each adapter supplies its own `env` source (Vite's `loadEnv()` locally, `process.env` on Vercel — every `loadXEnv()` function across `server/*/env.ts` takes this as a plain parameter now, rather than calling `loadEnv()` itself) and its own `backgroundTask()` (fire-and-forget locally, since the dev process stays alive for the life of `npm run dev`; Vercel's `waitUntil()` in production, which extends a function invocation past its initial response, up to `maxDuration`).
+
+**Routing `/api/*` to one function.** The obvious approach — naming the file `api/[...path].ts` so Vercel treats it as a catch-all — turned out not to work: that bracket convention is Next.js-specific file routing, and plain ("other" framework) Vercel Functions don't honor it as a multi-segment catch-all. In practice a `[...path].ts` file there only matched a single path segment, and mangled the capture into a literal `...path` query key — single-segment routes like `/api/tasks` reached the function, but anything nested like `/api/google/accounts` 404'd at Vercel's routing layer before the function ever ran. The fix: a plain, statically-named `api/index.ts`, reached via an explicit rewrite in `vercel.json` (`/api/(.*)` → `/api`) that forwards every `/api/*` request to it while leaving the original path intact, which the function then reads off the request itself. Confirmed live, both single- and multi-segment routes now resolve correctly.
+
+Separately, this project's Vercel runtime invokes `api/index.ts` with the classic Node.js `(req, res)` callback signature (`IncomingMessage`/`ServerResponse` — `req.headers` a plain object, `req.url` a relative path), not the Web Standard `Request`/`Response` object despite that being Vercel's current documented convention for non-Next.js functions — confirmed by a `request.headers.get is not a function` runtime error when the Web Standard signature was tried. `api/index.ts` hand-types a minimal `VercelLikeRequest` interface rather than depending on `@vercel/node`, which pulls in a large, vulnerable build-tooling dependency tree for two type imports.
 
 **Why Postgres.** Everything that used to persist locally — Google OAuth tokens (`.env`'s `GOOGLE_ACCOUNTS`), the Gmail metadata cache and nudge push-history (`node:sqlite`), and the Gmail sync/scan job status (an in-memory `let job`) — relied on either a writable local filesystem or a single long-lived process. Neither exists on Vercel: env vars are read-only at runtime, the filesystem is ephemeral, and a request can land on a different, stateless instance than the one before it. `server/db.ts` provisions Postgres via Neon (installed through Vercel's Storage/Marketplace tab — "Vercel Postgres" itself was discontinued in Dec 2024 in favor of Marketplace integrations) and exposes `ensureSchema()`, an idempotent `CREATE TABLE IF NOT EXISTS` set covering every table this app needs, run lazily on first access — same philosophy as the old SQLite `getDb()`, just pointed at a real network database. **One database serves both local dev and production** — deliberately, for parity, at the cost that a local test of Settings' wipe or per-account disconnect really does revoke your production Google grant and clear your production Gmail cache.
 
