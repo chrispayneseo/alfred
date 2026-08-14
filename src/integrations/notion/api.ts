@@ -21,9 +21,26 @@ export interface ApiProject {
   status: string;
 }
 
-export interface CaptureResult {
+export interface FiledCapture {
   inbox: { id: string; text: string; status: string };
   filed: { kind: "task" | "note"; id: string; project: string };
+}
+
+export interface CaptureItem {
+  text: string;
+  type: "task" | "note";
+  project: string;
+}
+
+export interface MultiCaptureResult {
+  multiple: true;
+  items: CaptureItem[];
+}
+
+export type CaptureResult = FiledCapture | MultiCaptureResult;
+
+export function isMultiCaptureResult(result: CaptureResult): result is MultiCaptureResult {
+  return "multiple" in result && result.multiple === true;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -40,6 +57,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function submitCapture(text: string, source: "manual" | "share-target"): Promise<CaptureResult> {
   return request("/api/capture", { method: "POST", body: JSON.stringify({ text, source }) });
+}
+
+export function submitMultiCapture(
+  items: CaptureItem[],
+  source: "manual" | "share-target"
+): Promise<{ results: FiledCapture[] }> {
+  return request("/api/capture/multi", { method: "POST", body: JSON.stringify({ items, source }) });
 }
 
 export function fetchProjects(): Promise<ApiProject[]> {

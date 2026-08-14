@@ -36,6 +36,7 @@ const PROJECT_KEYWORDS: Record<string, string[]> = {
   Freelance: ["client", "invoice", "freelance", "contract", "dan"],
   "Football Coaching": ["football", "training session", "match", "squad", "coaching", "fixture", "team talk"],
   Personal: ["dentist", "doctor", "home", "family", "genealogy", "holiday", "house"],
+  "Side Projects": ["side project", "coachplan", "tasklists", "glassdesk", "setlist", "home dashboard"],
 };
 
 export function classify(text: string): Classification {

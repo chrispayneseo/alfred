@@ -51,3 +51,12 @@ export const PROJECT_SEED_NAMES = ["Job", "Freelance", "Personal", "Football Coa
 export const DIGEST_PROJECTS = ["Job", "Freelance", "Personal", "Football Coaching", "Side Projects"] as const;
 export const UNSORTED_PROJECT = "Unsorted";
 export const GENEALOGY_PARENT_PROJECT = "Personal";
+
+// Every project a capture can actually be classified into — PROJECT_SEED_NAMES
+// above is specifically the one-time workspace-seeding list (predates "Side
+// Projects", which was added later via a migration rather than a reseed) and
+// was never the right constant for this; classify.ts previously used it by
+// mistake, which meant a capture could never be classified into "Side
+// Projects" even though the project has existed since the Freelance-view
+// work.
+export const CLASSIFY_PROJECT_NAMES = [...DIGEST_PROJECTS, UNSORTED_PROJECT] as const;

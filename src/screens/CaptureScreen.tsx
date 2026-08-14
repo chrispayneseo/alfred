@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Screen } from "../components/Screen";
-import { submitCapture } from "../integrations/notion/api";
+import {
+  fetchProjects,
+  isMultiCaptureResult,
+  submitCapture,
+  submitMultiCapture,
+  type ApiProject,
+  type CaptureItem,
+} from "../integrations/notion/api";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
 import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
@@ -9,6 +16,114 @@ interface RecentCapture {
   text: string;
   kind: "task" | "note";
   project: string;
+}
+
+interface ReviewItem extends CaptureItem {
+  id: string;
+}
+
+function CaptureReview({
+  items,
+  projects,
+  onChange,
+  onRemove,
+  onFile,
+  onCancel,
+  filing,
+  error,
+}: {
+  items: ReviewItem[];
+  projects: ApiProject[];
+  onChange: (id: string, patch: Partial<CaptureItem>) => void;
+  onRemove: (id: string) => void;
+  onFile: () => void;
+  onCancel: () => void;
+  filing: boolean;
+  error?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-ink-soft dark:text-ink-soft-dark">
+        Looks like a few things — review before filing:
+      </p>
+
+      <ul className="space-y-3">
+        {items.map((item) => (
+          <li key={item.id} className="rounded-2xl border border-line px-4 py-3 dark:border-line-dark">
+            <div className="flex items-start gap-2">
+              <input
+                value={item.text}
+                onChange={(e) => onChange(item.id, { text: e.target.value })}
+                className="flex-1 rounded-lg border border-line bg-paper-raised px-2.5 py-1.5 text-sm text-ink outline-none focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark"
+              />
+              <button
+                onClick={() => onRemove(item.id)}
+                aria-label="Remove item"
+                className="mt-1.5 shrink-0 text-ink-faint/60 hover:text-claude dark:text-ink-faint-dark/60"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <div className="flex gap-1 rounded-full border border-line p-0.5 dark:border-line-dark">
+                {(["task", "note"] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => onChange(item.id, { type })}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
+                      item.type === type
+                        ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
+                        : "text-ink-soft dark:text-ink-soft-dark"
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+
+              <select
+                value={item.project}
+                onChange={(e) => onChange(item.id, { project: e.target.value })}
+                className="rounded-full border border-line bg-paper-raised px-2.5 py-1 text-[11px] text-ink-soft outline-none dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-soft-dark"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+                {!projects.some((p) => p.name === item.project) && <option value={item.project}>{item.project}</option>}
+              </select>
+            </div>
+          </li>
+        ))}
+        {items.length === 0 && (
+          <li className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing left — removed them all.</li>
+        )}
+      </ul>
+
+      {error && <p className="text-xs text-claude">{error}</p>}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onFile}
+          disabled={filing || items.length === 0}
+          className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
+        >
+          {filing ? "Filing…" : `File ${items.length || ""} item${items.length === 1 ? "" : "s"}`}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={filing}
+          className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft disabled:opacity-50 dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function CaptureScreen() {
@@ -20,6 +135,12 @@ export function CaptureScreen() {
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>();
+  const [reviewSource, setReviewSource] = useState<"manual" | "share-target">("manual");
+  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [filing, setFiling] = useState(false);
+  const [reviewError, setReviewError] = useState<string>();
 
   const handleTranscribed = useCallback((transcript: string) => {
     const trimmed = transcript.trim();
@@ -53,6 +174,14 @@ export function CaptureScreen() {
     try {
       const source = sharedUrl || sharedImage ? "share-target" : "manual";
       const result = await submitCapture(trimmed, source);
+
+      if (isMultiCaptureResult(result)) {
+        setReviewItems(result.items.map((item, i) => ({ ...item, id: `${Date.now()}-${i}` })));
+        setReviewSource(source);
+        if (projects.length === 0) fetchProjects().then(setProjects).catch(() => undefined);
+        return;
+      }
+
       setRecent((prev) => [
         { id: result.inbox.id, text: trimmed, kind: result.filed.kind, project: result.filed.project },
         ...prev,
@@ -70,93 +199,150 @@ export function CaptureScreen() {
     }
   }
 
+  function handleReviewChange(id: string, patch: Partial<CaptureItem>) {
+    setReviewItems((prev) => prev?.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  function handleReviewRemove(id: string) {
+    setReviewItems((prev) => prev?.filter((item) => item.id !== id));
+  }
+
+  function handleReviewCancel() {
+    setReviewItems(undefined);
+    setReviewError(undefined);
+    inputRef.current?.focus();
+  }
+
+  async function handleReviewFile() {
+    if (!reviewItems || reviewItems.length === 0) return;
+    setFiling(true);
+    setReviewError(undefined);
+    try {
+      const { results } = await submitMultiCapture(
+        reviewItems.map(({ text: t, type, project }) => ({ text: t, type, project })),
+        reviewSource
+      );
+      setRecent((prev) => [
+        ...results.map((r) => ({ id: r.inbox.id, text: r.inbox.text, kind: r.filed.kind, project: r.filed.project })),
+        ...prev,
+      ]);
+      setReviewItems(undefined);
+      setText("");
+      setSharedUrl(undefined);
+      setSharedImage(undefined);
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 1200);
+      inputRef.current?.focus();
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Something went wrong filing those.");
+    } finally {
+      setFiling(false);
+    }
+  }
+
   return (
     <Screen title="Capture" subtitle="Jot it down — sort it out later">
       <div className="flex flex-col gap-3">
         {sharedImage && (
           <img src={sharedImage} alt="Shared attachment" className="max-h-40 rounded-xl border border-line object-cover dark:border-line-dark" />
         )}
-        <textarea
-          ref={inputRef}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              handleSave();
-            }
-          }}
-          placeholder="What's on your mind?"
-          rows={5}
-          className="w-full resize-none rounded-2xl border border-line bg-paper-raised px-4 py-3 text-base text-ink outline-none placeholder:text-ink-faint focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:placeholder:text-ink-faint-dark"
-        />
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={voice.state === "recording" ? voice.stop : voice.start}
-            disabled={voice.state === "transcribing" || voice.state === "unsupported"}
-            aria-label={
-              voice.state === "recording"
-                ? "Stop recording"
-                : voice.state === "transcribing"
-                  ? "Transcribing…"
-                  : "Start voice capture"
-            }
-            title={voice.state === "unsupported" ? "Voice capture isn't supported in this browser" : undefined}
-            className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
-              voice.state === "recording"
-                ? "border-claude bg-claude/10 text-claude"
-                : "border-line text-ink-faint hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
-            }`}
-          >
+        {reviewItems ? (
+          <CaptureReview
+            items={reviewItems}
+            projects={projects}
+            onChange={handleReviewChange}
+            onRemove={handleReviewRemove}
+            onFile={handleReviewFile}
+            onCancel={handleReviewCancel}
+            filing={filing}
+            error={reviewError}
+          />
+        ) : (
+          <>
+            <textarea
+              ref={inputRef}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  handleSave();
+                }
+              }}
+              placeholder="What's on your mind?"
+              rows={5}
+              className="w-full resize-none rounded-2xl border border-line bg-paper-raised px-4 py-3 text-base text-ink outline-none placeholder:text-ink-faint focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:placeholder:text-ink-faint-dark"
+            />
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={voice.state === "recording" ? voice.stop : voice.start}
+                disabled={voice.state === "transcribing" || voice.state === "unsupported"}
+                aria-label={
+                  voice.state === "recording"
+                    ? "Stop recording"
+                    : voice.state === "transcribing"
+                      ? "Transcribing…"
+                      : "Start voice capture"
+                }
+                title={voice.state === "unsupported" ? "Voice capture isn't supported in this browser" : undefined}
+                className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                  voice.state === "recording"
+                    ? "border-claude bg-claude/10 text-claude"
+                    : "border-line text-ink-faint hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
+                }`}
+              >
+                {voice.state === "recording" && (
+                  <span className="absolute inset-0 animate-ping rounded-full bg-claude/30" aria-hidden="true" />
+                )}
+                {voice.state === "transcribing" ? (
+                  <svg viewBox="0 0 24 24" width="18" height="18" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="18" height="18" className="relative" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3" strokeLinecap="round" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled
+                aria-disabled
+                title="Attach image — coming soon"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-line text-ink-faint opacity-50 dark:border-line-dark dark:text-ink-faint-dark"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <circle cx="9" cy="10" r="1.5" />
+                  <path d="m4 17 5-5 4 4 3-3 4 4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!text.trim() || isSaving}
+                className="ml-auto rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
+              >
+                {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
+              </button>
+            </div>
+
             {voice.state === "recording" && (
-              <span className="absolute inset-0 animate-ping rounded-full bg-claude/30" aria-hidden="true" />
+              <p className="text-xs text-claude">Recording… tap the mic again to stop.</p>
             )}
-            {voice.state === "transcribing" ? (
-              <svg viewBox="0 0 24 24" width="18" height="18" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" width="18" height="18" className="relative" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3" strokeLinecap="round" />
-              </svg>
+            {voice.state === "transcribing" && (
+              <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Transcribing…</p>
             )}
-          </button>
-          <button
-            type="button"
-            disabled
-            aria-disabled
-            title="Attach image — coming soon"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-line text-ink-faint opacity-50 dark:border-line-dark dark:text-ink-faint-dark"
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <circle cx="9" cy="10" r="1.5" />
-              <path d="m4 17 5-5 4 4 3-3 4 4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+            {voice.error && <p className="text-xs text-claude">{voice.error}</p>}
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!text.trim() || isSaving}
-            className="ml-auto rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
-          >
-            {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
-          </button>
-        </div>
-
-        {voice.state === "recording" && (
-          <p className="text-xs text-claude">Recording… tap the mic again to stop.</p>
+            {error && <p className="text-xs text-claude">{error}</p>}
+          </>
         )}
-        {voice.state === "transcribing" && (
-          <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Transcribing…</p>
-        )}
-        {voice.error && <p className="text-xs text-claude">{voice.error}</p>}
-
-        {error && <p className="text-xs text-claude">{error}</p>}
 
         {recent.length > 0 && (
           <section className="mt-6">

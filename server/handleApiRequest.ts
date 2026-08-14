@@ -26,7 +26,7 @@ import {
 import { emailSearchTermsFor, isFreelanceClient } from "./freelance/clientContacts.js";
 import { getScanStatus, startScan } from "./llm/emailScan.js";
 import { runChat } from "./llm/chat.js";
-import { classifyWithModel } from "./llm/classify.js";
+import { isCaptureItem, splitAndClassifyCapture } from "./llm/splitCapture.js";
 import { loadLlmEnv } from "./llm/env.js";
 import { transcribeAudio } from "./llm/openai.js";
 import type { ChatTurn } from "./llm/types.js";
@@ -413,10 +413,37 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const source = body.source === "share-target" ? "share-target" : "manual";
       if (!text) return json(400, { error: "text is required" });
 
-      const inbox = await repo.createInboxPage(text, source);
-      const classification = await classifyWithModel(llmEnv.anthropicApiKey, text);
-      const filed = await repo.fileClassifiedItem(inbox.id, text, classification);
-      return json(200, { inbox, filed });
+      const items = await splitAndClassifyCapture(llmEnv, text);
+
+      // Common case: one item, no review needed — files immediately, exact
+      // same shape/behavior as before this feature existed. Uses the
+      // original text verbatim (not the model's per-item text, which is
+      // only meaningfully different when there's more than one item).
+      if (items.length === 1) {
+        const inbox = await repo.createInboxPage(text, source);
+        const filed = await repo.fileClassifiedItem(inbox.id, text, { type: items[0].type, project: items[0].project });
+        return json(200, { inbox, filed });
+      }
+
+      // Multiple items detected — nothing is written yet. The frontend
+      // shows these for review/edit and calls /api/capture/multi once
+      // confirmed.
+      return json(200, { multiple: true, items });
+    }
+
+    if (method === "POST" && pathname === "/api/capture/multi") {
+      const body = await readBody();
+      const source = body.source === "share-target" ? "share-target" : "manual";
+      const items = Array.isArray(body.items) ? body.items.filter(isCaptureItem) : [];
+      if (items.length === 0) return json(400, { error: "items is required" });
+
+      const filed = [];
+      for (const item of items) {
+        const inbox = await repo.createInboxPage(item.text, source);
+        const filedItem = await repo.fileClassifiedItem(inbox.id, item.text, { type: item.type, project: item.project });
+        filed.push({ inbox, filed: filedItem });
+      }
+      return json(200, { results: filed });
     }
 
     if (method === "GET" && pathname === "/api/projects") {
