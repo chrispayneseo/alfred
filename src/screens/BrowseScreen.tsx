@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Screen } from "../components/Screen";
 import {
   deleteTask,
@@ -182,7 +183,14 @@ export function BrowseScreen() {
                     {openTasks} open task{openTasks === 1 ? "" : "s"}
                   </p>
                 </div>
-                <span className="text-xs text-ink-soft dark:text-ink-soft-dark">{project.status}</span>
+                <div className="flex items-center gap-3">
+                  {project.name === "Freelance" && (
+                    <Link to="/freelance" className="text-xs text-ink-soft underline underline-offset-2 dark:text-ink-soft-dark">
+                      Clients
+                    </Link>
+                  )}
+                  <span className="text-xs text-ink-soft dark:text-ink-soft-dark">{project.status}</span>
+                </div>
               </li>
             );
           })}

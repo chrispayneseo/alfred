@@ -112,6 +112,30 @@ export async function getFlaggedEmails(env: Env, limit = 50): Promise<EmailRecor
   return rows.map(toRecord);
 }
 
+/** Searches the full synced-email cache (not just flagged/actionable ones)
+ * for any of the given terms appearing in the sender address, sender name,
+ * or subject — used by the Freelance client view to surface relevant email
+ * by client name/known contact domain, reusing Step 5's sync/cache rather
+ * than hitting Gmail live. */
+export async function searchEmailsByTerms(env: Env, terms: string[], limit = 10): Promise<EmailRecord[]> {
+  if (terms.length === 0) return [];
+  const sql = await db(env);
+
+  const conditions: string[] = [];
+  const params: string[] = [];
+  for (const term of terms) {
+    const p = `%${term}%`;
+    conditions.push(`(sender_email ILIKE $${params.length + 1} OR sender ILIKE $${params.length + 2} OR subject ILIKE $${params.length + 3})`);
+    params.push(p, p, p);
+  }
+
+  const rows = await sql.query(
+    `SELECT * FROM gmail_emails WHERE ${conditions.join(" OR ")} ORDER BY date DESC LIMIT $${params.length + 1}`,
+    [...params, limit]
+  );
+  return rows.map(toRecord);
+}
+
 /** Removes an email from the Flagged list without touching the actual
  * Gmail message, any draft already created for it, or any Notion page it
  * was filed to — those are separately manageable (Gmail directly, Browse's

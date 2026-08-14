@@ -15,13 +15,21 @@ export const TASKS_PROPS = {
   project: "Project",
   fromInbox: "From Inbox",
   emailLink: "Email Link",
+  client: "Client",
 } as const;
 
 export const NOTES_PROPS = {
   project: "Project",
   fromInbox: "From Inbox",
   emailLink: "Email Link",
+  client: "Client",
 } as const;
+
+// The Freelance client view (added alongside the "Client" select property
+// on Tasks/Notes — see server/notion/addClientField.ts) is scoped to these
+// three named clients specifically, not an open-ended list.
+export const FREELANCE_CLIENTS = ["Active Health Hub", "Rafique Aesthetics", "Steadfast Collective"] as const;
+export type FreelanceClient = (typeof FREELANCE_CLIENTS)[number];
 
 export const PROJECTS_PROPS = {
   status: "Status",

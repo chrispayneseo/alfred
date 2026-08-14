@@ -11,7 +11,17 @@ import { loadGoogleEnv } from "./google/env.js";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors.js";
 import { exchangeCodeForRefreshToken, getAuthUrl, isValidState, revokeToken } from "./google/oauth.js";
 import { getSyncStatus, startSync } from "./google/gmailSync.js";
-import { clearEmailsForAccount, countFlagged, countTotal, countUnscanned, dismissFlaggedEmail, getFlaggedEmails, getMeta } from "./google/gmailStore.js";
+import {
+  clearEmailsForAccount,
+  countFlagged,
+  countTotal,
+  countUnscanned,
+  dismissFlaggedEmail,
+  getFlaggedEmails,
+  getMeta,
+  searchEmailsByTerms,
+} from "./google/gmailStore.js";
+import { emailSearchTermsFor, isFreelanceClient } from "./freelance/clientContacts.js";
 import { getScanStatus, startScan } from "./llm/emailScan.js";
 import { runChat } from "./llm/chat.js";
 import { classifyWithModel } from "./llm/classify.js";
@@ -23,6 +33,7 @@ import { snoozeNudge } from "./nudges/nudgeStore.js";
 import { createNotionClient } from "./notion/client.js";
 import { loadNotionEnv } from "./notion/env.js";
 import { NotionRepo } from "./notion/queries.js";
+import { FREELANCE_CLIENTS } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
@@ -261,6 +272,26 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
     if (!repo) {
       return json(503, { error: "Notion isn't configured yet — check NOTION_TOKEN and the *_DB_ID vars in .env." });
+    }
+
+    if (method === "GET" && pathname === "/api/freelance/clients") {
+      const [tasks, notes] = await Promise.all([repo.listTasks(), repo.listNotes()]);
+      const summaries = FREELANCE_CLIENTS.map((name) => ({
+        name,
+        openTaskCount: tasks.filter((t) => t.client === name && !t.done).length,
+        noteCount: notes.filter((n) => n.client === name).length,
+      }));
+      return json(200, summaries);
+    }
+
+    const clientMatch = pathname.match(/^\/api\/freelance\/clients\/([^/]+)$/);
+    if (method === "GET" && clientMatch) {
+      const client = decodeURIComponent(clientMatch[1]);
+      if (!isFreelanceClient(client)) return json(404, { error: "Unknown client" });
+
+      const [tasks, notes] = await Promise.all([repo.listTasks(undefined, client), repo.listNotes(undefined, client)]);
+      const emails = await searchEmailsByTerms(env, emailSearchTermsFor(client), 10);
+      return json(200, { client, tasks, notes, emails });
     }
 
     if (method === "POST" && pathname === "/api/capture") {

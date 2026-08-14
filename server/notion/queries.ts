@@ -37,6 +37,7 @@ export interface TaskRecord {
   due?: string;
   projectId?: string;
   projectName?: string;
+  client?: string;
 }
 
 export interface NoteRecord {
@@ -45,6 +46,7 @@ export interface NoteRecord {
   projectId?: string;
   projectName?: string;
   updatedAt: string;
+  client?: string;
 }
 
 export interface ProjectRecord {
@@ -140,10 +142,13 @@ export class NotionRepo {
     } as never);
   }
 
-  async listTasks(projectId?: string): Promise<TaskRecord[]> {
-    const filter = projectId
-      ? { property: TASKS_PROPS.project, relation: { contains: projectId } }
-      : undefined;
+  async listTasks(projectId?: string, client?: string): Promise<TaskRecord[]> {
+    const filters = [
+      projectId ? { property: TASKS_PROPS.project, relation: { contains: projectId } } : undefined,
+      client ? { property: TASKS_PROPS.client, select: { equals: client } } : undefined,
+    ].filter((f): f is NonNullable<typeof f> => Boolean(f));
+    const filter = filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { and: filters };
+
     const res = await this.notion.dataSources.query({
       data_source_id: this.env.tasksDbId,
       filter,
@@ -162,14 +167,18 @@ export class NotionRepo {
         due: getDate(page, TASKS_PROPS.dueDate),
         projectId: projId,
         projectName: projId ? projectById.get(projId) : undefined,
+        client: getSelect(page, TASKS_PROPS.client),
       };
     });
   }
 
-  async listNotes(projectId?: string): Promise<NoteRecord[]> {
-    const filter = projectId
-      ? { property: NOTES_PROPS.project, relation: { contains: projectId } }
-      : undefined;
+  async listNotes(projectId?: string, client?: string): Promise<NoteRecord[]> {
+    const filters = [
+      projectId ? { property: NOTES_PROPS.project, relation: { contains: projectId } } : undefined,
+      client ? { property: NOTES_PROPS.client, select: { equals: client } } : undefined,
+    ].filter((f): f is NonNullable<typeof f> => Boolean(f));
+    const filter = filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { and: filters };
+
     const res = await this.notion.dataSources.query({
       data_source_id: this.env.notesDbId,
       filter,
@@ -187,6 +196,7 @@ export class NotionRepo {
         projectId: projId,
         projectName: projId ? projectById.get(projId) : undefined,
         updatedAt: page.last_edited_time,
+        client: getSelect(page, NOTES_PROPS.client),
       };
     });
   }
