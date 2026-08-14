@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { Screen } from "../components/Screen";
-import { loadCaptures, saveCaptures } from "../lib/captureStore";
-import { makeId } from "../lib/id";
+import { submitCapture } from "../integrations/notion/api";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
-import type { CaptureItem } from "../types";
+
+interface RecentCapture {
+  id: string;
+  text: string;
+  kind: "task" | "note";
+  project: string;
+}
 
 export function CaptureScreen() {
   const [text, setText] = useState("");
   const [sharedImage, setSharedImage] = useState<string | undefined>();
   const [sharedUrl, setSharedUrl] = useState<string | undefined>();
-  const [captures, setCaptures] = useState<CaptureItem[]>(() => loadCaptures());
+  const [recent, setRecent] = useState<RecentCapture[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [error, setError] = useState<string>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -28,26 +35,30 @@ export function CaptureScreen() {
     });
   }, []);
 
-  function handleSave() {
+  async function handleSave() {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || isSaving) return;
 
-    const item: CaptureItem = {
-      id: makeId(),
-      text: trimmed,
-      createdAt: new Date().toISOString(),
-      source: sharedUrl || sharedImage ? "share-target" : "manual",
-      sharedUrl,
-    };
-    const next = [item, ...captures];
-    setCaptures(next);
-    saveCaptures(next);
-    setText("");
-    setSharedUrl(undefined);
-    setSharedImage(undefined);
-    setJustSaved(true);
-    window.setTimeout(() => setJustSaved(false), 1200);
-    inputRef.current?.focus();
+    setIsSaving(true);
+    setError(undefined);
+    try {
+      const source = sharedUrl || sharedImage ? "share-target" : "manual";
+      const result = await submitCapture(trimmed, source);
+      setRecent((prev) => [
+        { id: result.inbox.id, text: trimmed, kind: result.filed.kind, project: result.filed.project },
+        ...prev,
+      ]);
+      setText("");
+      setSharedUrl(undefined);
+      setSharedImage(undefined);
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 1200);
+      inputRef.current?.focus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong saving that.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -101,25 +112,27 @@ export function CaptureScreen() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={!text.trim()}
+            disabled={!text.trim() || isSaving}
             className="ml-auto rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
           >
-            {justSaved ? "Saved" : "Save"}
+            {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
           </button>
         </div>
 
-        {captures.length > 0 && (
+        {error && <p className="text-xs text-claude">{error}</p>}
+
+        {recent.length > 0 && (
           <section className="mt-6">
             <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
               Recent captures
             </h2>
             <ul className="space-y-3">
-              {captures.slice(0, 8).map((item) => (
+              {recent.slice(0, 8).map((item) => (
                 <li key={item.id} className="text-sm text-ink dark:text-ink-dark">
                   {item.text}
-                  {item.source === "share-target" && (
-                    <span className="ml-2 text-xs text-ink-faint dark:text-ink-faint-dark">shared</span>
-                  )}
+                  <span className="ml-2 text-xs text-ink-faint dark:text-ink-faint-dark">
+                    {item.kind === "task" ? "Task" : "Note"} · {item.project}
+                  </span>
                 </li>
               ))}
             </ul>

@@ -1,22 +1,58 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Screen } from "../components/Screen";
-import { browseNotes, browseProjects, browseTasks } from "../mocks/browse";
+import {
+  fetchNotes,
+  fetchProjects,
+  fetchTasks,
+  updateTaskStatus,
+  type ApiNote,
+  type ApiProject,
+  type ApiTask,
+} from "../integrations/notion/api";
 
 const tabs = ["Tasks", "Notes", "Projects"] as const;
 type Tab = (typeof tabs)[number];
 
-const statusLabel: Record<string, string> = {
-  active: "Active",
-  paused: "Paused",
-  done: "Done",
-};
+function formatUpdatedAt(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 export function BrowseScreen() {
   const [tab, setTab] = useState<Tab>("Tasks");
+  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [notes, setNotes] = useState<ApiNote[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    Promise.all([fetchProjects(), fetchTasks(), fetchNotes()])
+      .then(([projectsRes, tasksRes, notesRes]) => {
+        setProjects(projectsRes);
+        setTasks(tasksRes);
+        setNotes(notesRes);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load from Notion."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function toggleTask(task: ApiTask) {
+    const done = !task.done;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done } : t)));
+    try {
+      await updateTaskStatus(task.id, done);
+    } catch {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: !done } : t)));
+    }
+  }
+
+  const filteredTasks = selectedProjectId ? tasks.filter((t) => t.projectId === selectedProjectId) : tasks;
+  const filteredNotes = selectedProjectId ? notes.filter((n) => n.projectId === selectedProjectId) : notes;
 
   return (
     <Screen title="Browse" subtitle="A window into your Notion workspace">
-      <div className="mb-6 flex gap-1 rounded-full border border-line p-1 dark:border-line-dark">
+      <div className="mb-4 flex gap-1 rounded-full border border-line p-1 dark:border-line-dark">
         {tabs.map((t) => (
           <button
             key={t}
@@ -32,11 +68,47 @@ export function BrowseScreen() {
         ))}
       </div>
 
-      {tab === "Tasks" && (
+      {tab !== "Projects" && projects.length > 0 && (
+        <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
+          <button
+            onClick={() => setSelectedProjectId(undefined)}
+            className={`shrink-0 rounded-full border px-3 py-1 text-xs ${
+              !selectedProjectId
+                ? "border-ink text-ink dark:border-ink-dark dark:text-ink-dark"
+                : "border-line text-ink-faint dark:border-line-dark dark:text-ink-faint-dark"
+            }`}
+          >
+            All
+          </button>
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              onClick={() => setSelectedProjectId(project.id)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs ${
+                selectedProjectId === project.id
+                  ? "border-ink text-ink dark:border-ink-dark dark:text-ink-dark"
+                  : "border-line text-ink-faint dark:border-line-dark dark:text-ink-faint-dark"
+              }`}
+            >
+              {project.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {loading && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading from Notion…</p>}
+      {error && <p className="text-sm text-claude">{error}</p>}
+
+      {!loading && !error && tab === "Tasks" && (
         <ul className="space-y-2.5">
-          {browseTasks.map((task) => (
+          {filteredTasks.length === 0 && (
+            <li className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</li>
+          )}
+          {filteredTasks.map((task) => (
             <li key={task.id} className="flex items-start gap-3">
-              <span
+              <button
+                onClick={() => toggleTask(task)}
+                aria-label={task.done ? "Mark as open" : "Mark as done"}
                 className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
                   task.done ? "bg-ink-faint/50 dark:bg-ink-faint-dark/50" : "bg-ink-faint dark:bg-ink-faint-dark"
                 }`}
@@ -47,7 +119,7 @@ export function BrowseScreen() {
                 </p>
                 <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
                   {task.due ?? "No due date"}
-                  {task.project ? ` · ${task.project}` : ""}
+                  {task.projectName ? ` · ${task.projectName}` : ""}
                 </p>
               </div>
             </li>
@@ -55,31 +127,39 @@ export function BrowseScreen() {
         </ul>
       )}
 
-      {tab === "Notes" && (
+      {!loading && !error && tab === "Notes" && (
         <ul className="space-y-4">
-          {browseNotes.map((note) => (
+          {filteredNotes.length === 0 && (
+            <li className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</li>
+          )}
+          {filteredNotes.map((note) => (
             <li key={note.id}>
               <p className="text-sm text-ink dark:text-ink-dark">{note.title}</p>
-              <p className="truncate text-xs text-ink-faint dark:text-ink-faint-dark">{note.excerpt}</p>
-              <p className="mt-0.5 text-[11px] text-ink-faint/80 dark:text-ink-faint-dark/80">{note.updatedAt}</p>
+              <p className="mt-0.5 text-[11px] text-ink-faint/80 dark:text-ink-faint-dark/80">
+                {note.projectName ? `${note.projectName} · ` : ""}
+                {formatUpdatedAt(note.updatedAt)}
+              </p>
             </li>
           ))}
         </ul>
       )}
 
-      {tab === "Projects" && (
+      {!loading && !error && tab === "Projects" && (
         <ul className="space-y-3">
-          {browseProjects.map((project) => (
-            <li key={project.id} className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-ink dark:text-ink-dark">{project.name}</p>
-                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
-                  {project.taskCount} open task{project.taskCount === 1 ? "" : "s"}
-                </p>
-              </div>
-              <span className="text-xs text-ink-soft dark:text-ink-soft-dark">{statusLabel[project.status]}</span>
-            </li>
-          ))}
+          {projects.map((project) => {
+            const openTasks = tasks.filter((t) => t.projectId === project.id && !t.done).length;
+            return (
+              <li key={project.id} className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-ink dark:text-ink-dark">{project.name}</p>
+                  <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
+                    {openTasks} open task{openTasks === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <span className="text-xs text-ink-soft dark:text-ink-soft-dark">{project.status}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Screen>

@@ -23,25 +23,10 @@ export interface NoteItem {
   updatedAt: string;
 }
 
-export interface ProjectItem {
-  id: string;
-  name: string;
-  status: "active" | "paused" | "done";
-  taskCount: number;
-}
-
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   model?: ModelSource;
   createdAt: string;
-}
-
-export interface CaptureItem {
-  id: string;
-  text: string;
-  createdAt: string;
-  source: "manual" | "share-target";
-  sharedUrl?: string;
 }
