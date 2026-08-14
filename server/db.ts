@@ -94,6 +94,16 @@ const SCHEMA_STATEMENTS = [
     current_task_id TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  `CREATE TABLE IF NOT EXISTS project_grouping_suggestions (
+    id TEXT PRIMARY KEY,
+    suggested_name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    items TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_project_grouping_suggestions_status ON project_grouping_suggestions(status)`,
   `CREATE TABLE IF NOT EXISTS sync_job (
     id TEXT PRIMARY KEY DEFAULT 'singleton',
     running BOOLEAN NOT NULL DEFAULT false,

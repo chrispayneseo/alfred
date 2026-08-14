@@ -4,6 +4,7 @@ import { AccountTag } from "../components/AccountTag";
 import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { Nudges } from "../components/Nudges";
+import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
 import { Screen } from "../components/Screen";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
@@ -225,6 +226,8 @@ export function TodayScreen() {
       </section>
 
       <RecurringSuggestions />
+
+      <ProjectGroupingSuggestions />
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">

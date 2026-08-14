@@ -75,6 +75,19 @@ export class NotionRepo {
     return projects.find((p) => p.name.toLowerCase() === name.toLowerCase())?.id;
   }
 
+  /** Creates a new Project — used when the user accepts an auto-suggested
+   * project grouping. Never called without that explicit confirmation. */
+  async createProject(name: string): Promise<{ id: string }> {
+    const page = await this.notion.pages.create({
+      parent: { type: "data_source_id", data_source_id: this.env.projectsDbId },
+      properties: {
+        [TITLE_PROP]: { title: richText(name) },
+        [PROJECTS_PROPS.status]: { select: { name: "Active" } },
+      },
+    } as never);
+    return { id: page.id };
+  }
+
   /** Creates a Task directly, bypassing the Inbox/classification pipeline —
    * used by recurring-task detection, where the "task" being created is a
    * generated next-instance rather than something the user just typed. */

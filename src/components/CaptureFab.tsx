@@ -4,7 +4,7 @@ export function CaptureFab() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  if (location.pathname === "/capture") return null;
+  if (location.pathname === "/capture" || location.pathname === "/chat") return null;
 
   return (
     <button

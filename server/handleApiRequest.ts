@@ -40,6 +40,13 @@ import {
   type DigestTriggerDay,
 } from "./digest/weeklyDigest.js";
 import {
+  acceptGrouping,
+  checkProjectGroupings,
+  dismissGrouping,
+  listPendingGroupings,
+  scanForProjectGroupings,
+} from "./projectGroupings/projectGroupingDetection.js";
+import {
   acceptSuggestion,
   checkRecurringTasks,
   dismissSuggestion,
@@ -384,6 +391,30 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     const dismissMatch = pathname.match(/^\/api\/recurring\/suggestions\/([^/]+)\/dismiss$/);
     if (method === "POST" && dismissMatch) {
       await dismissSuggestion(env, dismissMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    if (method === "GET" && pathname === "/api/project-groupings/check") {
+      return json(200, await checkProjectGroupings(env, llmEnv, repo));
+    }
+
+    if (method === "POST" && pathname === "/api/project-groupings/scan") {
+      return json(200, await scanForProjectGroupings(env, llmEnv, repo));
+    }
+
+    if (method === "GET" && pathname === "/api/project-groupings/suggestions") {
+      return json(200, await listPendingGroupings(env));
+    }
+
+    const groupingAcceptMatch = pathname.match(/^\/api\/project-groupings\/suggestions\/([^/]+)\/accept$/);
+    if (method === "POST" && groupingAcceptMatch) {
+      await acceptGrouping(env, repo, groupingAcceptMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    const groupingDismissMatch = pathname.match(/^\/api\/project-groupings\/suggestions\/([^/]+)\/dismiss$/);
+    if (method === "POST" && groupingDismissMatch) {
+      await dismissGrouping(env, groupingDismissMatch[1]);
       return json(200, { ok: true });
     }
 

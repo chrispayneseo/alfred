@@ -15,19 +15,29 @@ function formatEventProposal(p: EventProposal): string {
   return `${dateLabel} · ${p.startTime}${p.endTime ? `–${p.endTime}` : ""}`;
 }
 
-const initialMessages: ChatMessage[] = [
-  {
-    id: "m0",
-    role: "assistant",
-    text: "Morning. Anything you want me to look into, or something on your mind?",
-    createdAt: new Date().toISOString(),
-  },
-];
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Late one.";
+  if (hour < 12) return "Morning.";
+  if (hour < 18) return "Afternoon.";
+  return "Evening.";
+}
+
+function buildInitialMessages(): ChatMessage[] {
+  return [
+    {
+      id: "m0",
+      role: "assistant",
+      text: `${greeting()} Anything you want me to look into, or something on your mind?`,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
 
 const MODEL_LABEL = { claude: "Claude", chatgpt: "ChatGPT" } as const;
 
 export function ChatScreen() {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>(buildInitialMessages);
   const [draft, setDraft] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [submittingEventId, setSubmittingEventId] = useState<string>();
