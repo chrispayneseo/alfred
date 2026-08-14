@@ -13,28 +13,32 @@
 // (api/index.ts) reached via an explicit rewrite in vercel.json that forwards
 // every /api/* request here while leaving the original path intact.
 //
-// Uses the Web Standard Request/Response signature — Vercel's current
-// documented convention for non-Next.js Functions. request.url here is not
-// guaranteed to be a full absolute URL, so it's parsed against the request's
-// own Host header rather than passed to `new URL()` directly.
+// Uses the classic Node.js (req, res) callback signature, not the Web
+// Standard Request/Response — confirmed live that this runtime actually
+// invokes with a plain Node IncomingMessage/ServerResponse pair (req.headers
+// is a plain object, not a Headers instance; req.url is a relative path, not
+// an absolute URL), despite that being the currently-documented convention.
+// Hand-typed rather than importing @vercel/node, which pulls in a large,
+// vulnerable build-tooling dependency tree for two type imports.
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { waitUntil } from "@vercel/functions";
 import { handleApiRequest } from "../server/handleApiRequest.js";
 
-export default async function handler(request: Request): Promise<Response> {
-  const host = request.headers.get("host") ?? "localhost";
-  const url = new URL(request.url, `https://${host}`);
+interface VercelLikeRequest extends IncomingMessage {
+  body?: unknown;
+}
+
+export default async function handler(req: VercelLikeRequest, res: ServerResponse): Promise<void> {
+  const host = (req.headers.host as string | undefined) ?? "localhost";
+  const url = new URL(req.url ?? "/", `https://${host}`);
 
   const result = await handleApiRequest({
-    method: request.method,
+    method: req.method ?? "GET",
     pathname: url.pathname,
     searchParams: url.searchParams,
     readBody: async () => {
-      if (request.method === "GET" || request.method === "HEAD") return {};
-      try {
-        return (await request.json()) as Record<string, unknown>;
-      } catch {
-        return {};
-      }
+      if (req.method === "GET" || req.method === "HEAD") return {};
+      return (req.body ?? {}) as Record<string, unknown>;
     },
     env: process.env,
     // Lets a route (Gmail sync/scan) return its initial response immediately
@@ -46,11 +50,12 @@ export default async function handler(request: Request): Promise<Response> {
   });
 
   if (result.kind === "redirect") {
-    return new Response(null, { status: 302, headers: { Location: result.location } });
+    res.writeHead(302, { Location: result.location });
+    res.end();
+    return;
   }
 
-  return new Response(JSON.stringify(result.body), {
-    status: result.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  res.statusCode = result.status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(result.body));
 }
