@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Screen } from "../components/Screen";
 import {
+  deleteTask,
   fetchNotes,
   fetchProjects,
   fetchTasks,
@@ -44,6 +45,16 @@ export function BrowseScreen() {
       await updateTaskStatus(task.id, done);
     } catch {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: !done } : t)));
+    }
+  }
+
+  async function removeTask(task: ApiTask) {
+    const prev = tasks;
+    setTasks((p) => p.filter((t) => t.id !== task.id));
+    try {
+      await deleteTask(task.id);
+    } catch {
+      setTasks(prev);
     }
   }
 
@@ -109,11 +120,17 @@ export function BrowseScreen() {
               <button
                 onClick={() => toggleTask(task)}
                 aria-label={task.done ? "Mark as open" : "Mark as done"}
-                className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                  task.done ? "bg-ink-faint/50 dark:bg-ink-faint-dark/50" : "bg-ink-faint dark:bg-ink-faint-dark"
+                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                  task.done
+                    ? "border-ink-faint/50 bg-ink-faint/20 text-ink-faint dark:border-ink-faint-dark/50 dark:bg-ink-faint-dark/20 dark:text-ink-faint-dark"
+                    : "border-line text-ink-faint hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
                 }`}
-              />
-              <div>
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1">
                 <p className={`text-sm text-ink dark:text-ink-dark ${task.done ? "line-through opacity-50" : ""}`}>
                   {task.title}
                 </p>
@@ -122,6 +139,15 @@ export function BrowseScreen() {
                   {task.projectName ? ` · ${task.projectName}` : ""}
                 </p>
               </div>
+              <button
+                onClick={() => removeTask(task)}
+                aria-label="Remove task"
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
             </li>
           ))}
         </ul>

@@ -253,6 +253,10 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       if (typeof body.projectId === "string") await repo.setTaskProject(taskMatch[1], body.projectId);
       return json(200, { ok: true });
     }
+    if (method === "DELETE" && taskMatch) {
+      await repo.archiveTask(taskMatch[1]);
+      return json(200, { ok: true });
+    }
 
     const noteMatch = pathname.match(/^\/api\/notes\/([^/]+)$/);
     if (method === "PATCH" && noteMatch) {

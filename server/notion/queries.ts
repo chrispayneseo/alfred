@@ -279,6 +279,12 @@ export class NotionRepo {
     } as never);
   }
 
+  /** Archives the Notion page — Notion's own trash, recoverable there for 30
+   * days, not a permanent delete. */
+  async archiveTask(taskId: string): Promise<void> {
+    await this.notion.pages.update({ page_id: taskId, archived: true } as never);
+  }
+
   async setNoteProject(noteId: string, projectId: string): Promise<void> {
     await this.notion.pages.update({
       page_id: noteId,

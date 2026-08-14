@@ -59,3 +59,7 @@ export function fetchNotes(projectId?: string): Promise<ApiNote[]> {
 export async function updateTaskStatus(taskId: string, done: boolean): Promise<void> {
   await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify({ done }) });
 }
+
+export async function deleteTask(taskId: string): Promise<void> {
+  await request(`/api/tasks/${taskId}`, { method: "DELETE" });
+}
