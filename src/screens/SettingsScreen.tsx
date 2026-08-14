@@ -1,6 +1,7 @@
 import { AppLockSettings } from "../components/AppLockSettings";
 import { DataControls } from "../components/DataControls";
 import { GoogleAccountsSettings } from "../components/GoogleAccountsSettings";
+import { RecurringTaskSettings } from "../components/RecurringTaskSettings";
 import { Screen } from "../components/Screen";
 import { WeeklyDigestSettings } from "../components/WeeklyDigestSettings";
 
@@ -26,6 +27,13 @@ export function SettingsScreen() {
           Weekly digest
         </h2>
         <WeeklyDigestSettings />
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+          Recurring tasks
+        </h2>
+        <RecurringTaskSettings />
       </section>
 
       <section className="mb-8">

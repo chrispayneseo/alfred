@@ -75,6 +75,22 @@ export class NotionRepo {
     return projects.find((p) => p.name.toLowerCase() === name.toLowerCase())?.id;
   }
 
+  /** Creates a Task directly, bypassing the Inbox/classification pipeline —
+   * used by recurring-task detection, where the "task" being created is a
+   * generated next-instance rather than something the user just typed. */
+  async createTask(title: string, opts: { due?: string; projectId?: string } = {}): Promise<{ id: string }> {
+    const page = await this.notion.pages.create({
+      parent: { type: "data_source_id", data_source_id: this.env.tasksDbId },
+      properties: {
+        [TITLE_PROP]: { title: richText(title) },
+        [TASKS_PROPS.status]: { select: { name: TASK_STATUS.OPEN } },
+        ...(opts.due ? { [TASKS_PROPS.dueDate]: { date: { start: opts.due } } } : {}),
+        ...(opts.projectId ? { [TASKS_PROPS.project]: { relation: [{ id: opts.projectId }] } } : {}),
+      },
+    } as never);
+    return { id: page.id };
+  }
+
   async createInboxPage(
     text: string,
     capturedVia: "manual" | "share-target" | "email",

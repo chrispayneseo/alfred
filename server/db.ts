@@ -74,6 +74,26 @@ const SCHEMA_STATEMENTS = [
     summary TEXT NOT NULL,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  `CREATE TABLE IF NOT EXISTS recurring_suggestions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    normalized_title TEXT NOT NULL,
+    cadence TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_recurring_suggestions_status ON recurring_suggestions(status)`,
+  `CREATE TABLE IF NOT EXISTS recurring_tasks (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    cadence TEXT NOT NULL,
+    cadence_days INT NOT NULL,
+    project_id TEXT,
+    client TEXT,
+    current_task_id TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
   `CREATE TABLE IF NOT EXISTS sync_job (
     id TEXT PRIMARY KEY DEFAULT 'singleton',
     running BOOLEAN NOT NULL DEFAULT false,

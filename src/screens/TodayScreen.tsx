@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AccountTag } from "../components/AccountTag";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { Nudges } from "../components/Nudges";
+import { RecurringSuggestions } from "../components/RecurringSuggestions";
 import { Screen } from "../components/Screen";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
@@ -221,6 +222,8 @@ export function TodayScreen() {
         </h2>
         <Nudges />
       </section>
+
+      <RecurringSuggestions />
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">

@@ -37,6 +37,13 @@ import {
   setDigestTriggerDay,
   type DigestTriggerDay,
 } from "./digest/weeklyDigest.js";
+import {
+  acceptSuggestion,
+  checkRecurringTasks,
+  dismissSuggestion,
+  listPendingSuggestions,
+  scanForRecurringPatterns,
+} from "./recurring/recurringDetection.js";
 import { createNotionClient } from "./notion/client.js";
 import { loadNotionEnv } from "./notion/env.js";
 import { NotionRepo } from "./notion/queries.js";
@@ -300,6 +307,30 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     if (method === "POST" && pathname === "/api/digest/weekly/generate") {
       const accounts = await loadGoogleAccounts(env);
       return json(200, await generateWeeklyDigestNow(env, llmEnv, loadNtfyEnv(env), accounts, repo));
+    }
+
+    if (method === "GET" && pathname === "/api/recurring/check") {
+      return json(200, await checkRecurringTasks(env, llmEnv, repo));
+    }
+
+    if (method === "POST" && pathname === "/api/recurring/scan") {
+      return json(200, await scanForRecurringPatterns(env, llmEnv, repo));
+    }
+
+    if (method === "GET" && pathname === "/api/recurring/suggestions") {
+      return json(200, await listPendingSuggestions(env));
+    }
+
+    const acceptMatch = pathname.match(/^\/api\/recurring\/suggestions\/([^/]+)\/accept$/);
+    if (method === "POST" && acceptMatch) {
+      await acceptSuggestion(env, repo, acceptMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    const dismissMatch = pathname.match(/^\/api\/recurring\/suggestions\/([^/]+)\/dismiss$/);
+    if (method === "POST" && dismissMatch) {
+      await dismissSuggestion(env, dismissMatch[1]);
+      return json(200, { ok: true });
     }
 
     if (method === "GET" && pathname === "/api/freelance/clients") {
