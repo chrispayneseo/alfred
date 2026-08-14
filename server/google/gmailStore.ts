@@ -1,10 +1,7 @@
-// Local metadata cache for Gmail — sender/subject/date/snippet/threadId only,
-// never raw bodies (those are fetched on demand, see gmail.ts). SQLite via
-// Node's built-in node:sqlite, so no new dependency; this is a stand-in for
-// wherever this data lives once Supabase is in place.
-import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
-import path from "node:path";
+// Metadata cache for Gmail — sender/subject/date/snippet/threadId only,
+// never raw bodies (those are fetched on demand, see gmail.ts). Postgres
+// (server/db.ts), same database as the accounts table and nudge store.
+import { ensureSchema, getSql, type Env } from "../db";
 
 export interface EmailRecord {
   id: string;
@@ -26,79 +23,35 @@ export interface EmailRecord {
   draftId?: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const DB_PATH = path.join(DATA_DIR, "gmail.db");
-
-let db: DatabaseSync | undefined;
+async function db(env: Env) {
+  await ensureSchema(env);
+  return getSql(env);
+}
 
 function rowKey(accountEmail: string, id: string): string {
   return `${accountEmail}:${id}`;
-}
-
-function getDb(): DatabaseSync {
-  if (db) return db;
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  db = new DatabaseSync(DB_PATH);
-
-  // Step 5's schema keyed emails by Gmail message id alone, which is only
-  // guaranteed unique within one account's mailbox. Step 8 (multi-account)
-  // needs (accountEmail, id) instead. This is a cache, not source of truth
-  // (see Step 5/7), so upgrading in place just rebuilds the table — a re-sync
-  // repopulates it — rather than writing a real column migration.
-  const columns = db.prepare(`PRAGMA table_info(emails)`).all() as { name: string }[];
-  const hasOldSchema = columns.length > 0 && !columns.some((c) => c.name === "accountEmail");
-  if (hasOldSchema) db.exec(`DROP TABLE emails;`);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS emails (
-      rowKey TEXT PRIMARY KEY,
-      accountEmail TEXT NOT NULL,
-      id TEXT NOT NULL,
-      threadId TEXT NOT NULL,
-      sender TEXT NOT NULL,
-      senderEmail TEXT NOT NULL,
-      subject TEXT NOT NULL,
-      date TEXT NOT NULL,
-      snippet TEXT NOT NULL,
-      scanned INTEGER NOT NULL DEFAULT 0,
-      actionable INTEGER NOT NULL DEFAULT 0,
-      needsReply INTEGER NOT NULL DEFAULT 0,
-      hasDeadline INTEGER NOT NULL DEFAULT 0,
-      deadlineDate TEXT,
-      project TEXT,
-      itemType TEXT,
-      notionPageId TEXT,
-      draftId TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_emails_scanned ON emails(scanned);
-    CREATE INDEX IF NOT EXISTS idx_emails_actionable ON emails(actionable);
-    CREATE INDEX IF NOT EXISTS idx_emails_date ON emails(date);
-    CREATE INDEX IF NOT EXISTS idx_emails_account ON emails(accountEmail);
-    CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  `);
-  return db;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toRecord(row: any): EmailRecord {
   return {
     id: row.id,
-    accountEmail: row.accountEmail,
-    threadId: row.threadId,
+    accountEmail: row.account_email,
+    threadId: row.thread_id,
     sender: row.sender,
-    senderEmail: row.senderEmail,
+    senderEmail: row.sender_email,
     subject: row.subject,
-    date: row.date,
+    date: new Date(row.date).toISOString(),
     snippet: row.snippet,
-    scanned: Boolean(row.scanned),
-    actionable: Boolean(row.actionable),
-    needsReply: Boolean(row.needsReply),
-    hasDeadline: Boolean(row.hasDeadline),
-    deadlineDate: row.deadlineDate ?? undefined,
+    scanned: row.scanned,
+    actionable: row.actionable,
+    needsReply: row.needs_reply,
+    hasDeadline: row.has_deadline,
+    deadlineDate: row.deadline_date ?? undefined,
     project: row.project ?? undefined,
-    itemType: row.itemType ?? undefined,
-    notionPageId: row.notionPageId ?? undefined,
-    draftId: row.draftId ?? undefined,
+    itemType: row.item_type ?? undefined,
+    notionPageId: row.notion_page_id ?? undefined,
+    draftId: row.draft_id ?? undefined,
   };
 }
 
@@ -116,44 +69,46 @@ export interface EmailMetadataInput {
 /** Inserts new email metadata; a message already stored (by account + id) is
  * left untouched (its scan state shouldn't be reset by re-running sync over
  * overlapping ranges). */
-export function upsertEmailMetadata(records: EmailMetadataInput[]): void {
+export async function upsertEmailMetadata(env: Env, records: EmailMetadataInput[]): Promise<void> {
   if (records.length === 0) return;
-  const stmt = getDb().prepare(`
-    INSERT INTO emails (rowKey, accountEmail, id, threadId, sender, senderEmail, subject, date, snippet)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(rowKey) DO NOTHING
-  `);
+  const sql = await db(env);
   for (const r of records) {
-    stmt.run(rowKey(r.accountEmail, r.id), r.accountEmail, r.id, r.threadId, r.sender, r.senderEmail, r.subject, r.date, r.snippet);
+    await sql.query(
+      `INSERT INTO gmail_emails (row_key, account_email, id, thread_id, sender, sender_email, subject, date, snippet)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (row_key) DO NOTHING`,
+      [rowKey(r.accountEmail, r.id), r.accountEmail, r.id, r.threadId, r.sender, r.senderEmail, r.subject, r.date, r.snippet]
+    );
   }
 }
 
-export function getUnscannedEmails(limit: number): EmailRecord[] {
-  const rows = getDb()
-    .prepare(`SELECT * FROM emails WHERE scanned = 0 ORDER BY date DESC LIMIT ?`)
-    .all(limit);
+export async function getUnscannedEmails(env: Env, limit: number): Promise<EmailRecord[]> {
+  const sql = await db(env);
+  const rows = await sql.query("SELECT * FROM gmail_emails WHERE scanned = false ORDER BY date DESC LIMIT $1", [limit]);
   return rows.map(toRecord);
 }
 
-export function countUnscanned(): number {
-  const row = getDb().prepare(`SELECT COUNT(*) as n FROM emails WHERE scanned = 0`).get() as { n: number };
-  return row.n;
+export async function countUnscanned(env: Env): Promise<number> {
+  const sql = await db(env);
+  const [row] = (await sql.query("SELECT COUNT(*) as n FROM gmail_emails WHERE scanned = false")) as { n: string }[];
+  return Number(row.n);
 }
 
-export function countTotal(): number {
-  const row = getDb().prepare(`SELECT COUNT(*) as n FROM emails`).get() as { n: number };
-  return row.n;
+export async function countTotal(env: Env): Promise<number> {
+  const sql = await db(env);
+  const [row] = (await sql.query("SELECT COUNT(*) as n FROM gmail_emails")) as { n: string }[];
+  return Number(row.n);
 }
 
-export function countFlagged(): number {
-  const row = getDb().prepare(`SELECT COUNT(*) as n FROM emails WHERE actionable = 1`).get() as { n: number };
-  return row.n;
+export async function countFlagged(env: Env): Promise<number> {
+  const sql = await db(env);
+  const [row] = (await sql.query("SELECT COUNT(*) as n FROM gmail_emails WHERE actionable = true")) as { n: string }[];
+  return Number(row.n);
 }
 
-export function getFlaggedEmails(limit = 50): EmailRecord[] {
-  const rows = getDb()
-    .prepare(`SELECT * FROM emails WHERE actionable = 1 ORDER BY date DESC LIMIT ?`)
-    .all(limit);
+export async function getFlaggedEmails(env: Env, limit = 50): Promise<EmailRecord[]> {
+  const sql = await db(env);
+  const rows = await sql.query("SELECT * FROM gmail_emails WHERE actionable = true ORDER BY date DESC LIMIT $1", [limit]);
   return rows.map(toRecord);
 }
 
@@ -168,60 +123,60 @@ export interface ScanResult {
   draftId?: string;
 }
 
-export function markScanned(accountEmail: string, id: string, result: ScanResult): void {
-  getDb()
-    .prepare(
-      `UPDATE emails SET scanned = 1, actionable = ?, needsReply = ?, hasDeadline = ?, deadlineDate = ?, project = ?, itemType = ?, notionPageId = ?, draftId = ? WHERE rowKey = ?`
-    )
-    .run(
-      result.actionable ? 1 : 0,
-      result.needsReply ? 1 : 0,
-      result.hasDeadline ? 1 : 0,
+export async function markScanned(env: Env, accountEmail: string, id: string, result: ScanResult): Promise<void> {
+  const sql = await db(env);
+  await sql.query(
+    `UPDATE gmail_emails
+     SET scanned = true, actionable = $1, needs_reply = $2, has_deadline = $3, deadline_date = $4,
+         project = $5, item_type = $6, notion_page_id = $7, draft_id = $8
+     WHERE row_key = $9`,
+    [
+      result.actionable,
+      result.needsReply,
+      result.hasDeadline,
       result.deadlineDate ?? null,
       result.project ?? null,
       result.itemType ?? null,
       result.notionPageId ?? null,
       result.draftId ?? null,
-      rowKey(accountEmail, id)
-    );
-}
-
-/** Cheap local fallback search (subject/sender/snippet) — used only if a live
- * Gmail search can't run (e.g. mid-sync). Prefer gmail.ts's searchMessages otherwise. */
-export function searchEmailsLocal(query: string, limit = 5): EmailRecord[] {
-  const like = `%${query}%`;
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM emails WHERE subject LIKE ? OR sender LIKE ? OR snippet LIKE ? ORDER BY date DESC LIMIT ?`
-    )
-    .all(like, like, like, limit);
-  return rows.map(toRecord);
+      rowKey(accountEmail, id),
+    ]
+  );
 }
 
 /** All cached email metadata, for the data export — same fields as everywhere
  * else in this store (metadata only, never raw bodies). */
-export function getAllEmails(): EmailRecord[] {
-  const rows = getDb().prepare(`SELECT * FROM emails ORDER BY date DESC`).all();
+export async function getAllEmails(env: Env): Promise<EmailRecord[]> {
+  const sql = await db(env);
+  const rows = await sql.query("SELECT * FROM gmail_emails ORDER BY date DESC");
   return rows.map(toRecord);
 }
 
-/** Wipes the entire local Gmail cache — used by the settings "delete
+/** Wipes the entire cached Gmail metadata — used by the settings "delete
  * everything / disconnect" flow. Does not touch Gmail or Notion themselves. */
-export function clearAllEmails(): void {
-  getDb().exec(`DELETE FROM emails; DELETE FROM meta;`);
+export async function clearAllEmails(env: Env): Promise<void> {
+  const sql = await db(env);
+  await sql.query("DELETE FROM gmail_emails");
+  await sql.query("DELETE FROM gmail_meta");
 }
 
 /** Clears just one account's cached emails — used when disconnecting a
  * single account (Step 8) rather than the full wipe. */
-export function clearEmailsForAccount(accountEmail: string): void {
-  getDb().prepare(`DELETE FROM emails WHERE accountEmail = ?`).run(accountEmail);
+export async function clearEmailsForAccount(env: Env, accountEmail: string): Promise<void> {
+  const sql = await db(env);
+  await sql.query("DELETE FROM gmail_emails WHERE account_email = $1", [accountEmail]);
 }
 
-export function getMeta(key: string): string | undefined {
-  const row = getDb().prepare(`SELECT value FROM meta WHERE key = ?`).get(key) as { value: string } | undefined;
-  return row?.value;
+export async function getMeta(env: Env, key: string): Promise<string | undefined> {
+  const sql = await db(env);
+  const rows = (await sql.query("SELECT value FROM gmail_meta WHERE key = $1", [key])) as { value: string }[];
+  return rows[0]?.value;
 }
 
-export function setMeta(key: string, value: string): void {
-  getDb().prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+export async function setMeta(env: Env, key: string, value: string): Promise<void> {
+  const sql = await db(env);
+  await sql.query(
+    "INSERT INTO gmail_meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    [key, value]
+  );
 }

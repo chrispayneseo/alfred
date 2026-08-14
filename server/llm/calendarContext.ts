@@ -1,3 +1,4 @@
+import type { Env } from "../db";
 import type { GoogleAccountEnv } from "../google/accounts";
 import { getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type CalendarEventRecord } from "../google/calendar";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors";
@@ -41,9 +42,12 @@ function formatEvent(event: CalendarEventRecord): string {
  * request. If one account needs reconnecting but another still works, the
  * working account's events are still included, with an honest note about
  * the one that's missing (Step 8: multi-account). */
-export async function buildCalendarContext(accounts: GoogleAccountEnv[]): Promise<string> {
+export async function buildCalendarContext(env: Env, accounts: GoogleAccountEnv[]): Promise<string> {
   try {
-    const [today, tomorrow] = await Promise.all([getTodayEventsAllAccounts(accounts), getTomorrowEventsAllAccounts(accounts)]);
+    const [today, tomorrow] = await Promise.all([
+      getTodayEventsAllAccounts(env, accounts),
+      getTomorrowEventsAllAccounts(env, accounts),
+    ]);
     const todayBlock = today.events.length ? today.events.map(formatEvent).join("\n") : "No events today.";
     const tomorrowBlock = tomorrow.events.length ? tomorrow.events.map(formatEvent).join("\n") : "No events tomorrow.";
     const failedAccounts = [...new Set([...today.failedAccounts, ...tomorrow.failedAccounts])];

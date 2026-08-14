@@ -1,5 +1,3 @@
-import { loadEnv } from "vite";
-
 export interface LlmEnv {
   anthropicApiKey: string;
   openaiApiKey: string;
@@ -8,11 +6,12 @@ export interface LlmEnv {
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
 
-export function loadLlmEnv(): LlmEnv {
-  const env = loadEnv("development", process.cwd(), "");
+/** Takes a raw env source rather than loading one itself — see google/env.ts
+ * for why (dev uses Vite's loadEnv(), prod uses process.env). */
+export function loadLlmEnv(source: Record<string, string | undefined>): LlmEnv {
   return {
-    anthropicApiKey: env.ANTHROPIC_API_KEY ?? "",
-    openaiApiKey: env.OPENAI_API_KEY ?? "",
-    openaiModel: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    anthropicApiKey: source.ANTHROPIC_API_KEY ?? "",
+    openaiApiKey: source.OPENAI_API_KEY ?? "",
+    openaiModel: source.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
   };
 }

@@ -1,3 +1,4 @@
+import type { Env } from "../db";
 import type { LlmEnv } from "../llm/env";
 import { phraseNudge } from "../llm/nudgeMessage";
 import type { NotionRepo } from "../notion/queries";
@@ -24,7 +25,7 @@ function todayIso(): string {
  * it's triggered on Today-screen load. No "dismissed" state is tracked: the
  * task list is re-derived live every call, so marking a task Done in Notion
  * is enough to make its nudge stop appearing on the next check. */
-export async function runNudgeCheck(llmEnv: LlmEnv, ntfyEnv: NtfyEnv, repo: NotionRepo): Promise<NudgeItem[]> {
+export async function runNudgeCheck(dbEnv: Env, llmEnv: LlmEnv, ntfyEnv: NtfyEnv, repo: NotionRepo): Promise<NudgeItem[]> {
   const overdue = await repo.listOverdueTasks();
   const today = todayIso();
 
@@ -33,10 +34,10 @@ export async function runNudgeCheck(llmEnv: LlmEnv, ntfyEnv: NtfyEnv, repo: Noti
       const message = await phraseNudge(llmEnv, task);
       let pushed = false;
 
-      if (ntfyEnv.topic && shouldPush(task.id, today)) {
+      if (ntfyEnv.topic && (await shouldPush(dbEnv, task.id, today))) {
         try {
           await notify(ntfyEnv.topic, message);
-          recordPush(task.id, today);
+          await recordPush(dbEnv, task.id, today);
           pushed = true;
         } catch (error) {
           console.error(`[nudges] push failed for task ${task.id}:`, error);

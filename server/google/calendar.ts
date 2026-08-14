@@ -1,7 +1,7 @@
 import { calendar_v3 } from "googleapis";
+import type { Env } from "../db";
 import { createAuthenticatedClient } from "./client";
-import type { GoogleAccountEnv } from "./accounts";
-import { markAccountNeedsReconnect, markAccountOk } from "./accountStatus";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "./accounts";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors";
 
 export interface CalendarEventRecord {
@@ -108,7 +108,7 @@ export interface MultiAccountEvents {
  * request — so one stale token doesn't take down a still-working account.
  * Only throws GoogleReconnectRequiredError if EVERY connected account fails,
  * matching the single-account "reconnect" screen when nothing works at all. */
-export async function listEventsAllAccounts(accounts: GoogleAccountEnv[], range: DateRange): Promise<MultiAccountEvents> {
+export async function listEventsAllAccounts(env: Env, accounts: GoogleAccountEnv[], range: DateRange): Promise<MultiAccountEvents> {
   if (accounts.length === 0) throw new GoogleNotConnectedError();
 
   const failedAccounts: string[] = [];
@@ -116,11 +116,11 @@ export async function listEventsAllAccounts(accounts: GoogleAccountEnv[], range:
     accounts.map(async (account) => {
       try {
         const events = await listEvents(account, range);
-        markAccountOk(account.email);
+        await markAccountOk(env, account.email);
         return events;
       } catch (error) {
         if (error instanceof GoogleReconnectRequiredError) {
-          markAccountNeedsReconnect(account.email);
+          await markAccountNeedsReconnect(env, account.email);
           failedAccounts.push(account.email);
           return [];
         }
@@ -135,10 +135,10 @@ export async function listEventsAllAccounts(accounts: GoogleAccountEnv[], range:
   return { events, failedAccounts };
 }
 
-export function getTodayEventsAllAccounts(accounts: GoogleAccountEnv[]): Promise<MultiAccountEvents> {
-  return listEventsAllAccounts(accounts, getTodayRange());
+export function getTodayEventsAllAccounts(env: Env, accounts: GoogleAccountEnv[]): Promise<MultiAccountEvents> {
+  return listEventsAllAccounts(env, accounts, getTodayRange());
 }
 
-export function getTomorrowEventsAllAccounts(accounts: GoogleAccountEnv[]): Promise<MultiAccountEvents> {
-  return listEventsAllAccounts(accounts, getTomorrowRange());
+export function getTomorrowEventsAllAccounts(env: Env, accounts: GoogleAccountEnv[]): Promise<MultiAccountEvents> {
+  return listEventsAllAccounts(env, accounts, getTomorrowRange());
 }

@@ -2,42 +2,29 @@
 // dismissal or acknowledgement. The in-app nudge list is always re-derived
 // live from Notion; this store exists solely to stop repeated Today-screen
 // opens from re-pinging the phone for the same still-overdue task on the
-// same day. SQLite via node:sqlite, same stand-in pattern as gmailStore.ts.
-import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
-import path from "node:path";
+// same day. Postgres (server/db.ts) — same database as the Gmail cache.
+import { ensureSchema, getSql, type Env } from "../db";
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const DB_PATH = path.join(DATA_DIR, "nudges.db");
-
-let db: DatabaseSync | undefined;
-
-function getDb(): DatabaseSync {
-  if (db) return db;
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  db = new DatabaseSync(DB_PATH);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS pushed_nudges (
-      task_id TEXT PRIMARY KEY,
-      pushed_date TEXT NOT NULL
-    );
-  `);
-  return db;
+async function db(env: Env) {
+  await ensureSchema(env);
+  return getSql(env);
 }
 
-export function shouldPush(taskId: string, todayIso: string): boolean {
-  const row = getDb().prepare(`SELECT pushed_date FROM pushed_nudges WHERE task_id = ?`).get(taskId) as
-    | { pushed_date: string }
-    | undefined;
-  return row?.pushed_date !== todayIso;
+export async function shouldPush(env: Env, taskId: string, todayIso: string): Promise<boolean> {
+  const sql = await db(env);
+  const rows = (await sql.query("SELECT pushed_date FROM pushed_nudges WHERE task_id = $1", [taskId])) as {
+    pushed_date: string;
+  }[];
+  return rows[0]?.pushed_date !== todayIso;
 }
 
-export function recordPush(taskId: string, todayIso: string): void {
-  getDb()
-    .prepare(
-      `INSERT INTO pushed_nudges (task_id, pushed_date) VALUES (?, ?) ON CONFLICT(task_id) DO UPDATE SET pushed_date = excluded.pushed_date`
-    )
-    .run(taskId, todayIso);
+export async function recordPush(env: Env, taskId: string, todayIso: string): Promise<void> {
+  const sql = await db(env);
+  await sql.query(
+    `INSERT INTO pushed_nudges (task_id, pushed_date) VALUES ($1, $2)
+     ON CONFLICT (task_id) DO UPDATE SET pushed_date = excluded.pushed_date`,
+    [taskId, todayIso]
+  );
 }
 
 export interface PushedNudgeRecord {
@@ -46,14 +33,19 @@ export interface PushedNudgeRecord {
 }
 
 /** All push-throttle rows, for the data export. */
-export function getAllPushedNudges(): PushedNudgeRecord[] {
-  const rows = getDb().prepare(`SELECT task_id as taskId, pushed_date as pushedDate FROM pushed_nudges`).all();
-  return rows as unknown as PushedNudgeRecord[];
+export async function getAllPushedNudges(env: Env): Promise<PushedNudgeRecord[]> {
+  const sql = await db(env);
+  const rows = (await sql.query("SELECT task_id, pushed_date FROM pushed_nudges")) as {
+    task_id: string;
+    pushed_date: string;
+  }[];
+  return rows.map((r) => ({ taskId: r.task_id, pushedDate: r.pushed_date }));
 }
 
 /** Wipes the push-throttle state — used by the settings "delete everything /
  * disconnect" flow. Doesn't affect anything in Notion; nudges themselves are
  * always re-derived live from Notion's current task status. */
-export function clearAllPushedNudges(): void {
-  getDb().exec(`DELETE FROM pushed_nudges;`);
+export async function clearAllPushedNudges(env: Env): Promise<void> {
+  const sql = await db(env);
+  await sql.query("DELETE FROM pushed_nudges");
 }

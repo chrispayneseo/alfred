@@ -1,11 +1,11 @@
 import { z } from "zod";
-import type { GoogleAccountEnv } from "../google/accounts";
-import { markAccountNeedsReconnect, markAccountOk } from "../google/accountStatus";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError, toGoogleErrorCode } from "../google/errors";
 import { createDraftReply, getMessageBody, getReplyHeaders, gmailThreadUrl } from "../google/gmail";
 import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gmailStore";
 import type { NotionRepo } from "../notion/queries";
 import { PROJECT_SEED_NAMES } from "../notion/schema";
+import { ensureSchema, getSql, type Env } from "../db";
 import type { LlmEnv } from "./env";
 import { routedComplete } from "./routedComplete";
 
@@ -77,33 +77,76 @@ export interface ScanStatus {
   error?: string;
 }
 
-// Single in-memory job, same pattern as gmailSync.ts.
-let job: ScanStatus = { running: false, processed: 0, total: 0 };
+interface ScanJobRow {
+  running: boolean;
+  processed: number;
+  total: number;
+  error: string | null;
+  updated_at: string;
+}
 
-export function getScanStatus(): ScanStatus {
-  return { ...job };
+const STALE_AFTER_MS = 6 * 60 * 1000;
+
+async function db(env: Env) {
+  await ensureSchema(env);
+  return getSql(env);
+}
+
+function toStatus(row: ScanJobRow): ScanStatus {
+  return { running: row.running, processed: row.processed, total: row.total, error: row.error ?? undefined };
+}
+
+export async function getScanStatus(env: Env): Promise<ScanStatus> {
+  const sql = await db(env);
+  const [row] = (await sql.query("SELECT * FROM scan_job WHERE id = 'singleton'")) as ScanJobRow[];
+  if (row.running && Date.now() - new Date(row.updated_at).getTime() > STALE_AFTER_MS) {
+    const [updated] = (await sql.query(
+      "UPDATE scan_job SET running = false, error = 'timeout', updated_at = now() WHERE id = 'singleton' RETURNING *"
+    )) as ScanJobRow[];
+    return toStatus(updated);
+  }
+  return toStatus(row);
 }
 
 /** Scans up to `limit` unscanned emails, regardless of which connected
  * account they came from: classifies each with the routed model (Step 3's
  * routing/fallback), files actionable ones into Notion, and creates a Gmail
  * draft (never sends) for anything needing a reply — using the SAME account
- * the email arrived on. Runs in the background — call getScanStatus() to
- * poll progress. */
-export function startScan(llmEnv: LlmEnv, accounts: GoogleAccountEnv[], notionRepo: NotionRepo, limit: number): ScanStatus {
-  if (job.running) return getScanStatus();
-  const batch = getUnscannedEmails(limit);
-  job = { running: true, processed: 0, total: batch.length };
+ * the email arrived on. Claimed atomically against scan_job, same pattern as
+ * gmailSync.ts's startSync. `backgroundTask` lets the work continue after
+ * this returns (fire-and-forget locally, Vercel's waitUntil in production).
+ * Call getScanStatus() to poll progress. */
+export async function startScan(
+  env: Env,
+  llmEnv: LlmEnv,
+  accounts: GoogleAccountEnv[],
+  notionRepo: NotionRepo,
+  limit: number,
+  backgroundTask: (task: Promise<unknown>) => void
+): Promise<ScanStatus> {
+  const batch = await getUnscannedEmails(env, limit);
+  const sql = await db(env);
+  const claimed = (await sql.query(
+    `UPDATE scan_job SET running = true, processed = 0, total = $1, error = NULL, updated_at = now()
+     WHERE id = 'singleton' AND running = false
+     RETURNING *`,
+    [batch.length]
+  )) as ScanJobRow[];
+  if (claimed.length === 0) return getScanStatus(env);
 
-  void runScan(llmEnv, accounts, notionRepo, batch).catch((error) => {
-    console.error("[emailScan] scan failed:", error);
-    job = { ...job, running: false, error: toGoogleErrorCode(error) };
-  });
+  backgroundTask(runScan(env, llmEnv, accounts, notionRepo, batch));
 
-  return getScanStatus();
+  return toStatus(claimed[0]);
 }
 
-async function runScan(llmEnv: LlmEnv, accounts: GoogleAccountEnv[], notionRepo: NotionRepo, batch: EmailRecord[]): Promise<void> {
+async function runScan(
+  env: Env,
+  llmEnv: LlmEnv,
+  accounts: GoogleAccountEnv[],
+  notionRepo: NotionRepo,
+  batch: EmailRecord[]
+): Promise<void> {
+  const sql = await db(env);
   const accountByEmail = new Map(accounts.map((a) => [a.email, a]));
   // If an account's token turns out to need reconnecting mid-batch, don't
   // keep retrying Gmail calls against it for every remaining email from that
@@ -116,22 +159,22 @@ async function runScan(llmEnv: LlmEnv, accounts: GoogleAccountEnv[], notionRepo:
     const account = accountByEmail.get(email.accountEmail);
     try {
       if (!account || brokenAccounts.has(email.accountEmail)) {
-        markScanned(email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
+        await markScanned(env, email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
       } else {
-        await scanOne(llmEnv, account, notionRepo, email);
-        markAccountOk(account.email);
+        await scanOne(env, llmEnv, account, notionRepo, email);
+        await markAccountOk(env, account.email);
       }
     } catch (error) {
       if (error instanceof GoogleNotConnectedError || error instanceof GoogleReconnectRequiredError) {
         console.error(`[emailScan] account ${email.accountEmail} needs reconnecting — skipping its remaining emails this batch`);
-        markAccountNeedsReconnect(email.accountEmail);
+        await markAccountNeedsReconnect(env, email.accountEmail);
         brokenAccounts.add(email.accountEmail);
       } else {
         console.error(`[emailScan] failed to scan ${email.id}:`, error);
       }
-      markScanned(email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
+      await markScanned(env, email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
     }
-    job = { ...job, processed: job.processed + 1 };
+    await sql.query("UPDATE scan_job SET processed = processed + 1, updated_at = now() WHERE id = 'singleton'");
   }
 
   // Only surface a job-level error if every account hit in this batch was
@@ -139,12 +182,14 @@ async function runScan(llmEnv: LlmEnv, accounts: GoogleAccountEnv[], notionRepo:
   // per-account in Settings rather than blocking the whole scan.
   const accountsInBatch = new Set(batch.map((e) => e.accountEmail));
   const allFailed = accountsInBatch.size > 0 && [...accountsInBatch].every((email) => brokenAccounts.has(email));
-  job = { ...job, running: false, error: allFailed ? "reconnect_required" : undefined };
+  await sql.query("UPDATE scan_job SET running = false, error = $1, updated_at = now() WHERE id = 'singleton'", [
+    allFailed ? "reconnect_required" : null,
+  ]);
 }
 
-async function scanOne(llmEnv: LlmEnv, account: GoogleAccountEnv, notionRepo: NotionRepo, email: EmailRecord): Promise<void> {
+async function scanOne(env: Env, llmEnv: LlmEnv, account: GoogleAccountEnv, notionRepo: NotionRepo, email: EmailRecord): Promise<void> {
   if (looksAutomated(email)) {
-    markScanned(email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
+    await markScanned(env, email.accountEmail, email.id, { actionable: false, needsReply: false, hasDeadline: false });
     return;
   }
 
@@ -170,7 +215,7 @@ async function scanOne(llmEnv: LlmEnv, account: GoogleAccountEnv, notionRepo: No
     draftId = await createDraftReply(account, { threadId: email.threadId, replyHeaders, bodyText: draftText });
   }
 
-  markScanned(email.accountEmail, email.id, {
+  await markScanned(env, email.accountEmail, email.id, {
     actionable: action.actionable,
     needsReply: action.needsReply,
     hasDeadline: action.hasDeadline,

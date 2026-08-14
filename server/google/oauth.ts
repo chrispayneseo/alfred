@@ -19,18 +19,55 @@ export const USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.em
 
 const SCOPES = [CALENDAR_READONLY_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE];
 
-// Single-user local dev flow — an in-memory pending state is enough to guard
-// against CSRF on the callback without needing a session store.
-let pendingState: string | undefined;
+// Stateless CSRF protection for the OAuth flow: a timestamp + random nonce,
+// HMAC-signed with the app's own GOOGLE_CLIENT_SECRET (already a private
+// secret with no other cryptographic use here, so no new secret is needed).
+// A module-level "pending state" variable — what this replaces — doesn't
+// survive Vercel's stateless, potentially multi-instance serverless model,
+// where the callback request can land on a different instance than the one
+// that generated the auth URL.
+//
+// Trade-off, accepted deliberately: the old in-memory token was single-use
+// (cleared on first check), which also blocked replay. This signed token is
+// valid for its whole freshness window below, so a captured still-fresh
+// state could in principle be replayed within that window. Acceptable for a
+// single-user personal app — not equivalent security to the mechanism it
+// replaces, and worth remembering if this pattern is ever reused somewhere
+// with a real multi-user threat model.
+const STATE_FRESHNESS_MS = 10 * 60 * 1000;
+
+function signState(clientSecret: string, timestamp: number, nonce: string): string {
+  return crypto.createHmac("sha256", clientSecret).update(`${timestamp}.${nonce}`).digest("hex");
+}
+
+function generateState(clientSecret: string): string {
+  const timestamp = Date.now();
+  const nonce = crypto.randomBytes(16).toString("hex");
+  return `${timestamp}.${nonce}.${signState(clientSecret, timestamp, nonce)}`;
+}
+
+export function isValidState(state: string | null, clientSecret: string): boolean {
+  if (!state) return false;
+  const parts = state.split(".");
+  if (parts.length !== 3) return false;
+  const [timestampStr, nonce, signature] = parts;
+
+  const timestamp = Number(timestampStr);
+  if (!Number.isFinite(timestamp) || Date.now() - timestamp > STATE_FRESHNESS_MS) return false;
+
+  const expected = Buffer.from(signState(clientSecret, timestamp, nonce), "hex");
+  const actual = Buffer.from(signature, "hex");
+  if (expected.length !== actual.length) return false;
+  return crypto.timingSafeEqual(expected, actual);
+}
 
 export function getAuthUrl(env: GoogleEnv, options?: { loginHint?: string }): string {
   const client = createOAuth2Client(env);
-  pendingState = crypto.randomBytes(16).toString("hex");
   return client.generateAuthUrl({
     access_type: "offline",
     scope: SCOPES,
     prompt: "consent", // guarantees a refresh_token even on a reconnect, and re-prompts for newly added scopes
-    state: pendingState,
+    state: generateState(env.clientSecret),
     // Pre-selects/suggests the right account in Google's picker when
     // reconnecting a specific already-connected account, so it's harder to
     // accidentally re-auth the wrong one. Left out of the options object
@@ -39,12 +76,6 @@ export function getAuthUrl(env: GoogleEnv, options?: { loginHint?: string }): st
     // meaningless empty `login_hint=` param.
     ...(options?.loginHint ? { login_hint: options.loginHint } : {}),
   });
-}
-
-export function isValidState(state: string | null): boolean {
-  const valid = !!state && state === pendingState;
-  pendingState = undefined;
-  return valid;
 }
 
 /** Exchanges an OAuth code for tokens and returns the refresh token to persist. */

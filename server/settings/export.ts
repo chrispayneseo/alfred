@@ -1,3 +1,4 @@
+import type { Env } from "../db";
 import type { GoogleAccountEnv } from "../google/accounts";
 import { CALENDAR_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, GMAIL_READONLY_SCOPE, USERINFO_EMAIL_SCOPE } from "../google/oauth";
 import { getAllEmails, getMeta } from "../google/gmailStore";
@@ -11,7 +12,7 @@ import type { NtfyEnv } from "../notify/env";
  * not "your data" in the sense this export is for. Notion content itself is
  * out of scope too — it's already the source of truth and exportable from
  * Notion directly. */
-export function buildExport(googleAccounts: GoogleAccountEnv[], notionEnv: NotionEnv, ntfyEnv: NtfyEnv) {
+export async function buildExport(env: Env, googleAccounts: GoogleAccountEnv[], notionEnv: NotionEnv, ntfyEnv: NtfyEnv) {
   return {
     exportedAt: new Date().toISOString(),
     integrations: {
@@ -24,9 +25,9 @@ export function buildExport(googleAccounts: GoogleAccountEnv[], notionEnv: Notio
       ntfy: { topic: ntfyEnv.topic || null },
     },
     gmailCache: {
-      lastSyncAt: getMeta("lastSyncAt") ?? null,
-      emails: getAllEmails(),
+      lastSyncAt: (await getMeta(env, "lastSyncAt")) ?? null,
+      emails: await getAllEmails(env),
     },
-    nudgePushHistory: getAllPushedNudges(),
+    nudgePushHistory: await getAllPushedNudges(env),
   };
 }

@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -14,7 +17,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
+    "@neondatabase/serverless": "^1.1.0",
     "@notionhq/client": "^5.25.2",
+    "@vercel/functions": "^3.9.3",
     "googleapis": "^174.0.1",
     "openai": "^7.4.0",
     "react": "^19.1.0",

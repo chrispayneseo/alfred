@@ -9,3 +9,7 @@ dev-dist
 !.env.example
 .claude/
 .data/
+.vercel
+.env*
+.agents/
+skills-lock.json

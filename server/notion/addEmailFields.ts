@@ -1,6 +1,7 @@
 // One-off, idempotent migration for Step 5: adds an "Email Link" URL property
 // to Inbox/Tasks/Notes, and an "email" option to Inbox's Captured Via select.
 // Run with: npm run notion:add-email-fields
+import { loadEnv } from "vite";
 import type { Client } from "@notionhq/client";
 import { createNotionClient } from "./client";
 import { loadNotionEnv } from "./env";
@@ -37,7 +38,7 @@ async function ensureSelectOption(notion: Client, dataSourceId: string, propName
 }
 
 async function main() {
-  const env = loadNotionEnv();
+  const env = loadNotionEnv(loadEnv("development", process.cwd(), ""));
   if (!env.token) throw new Error("NOTION_TOKEN is missing from .env");
   const notion = createNotionClient(env.token);
 

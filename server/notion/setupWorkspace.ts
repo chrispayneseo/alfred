@@ -6,6 +6,7 @@
 // (not the outer database id) that relations, page creation, and queries
 // all key off — see server/notion/env.ts.
 import path from "node:path";
+import { loadEnv } from "vite";
 import type { Client } from "@notionhq/client";
 import { createNotionClient } from "./client";
 import { loadNotionEnv } from "./env";
@@ -44,7 +45,7 @@ async function createDataSourceDb(
 }
 
 async function main() {
-  const env = loadNotionEnv();
+  const env = loadNotionEnv(loadEnv("development", process.cwd(), ""));
   if (!env.token) throw new Error("NOTION_TOKEN is missing from .env");
   if (!env.parentPageId) throw new Error("NOTION_PARENT_PAGE_ID is missing from .env");
 

@@ -1,10 +1,9 @@
-import { loadEnv } from "vite";
-
 export interface NtfyEnv {
   topic: string;
 }
 
-export function loadNtfyEnv(): NtfyEnv {
-  const env = loadEnv("development", process.cwd(), "");
-  return { topic: env.NTFY_TOPIC ?? "" };
+/** Takes a raw env source rather than loading one itself — see
+ * google/env.ts for why (dev uses Vite's loadEnv(), prod uses process.env). */
+export function loadNtfyEnv(source: Record<string, string | undefined>): NtfyEnv {
+  return { topic: source.NTFY_TOPIC ?? "" };
 }

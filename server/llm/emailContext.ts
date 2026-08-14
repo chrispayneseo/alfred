@@ -1,5 +1,5 @@
-import type { GoogleAccountEnv } from "../google/accounts";
-import { markAccountNeedsReconnect, markAccountOk } from "../google/accountStatus";
+import type { Env } from "../db";
+import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors";
 import { getMessageBody, searchMessages, type EmailMetadata } from "../google/gmail";
 import { deriveSearchQuery } from "./queryTerms";
@@ -32,6 +32,7 @@ const BODY_FETCH_COUNT = 2;
 /** Searches every connected account in parallel and merges results by date —
  * a stale token on one account doesn't block search on the others (Step 8). */
 async function searchAllAccounts(
+  env: Env,
   accounts: GoogleAccountEnv[],
   query: string
 ): Promise<{ matches: EmailMetadata[]; failedAccounts: string[] }> {
@@ -40,11 +41,11 @@ async function searchAllAccounts(
     accounts.map(async (account) => {
       try {
         const results = await searchMessages(account, query, MAX_RESULTS);
-        markAccountOk(account.email);
+        await markAccountOk(env, account.email);
         return results;
       } catch (error) {
         if (error instanceof GoogleReconnectRequiredError) {
-          markAccountNeedsReconnect(account.email);
+          await markAccountNeedsReconnect(env, account.email);
           failedAccounts.push(account.email);
           return [];
         }
@@ -64,13 +65,13 @@ async function searchAllAccounts(
  * connected accounts + on-demand body fetch for the top matches, formatted
  * for the model's system context. Never throws — a connection problem
  * becomes an honest note in the context. */
-export async function buildEmailContext(accounts: GoogleAccountEnv[], text: string): Promise<string> {
+export async function buildEmailContext(env: Env, accounts: GoogleAccountEnv[], text: string): Promise<string> {
   if (accounts.length === 0) {
     return "The user's Gmail isn't connected yet. If they ask about email, tell them to connect it from the Today screen — don't guess.";
   }
 
   try {
-    const { matches, failedAccounts } = await searchAllAccounts(accounts, deriveSearchQuery(text));
+    const { matches, failedAccounts } = await searchAllAccounts(env, accounts, deriveSearchQuery(text));
     const failedNote = failedAccounts.length
       ? ` (note: ${failedAccounts.join(", ")} couldn't be searched — needs reconnecting; results below are from the user's other connected account(s) only)`
       : "";
