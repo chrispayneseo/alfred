@@ -12,9 +12,11 @@ import { runChat } from "./llm/chat";
 import { classifyWithModel } from "./llm/classify";
 import { loadLlmEnv } from "./llm/env";
 import type { ChatTurn } from "./llm/types";
+import { runNudgeCheck } from "./nudges/check";
 import { createNotionClient } from "./notion/client";
 import { loadNotionEnv } from "./notion/env";
 import { NotionRepo } from "./notion/queries";
+import { loadNtfyEnv } from "./notify/env";
 
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -179,6 +181,11 @@ export function apiPlugin(): Plugin {
 
           if (method === "GET" && url.pathname === "/api/gmail/flagged") {
             return sendJson(res, 200, getFlaggedEmails());
+          }
+
+          if (method === "POST" && url.pathname === "/api/nudges/check") {
+            if (!repo) return sendJson(res, 503, { error: "Notion isn't configured yet." });
+            return sendJson(res, 200, await runNudgeCheck(llmEnv, loadNtfyEnv(), repo));
           }
 
           if (!repo) {

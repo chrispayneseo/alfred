@@ -28,11 +28,19 @@ export async function claudeChat(apiKey: string, messages: ChatTurn[], extraCont
 
 /** Single-turn completion with a caller-supplied system prompt — no Alfred
  * chat persona baked in. Used for structured/classification-style tasks
- * (email action-item scanning) that still want Step 3's routing/fallback. */
-export async function claudeComplete(apiKey: string, systemPrompt: string, userText: string, maxTokens = 512): Promise<string> {
+ * (email action-item scanning) that still want Step 3's routing/fallback.
+ * `model` defaults to Opus but callers doing cheap classification (rather
+ * than generation quality-sensitive work) should pass a lighter model. */
+export async function claudeComplete(
+  apiKey: string,
+  systemPrompt: string,
+  userText: string,
+  maxTokens = 512,
+  model = "claude-opus-5"
+): Promise<string> {
   const anthropic = getAnthropicClient(apiKey);
   const response = await anthropic.messages.create({
-    model: "claude-opus-5",
+    model,
     max_tokens: maxTokens,
     thinking: { type: "disabled" },
     system: systemPrompt,

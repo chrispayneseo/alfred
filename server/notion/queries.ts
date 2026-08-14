@@ -230,6 +230,39 @@ export class NotionRepo {
     return { tasks, notes };
   }
 
+  /** Open Tasks with a due date before today — always re-derived live from
+   * Notion's current status, nothing about "already nudged" is stored here
+   * (see server/nudges/nudgeStore.ts for the separate push-throttle state). */
+  async listOverdueTasks(): Promise<TaskRecord[]> {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const filter = {
+      and: [
+        { property: TASKS_PROPS.status, select: { equals: TASK_STATUS.OPEN } },
+        { property: TASKS_PROPS.dueDate, date: { before: todayIso } },
+      ],
+    };
+    const res = await this.notion.dataSources.query({
+      data_source_id: this.env.tasksDbId,
+      filter,
+      sorts: [{ property: TASKS_PROPS.dueDate, direction: "ascending" }],
+    } as never);
+
+    const projects = await this.listProjects();
+    const projectById = new Map(projects.map((p) => [p.id, p.name]));
+
+    return (res.results as AnyPage[]).map((page) => {
+      const [projId] = getRelationIds(page, TASKS_PROPS.project);
+      return {
+        id: page.id,
+        title: getTitle(page),
+        done: false,
+        due: getDate(page, TASKS_PROPS.dueDate),
+        projectId: projId,
+        projectName: projId ? projectById.get(projId) : undefined,
+      };
+    });
+  }
+
   async updateTaskStatus(taskId: string, done: boolean): Promise<void> {
     await this.notion.pages.update({
       page_id: taskId,

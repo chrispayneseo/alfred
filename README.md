@@ -4,7 +4,7 @@ A proactive personal assistant PWA — captures, organizes, and briefs, using Cl
 
 ## Status
 
-Step 5 of 8: Gmail integration (read-only + draft-only, same one account as Calendar). The Today screen has a "Flagged" section: sync the inbox, scan for action items with the routed model, and see what got flagged — with a link back to the thread, the Notion page it was filed to, and whether a reply draft is waiting in Gmail. Chat's grounding now spans Notion and email together, so a question like "what time is my Thaikhun reservation?" is answered from a real, live-searched email instead of a guess.
+Step 6 of 8: Nudges — proactive reminders for overdue Tasks, delivered both in-app and as a real phone push via [ntfy.sh](https://ntfy.sh). The Today screen has a "Nudges" section that checks Notion for open Tasks past their due date, phrases a calm reminder for each with the routed model, and shows a soft count/badge — no big banner. The same check pushes to your phone via ntfy, throttled to once per task per day so reopening the app doesn't re-ping you for something you already know about.
 
 **Alfred never sends email.** Only `gmail.readonly` and `gmail.compose` are requested — never `gmail.send` — and the code only ever calls `gmail.users.drafts.create`; nothing in `server/` calls `messages.send` or `drafts.send`. See [Gmail](#gmail) below for the full safety model.
 
@@ -25,6 +25,7 @@ See `.env.example` for the full list of required variables. Notes on the trickie
 - `OPENAI_MODEL` is optional, defaults to `gpt-5.6-terra`
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` come from a Google Cloud Console OAuth client (Web application type) — the authorized redirect URI must be exactly `http://localhost:5173/api/google/oauth/callback`. In the Cloud Console you need both the **Calendar API** and the **Gmail API** enabled for the project (Library → search each → Enable), and the OAuth consent screen needs the `calendar.readonly`, `gmail.readonly`, and `gmail.compose` scopes with your own account added as a test user
 - `GOOGLE_REFRESH_TOKEN` is filled in automatically — open the app, go to Today, and click "Connect calendar" (this now also connects Gmail; if you connected before Step 5 you'll need to reconnect once so the new scopes are granted)
+- `NTFY_TOPIC` — pick your own unguessable topic name (ntfy.sh topics aren't private unless you add auth) and subscribe to `https://ntfy.sh/<topic>` in the ntfy app or web UI to actually receive the pushes; leave blank to skip push delivery and still see nudges in-app only
 
 Run `npm test` to run the standalone router unit tests (`server/llm/router.test.ts`).
 
@@ -38,10 +39,13 @@ Run `npm test` to run the standalone router unit tests (`server/llm/router.test.
 - `src/integrations/llm` — frontend fetch wrapper around `/api/chat`
 - `src/integrations/google-calendar` — frontend fetch wrappers around `/api/calendar/*` and `/api/google/status`
 - `src/integrations/gmail` — frontend fetch wrappers around `/api/gmail/*` (status, sync, scan, flagged list)
+- `src/integrations/nudges` — frontend fetch wrapper around `/api/nudges/check`
 - `src/integrations/{supabase,anthropic,openai}` — empty stubs reserved for later steps (the actual Anthropic/OpenAI/Google calls live server-side, never in the browser)
-- `server/notion` — Notion SDK client, query layer, rule-based classifier (now a fallback), workspace setup script, `searchTasksAndNotes` for Q&A grounding
-- `server/llm` — routing function (`router.ts`, with tests), Anthropic/OpenAI client wrappers (chat + single-turn `*Complete` variants), `routedComplete.ts` (Step 3's routing/fallback reused for structured tasks), chat fallback orchestration, real capture classifier, `emailScan.ts` (action-item classification + draft generation), `queryTerms.ts` (derives a Gmail search query from a chat message), `notionContext.ts` / `emailContext.ts` (Q&A grounding)
+- `server/notion` — Notion SDK client, query layer, rule-based classifier (now a fallback), workspace setup script, `searchTasksAndNotes` for Q&A grounding, `listOverdueTasks` for nudges
+- `server/llm` — routing function (`router.ts`, with tests), Anthropic/OpenAI client wrappers (chat + single-turn `*Complete` variants), `routedComplete.ts` (Step 3's routing/fallback reused for structured tasks), chat fallback orchestration, real capture classifier, `emailScan.ts` (action-item classification + draft generation), `nudgeMessage.ts` (overdue-task nudge phrasing), `queryTerms.ts` (derives a Gmail search query from a chat message), `notionContext.ts` / `emailContext.ts` (Q&A grounding)
 - `server/google` — OAuth flow (`oauth.ts`), authenticated client factory (`client.ts`), typed error hierarchy (`errors.ts`), calendar service (`calendar.ts`), Gmail service (`gmail.ts` — the safety-critical file, see [Gmail](#gmail)), sync job (`gmailSync.ts`), and local metadata cache (`gmailStore.ts`, SQLite via `node:sqlite`)
+- `server/notify` — `notify(topic, message)`, a reusable ntfy.sh push sender (`ntfy.ts`) plus its env loader; meant to be reused for the daily briefing later
+- `server/nudges` — nudge orchestration (`check.ts` — the one entry point, `runNudgeCheck(llmEnv, ntfyEnv, repo)`, written to be callable from a real scheduler later) and the push-throttle store (`nudgeStore.ts`, SQLite via `node:sqlite`)
 - `server/apiPlugin.ts` — the Vite dev-server API plugin wiring all of the above into `/api/*`
 - `src/sw.ts` — custom service worker (offline shell caching + Web Share Target handling)
 
@@ -73,3 +77,15 @@ Read-only (`calendar.readonly`), one account, OAuth 2.0 with `access_type: offli
 **Errors.** Three distinct typed errors (`server/google/errors.ts`) drive three distinct UI states: `GoogleNotConnectedError` (never connected — show "Connect Gmail"), `GoogleReconnectRequiredError` (expired/revoked/missing-scope token — show "Reconnect"), and `GoogleApiDisabledError` (the Gmail API itself isn't enabled in the Cloud project — a 403 that reconnecting can never fix, so the UI links straight to Cloud Console instead of offering a reconnect button).
 
 **Privacy.** No email content leaves the app except in the LLM calls needed to classify or draft a reply (Anthropic/OpenAI, same as every other model call in the app).
+
+## Nudges
+
+**Scope.** v1 covers overdue Tasks only: a Notion Task with `Status: Open` and a `Due Date` before today. `NotionRepo.listOverdueTasks()` queries this directly with a compound Notion filter rather than fetching and filtering every task client-side.
+
+**No dismissed state.** There's no "dismiss" action or stored per-task acknowledgement — a nudge is derived live from Notion's current status every time the check runs. Mark the task Done in Notion and its nudge simply stops showing up on the next check, in-app or push.
+
+**Generation.** `server/nudges/check.ts`'s `runNudgeCheck(llmEnv, ntfyEnv, repo)` is the one entry point: it queries overdue tasks, phrases a short, calm reminder for each with the routed model (`server/llm/nudgeMessage.ts`, reusing Step 3's Claude/ChatGPT routing and fallback via `routedComplete.ts`, on Haiku rather than Chat's Opus — same cost reasoning as the email classifier), and pushes each via `notify()`. It's a plain async function with no framework-specific triggering baked in, so a real scheduler can call it exactly this way later; for v1 it's triggered by the Today screen on load.
+
+**Push delivery.** `server/notify/ntfy.ts` exports `notify(topic, message)` — one `POST` to `https://ntfy.sh/<topic>`, no server URL or account needed beyond picking a topic name. It's intentionally generic (not nudge-specific) so the daily briefing can reuse it later. Delivery degrades gracefully: with `NTFY_TOPIC` unset, nudges still show in-app, they just don't push.
+
+**Push throttling.** Since nudges have no dismissed state, the in-app list is always live — but that also means opening Today five times in a day would otherwise fire five phone pushes for the same still-overdue task. `server/nudges/nudgeStore.ts` is a tiny SQLite table (`.data/nudges.db`) recording only "was this task's push already sent today" — it throttles the *push*, not the in-app display, and resets naturally at midnight since it's keyed by date.

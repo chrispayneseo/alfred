@@ -52,7 +52,9 @@ export async function classifyEmailAction(
   email: { sender: string; subject: string; snippet: string }
 ): Promise<EmailAction> {
   const userText = `Sender: ${email.sender}\nSubject: ${email.subject}\nSnippet: ${email.snippet}`;
-  const text = await routedComplete(env, `${email.subject} ${email.snippet}`, CLASSIFY_SYSTEM_PROMPT, userText, 300);
+  // Cheap yes/no-shaped classification — same reasoning as the Notion capture
+  // classifier (classify.ts) using Haiku instead of Chat's full-price Opus.
+  const text = await routedComplete(env, `${email.subject} ${email.snippet}`, CLASSIFY_SYSTEM_PROMPT, userText, 300, "claude-haiku-4-5");
   return EmailActionSchema.parse(parseJsonLoose(text));
 }
 
