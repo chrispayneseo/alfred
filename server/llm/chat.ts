@@ -3,6 +3,7 @@ import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
 import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
 import type { NotionRepo } from "../notion/queries.js";
+import type { WeatherEnv } from "../weather/env.js";
 import { claudeChat } from "./anthropic.js";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext.js";
 import { buildCoachPlanContext, needsCoachPlanContext } from "./coachPlanContext.js";
@@ -12,6 +13,7 @@ import { buildNotionContext, needsNotionContext } from "./notionContext.js";
 import { chatGptChat } from "./openai.js";
 import { routeToModel, type ModelChoice } from "./router.js";
 import type { ChatTurn } from "./types.js";
+import { buildWeatherContext, needsWeatherContext } from "./weatherContext.js";
 
 export type Confidence = "direct" | "inferred";
 
@@ -131,7 +133,8 @@ async function buildContext(
   lastText: string,
   googleAccounts: GoogleAccountEnv[],
   notionRepo: NotionRepo | undefined,
-  coachPlanEnv: CoachPlanEnv
+  coachPlanEnv: CoachPlanEnv,
+  weatherEnv: WeatherEnv
 ): Promise<string> {
   const blocks: string[] = [todayGrounding()];
 
@@ -139,6 +142,7 @@ async function buildContext(
   if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(dbEnv, googleAccounts, lastText));
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
   if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
+  if (needsWeatherContext(lastText)) blocks.push(await buildWeatherContext(weatherEnv));
 
   return [...blocks, EVENT_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }
@@ -158,6 +162,7 @@ export async function runChat(
   googleAccounts: GoogleAccountEnv[],
   notionRepo: NotionRepo | undefined,
   coachPlanEnv: CoachPlanEnv,
+  weatherEnv: WeatherEnv,
   messages: ChatTurn[]
 ): Promise<ChatResult> {
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
@@ -165,7 +170,7 @@ export async function runChat(
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = await buildContext(dbEnv, lastText, googleAccounts, notionRepo, coachPlanEnv);
+  const extraContext = await buildContext(dbEnv, lastText, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
 
   try {
     const raw = await callModel(intended, env, messages, extraContext);

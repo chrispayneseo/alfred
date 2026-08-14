@@ -60,6 +60,8 @@ import { FREELANCE_CLIENTS } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
+import { loadWeatherEnv } from "./weather/env.js";
+import { fetchWeatherBriefing } from "./weather/openMeteo.js";
 
 export interface ApiRequest {
   method: string;
@@ -113,6 +115,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     const llmEnv = loadLlmEnv(env);
     const repo = notionEnv.token ? new NotionRepo(createNotionClient(notionEnv.token), notionEnv) : undefined;
     const coachPlanEnv = loadCoachPlanEnv(env);
+    const weatherEnv = loadWeatherEnv(env);
 
     if (method === "POST" && pathname === "/api/chat") {
       const body = await readBody();
@@ -121,7 +124,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
       try {
         const accounts = await loadGoogleAccounts(env);
-        const result = await runChat(llmEnv, env, accounts, repo, coachPlanEnv, messages);
+        const result = await runChat(llmEnv, env, accounts, repo, coachPlanEnv, weatherEnv, messages);
         return json(200, result);
       } catch (error) {
         if (error instanceof Error && error.message === "both_unavailable") {
@@ -140,6 +143,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         console.error("[coachplan] upcoming query failed:", error);
         return json(502, { error: "Couldn't reach CoachPlan right now." });
       }
+    }
+
+    if (method === "GET" && pathname === "/api/weather/today") {
+      const briefing = await fetchWeatherBriefing(weatherEnv);
+      return json(200, briefing ?? null);
     }
 
     if (method === "POST" && pathname === "/api/capture/transcribe") {

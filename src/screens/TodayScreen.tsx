@@ -7,6 +7,7 @@ import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
 import { Screen } from "../components/Screen";
+import { WeatherSummary } from "../components/WeatherSummary";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
@@ -164,6 +165,8 @@ export function TodayScreen() {
           {oauthNotice}
         </p>
       )}
+
+      <WeatherSummary />
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
