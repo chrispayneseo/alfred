@@ -6,6 +6,7 @@ import { WRITABLE_CALENDAR_ACCOUNT } from "../google/calendarWriteGuard.js";
 import type { NotionRepo } from "../notion/queries.js";
 import { DIGEST_PROJECTS, UNSORTED_PROJECT } from "../notion/schema.js";
 import type { WeatherEnv } from "../weather/env.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import { claudeChat } from "./anthropic.js";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext.js";
 import { buildCoachPlanContext, needsCoachPlanContext } from "./coachPlanContext.js";
@@ -14,7 +15,8 @@ import type { LlmEnv } from "./env.js";
 import { buildNotionContext, needsNotionContext } from "./notionContext.js";
 import { chatGptChat } from "./openai.js";
 import { routeToModel, type ModelChoice } from "./router.js";
-import type { ChatTurn } from "./types.js";
+import { buildSearchConsoleContext, needsSearchConsoleContext } from "./searchConsoleContext.js";
+import type { ChatTurn, CompletionResult } from "./types.js";
 import { buildWeatherContext, needsWeatherContext } from "./weatherContext.js";
 
 export type Confidence = "direct" | "inferred";
@@ -151,7 +153,7 @@ function extractLocationReminderProposal(text: string): { text: string; location
   }
 }
 
-async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], extraContext?: string): Promise<string> {
+async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], extraContext?: string): Promise<CompletionResult> {
   return model === "claude"
     ? claudeChat(env.anthropicApiKey, messages, extraContext)
     : chatGptChat(env.openaiApiKey, env.openaiModel, messages, extraContext);
@@ -172,6 +174,7 @@ function todayGrounding(): string {
 }
 
 async function buildContext(
+  llmEnv: LlmEnv,
   dbEnv: Env,
   lastText: string,
   googleAccounts: GoogleAccountEnv[],
@@ -186,6 +189,7 @@ async function buildContext(
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
   if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
   if (needsWeatherContext(lastText)) blocks.push(await buildWeatherContext(weatherEnv, dbEnv, googleAccounts));
+  if (needsSearchConsoleContext(lastText)) blocks.push(await buildSearchConsoleContext(dbEnv, llmEnv, googleAccounts, lastText));
 
   return [...blocks, EVENT_PROPOSAL_INSTRUCTION, LOCATION_REMINDER_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }
@@ -213,10 +217,17 @@ export async function runChat(
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = await buildContext(dbEnv, lastText, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
+  const extraContext = await buildContext(env, dbEnv, lastText, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
 
   try {
-    const raw = await callModel(intended, env, messages, extraContext);
+    const { text: raw, inputTokens, outputTokens } = await callModel(intended, env, messages, extraContext);
+    await logModelCall(dbEnv, {
+      provider: intended,
+      feature: "chat",
+      model: intended === "claude" ? "claude-opus-5" : env.openaiModel,
+      inputTokens,
+      outputTokens,
+    });
     const { text: afterConfidence, confidence } = extractConfidence(raw);
     const { text: afterEvent, eventProposal } = extractEventProposal(afterConfidence);
     const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
@@ -224,7 +235,14 @@ export async function runChat(
   } catch (primaryError) {
     console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
     try {
-      const raw = await callModel(fallback, env, messages, extraContext);
+      const { text: raw, inputTokens, outputTokens } = await callModel(fallback, env, messages, extraContext);
+      await logModelCall(dbEnv, {
+        provider: fallback,
+        feature: "chat",
+        model: fallback === "claude" ? "claude-opus-5" : env.openaiModel,
+        inputTokens,
+        outputTokens,
+      });
       const { text: afterConfidence, confidence } = extractConfidence(raw);
       const { text: afterEvent, eventProposal } = extractEventProposal(afterConfidence);
       const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);

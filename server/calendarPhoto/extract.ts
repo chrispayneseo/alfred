@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import type { LlmEnv } from "../llm/env.js";
 import { routedVisionComplete } from "../llm/routedComplete.js";
 
@@ -70,8 +72,13 @@ function parseJsonLoose(text: string): unknown {
  * clear "couldn't read that photo, try again" rather than silently
  * returning nothing, since a parse failure here means the whole scan
  * failed, not that the page was blank. */
-export async function extractCalendarPhoto(env: LlmEnv, imageBase64: string, mediaType: "image/jpeg" | "image/png" | "image/webp"): Promise<CalendarExtraction> {
-  const raw = await routedVisionComplete(
+export async function extractCalendarPhoto(
+  dbEnv: Env,
+  env: LlmEnv,
+  imageBase64: string,
+  mediaType: "image/jpeg" | "image/png" | "image/webp"
+): Promise<CalendarExtraction> {
+  const result = await routedVisionComplete(
     env,
     "extract structured calendar data as json from this photo",
     EXTRACTION_SYSTEM_PROMPT,
@@ -80,7 +87,14 @@ export async function extractCalendarPhoto(env: LlmEnv, imageBase64: string, med
     mediaType,
     4096
   );
+  await logModelCall(dbEnv, {
+    provider: result.model,
+    feature: "photo_extraction",
+    model: result.modelId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  });
 
-  const parsed = parseJsonLoose(raw);
+  const parsed = parseJsonLoose(result.text);
   return CalendarExtractionSchema.parse(parsed);
 }

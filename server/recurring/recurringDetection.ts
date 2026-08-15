@@ -10,6 +10,7 @@
 //    current one is marked Done runs on every check — the user opted in,
 //    so there's no reason to delay it.
 import { ensureSchema, getSql, type Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import { getAllEmails, type EmailRecord } from "../google/gmailStore.js";
 import type { LlmEnv } from "../llm/env.js";
 import { routedComplete } from "../llm/routedComplete.js";
@@ -104,10 +105,18 @@ function isRawSuggestion(value: unknown): value is RawSuggestion {
   return typeof v.title === "string" && typeof v.reason === "string" && CADENCES.includes(v.cadence as Cadence);
 }
 
-async function detectCandidates(llmEnv: LlmEnv, candidateText: string): Promise<RawSuggestion[]> {
+async function detectCandidates(dbEnv: Env, llmEnv: LlmEnv, candidateText: string): Promise<RawSuggestion[]> {
   let raw: string;
   try {
-    raw = await routedComplete(llmEnv, "recurring pattern detection", DETECTION_SYSTEM_PROMPT, candidateText, 500, "claude-haiku-4-5");
+    const result = await routedComplete(llmEnv, "recurring pattern detection", DETECTION_SYSTEM_PROMPT, candidateText, 500, "claude-haiku-4-5");
+    raw = result.text;
+    await logModelCall(dbEnv, {
+      provider: result.model,
+      feature: "recurring_detection",
+      model: result.modelId,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
   } catch (error) {
     console.error("[recurring] detection call failed:", error);
     return [];
@@ -160,7 +169,7 @@ export async function scanForRecurringPatterns(dbEnv: Env, llmEnv: LlmEnv, repo:
   const candidateText = buildCandidateText(tasks, emails);
   if (!candidateText) return { created: 0 };
 
-  const candidates = await detectCandidates(llmEnv, candidateText);
+  const candidates = await detectCandidates(dbEnv, llmEnv, candidateText);
   const created = await storeNewSuggestions(dbEnv, candidates);
   return { created };
 }

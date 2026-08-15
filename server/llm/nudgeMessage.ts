@@ -1,3 +1,5 @@
+import type { Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import type { TaskRecord } from "../notion/queries.js";
 import type { LlmEnv } from "./env.js";
 import { routedComplete } from "./routedComplete.js";
@@ -8,7 +10,15 @@ const NUDGE_SYSTEM_PROMPT = `You write a single short, gentle nudge reminding so
  * routing/fallback). Cheap, short, classification-adjacent task — same
  * reasoning as emailScan.ts's classification call for using Haiku over
  * Chat's full-price Opus on the Claude side. */
-export function phraseNudge(env: LlmEnv, task: Pick<TaskRecord, "title" | "due" | "projectName">): Promise<string> {
+export async function phraseNudge(dbEnv: Env, env: LlmEnv, task: Pick<TaskRecord, "title" | "due" | "projectName">): Promise<string> {
   const userText = `Task: ${task.title}\nDue: ${task.due ?? "an earlier date"}${task.projectName ? `\nProject: ${task.projectName}` : ""}`;
-  return routedComplete(env, task.title, NUDGE_SYSTEM_PROMPT, userText, 80, "claude-haiku-4-5");
+  const result = await routedComplete(env, task.title, NUDGE_SYSTEM_PROMPT, userText, 80, "claude-haiku-4-5");
+  await logModelCall(dbEnv, {
+    provider: result.model,
+    feature: "nudges",
+    model: result.modelId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  });
+  return result.text;
 }

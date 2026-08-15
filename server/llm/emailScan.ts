@@ -6,6 +6,7 @@ import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gma
 import type { NotionRepo } from "../notion/queries.js";
 import { PROJECT_SEED_NAMES } from "../notion/schema.js";
 import { ensureSchema, getSql, type Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import type { LlmEnv } from "./env.js";
 import { routedComplete } from "./routedComplete.js";
 
@@ -53,21 +54,37 @@ function parseJsonLoose(text: string): unknown {
 }
 
 export async function classifyEmailAction(
+  dbEnv: Env,
   env: LlmEnv,
   email: { sender: string; subject: string; snippet: string }
 ): Promise<EmailAction> {
   const userText = `Sender: ${email.sender}\nSubject: ${email.subject}\nSnippet: ${email.snippet}`;
   // Cheap yes/no-shaped classification — same reasoning as the Notion capture
   // classifier (classify.ts) using Haiku instead of Chat's full-price Opus.
-  const text = await routedComplete(env, `${email.subject} ${email.snippet}`, CLASSIFY_SYSTEM_PROMPT, userText, 300, "claude-haiku-4-5");
-  return EmailActionSchema.parse(parseJsonLoose(text));
+  const result = await routedComplete(env, `${email.subject} ${email.snippet}`, CLASSIFY_SYSTEM_PROMPT, userText, 300, "claude-haiku-4-5");
+  await logModelCall(dbEnv, {
+    provider: result.model,
+    feature: "gmail_scan_classify",
+    model: result.modelId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  });
+  return EmailActionSchema.parse(parseJsonLoose(result.text));
 }
 
 const DRAFT_SYSTEM_PROMPT = `You draft a suggested reply to an email on behalf of a person, for them to review and edit before sending — you never send anything yourself. Write a concise, natural, appropriately-toned plain-text reply based only on what's in the email. Do not invent facts, commitments, dates, or details not present in the original message. If a specific detail is needed that you don't have (e.g. exact availability), leave a clear placeholder like [confirm date] rather than guessing. No subject line, no signature — just the reply body.`;
 
-export async function generateReplyDraft(env: LlmEnv, email: { sender: string; subject: string }, fullBody: string): Promise<string> {
+export async function generateReplyDraft(dbEnv: Env, env: LlmEnv, email: { sender: string; subject: string }, fullBody: string): Promise<string> {
   const userText = `Original email from ${email.sender}, subject "${email.subject}":\n\n${fullBody.slice(0, 4000)}`;
-  return routedComplete(env, `${email.subject} ${fullBody}`, DRAFT_SYSTEM_PROMPT, userText, 500);
+  const result = await routedComplete(env, `${email.subject} ${fullBody}`, DRAFT_SYSTEM_PROMPT, userText, 500);
+  await logModelCall(dbEnv, {
+    provider: result.model,
+    feature: "gmail_scan_reply",
+    model: result.modelId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  });
+  return result.text;
 }
 
 export interface ScanStatus {
@@ -193,7 +210,7 @@ async function scanOne(env: Env, llmEnv: LlmEnv, account: GoogleAccountEnv, noti
     return;
   }
 
-  const action = await classifyEmailAction(llmEnv, email);
+  const action = await classifyEmailAction(env, llmEnv, email);
   let notionPageId: string | undefined;
   let draftId: string | undefined;
   const emailLink = gmailThreadUrl(email.threadId, email.accountEmail);
@@ -211,7 +228,7 @@ async function scanOne(env: Env, llmEnv: LlmEnv, account: GoogleAccountEnv, noti
       getMessageBody(account, email.id),
       getReplyHeaders(account, email.id),
     ]);
-    const draftText = await generateReplyDraft(llmEnv, email, fullBody);
+    const draftText = await generateReplyDraft(env, llmEnv, email, fullBody);
     draftId = await createDraftReply(account, { threadId: email.threadId, replyHeaders, bodyText: draftText });
   }
 

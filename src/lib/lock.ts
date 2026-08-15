@@ -14,16 +14,27 @@ export const RELOCK_AFTER_MS = 60_000;
 // continuation of something the user just did from inside the (already
 // unlocked) app, so it shouldn't force a re-unlock. Call expectBackgrounding()
 // right before triggering the picker; useLockGate consumes it on return.
-let relockSuppressed = false;
+//
+// Backed by sessionStorage, not a plain module variable: opening the native
+// camera is exactly the kind of memory pressure that makes iOS/Android
+// silently reload a backgrounded PWA's page before handing control back. A
+// module variable doesn't survive that reload — sessionStorage does (it's
+// tied to the tab's browsing context, not the JS heap), so the suppression
+// still holds even if the app's whole JS state was wiped and rebuilt while
+// the camera was open. Expiring after SUPPRESS_WINDOW_MS keeps a
+// never-consumed flag (e.g. the user backed out of the picker and the app
+// was later reopened cold) from suppressing a real relock indefinitely.
+const SUPPRESS_KEY = "alfred.lock.suppressUntil";
+const SUPPRESS_WINDOW_MS = 5 * 60 * 1000;
 
 export function expectBackgrounding(): void {
-  relockSuppressed = true;
+  sessionStorage.setItem(SUPPRESS_KEY, String(Date.now() + SUPPRESS_WINDOW_MS));
 }
 
 export function consumeRelockSuppression(): boolean {
-  const wasSuppressed = relockSuppressed;
-  relockSuppressed = false;
-  return wasSuppressed;
+  const raw = sessionStorage.getItem(SUPPRESS_KEY);
+  sessionStorage.removeItem(SUPPRESS_KEY);
+  return raw !== null && Date.now() < Number(raw);
 }
 
 export function isLockEnabled(): boolean {

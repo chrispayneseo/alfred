@@ -2,8 +2,14 @@ import { claudeComplete, claudeVisionComplete } from "./anthropic.js";
 import type { LlmEnv } from "./env.js";
 import { chatGptComplete, chatGptVisionComplete } from "./openai.js";
 import { routeToModel, type ModelChoice } from "./router.js";
+import type { CompletionResult } from "./types.js";
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/webp";
+
+export interface RoutedCompletionResult extends CompletionResult {
+  model: ModelChoice;
+  modelId: string;
+}
 
 async function callModel(
   model: ModelChoice,
@@ -12,10 +18,14 @@ async function callModel(
   userText: string,
   maxTokens?: number,
   claudeModel?: string
-): Promise<string> {
-  return model === "claude"
-    ? claudeComplete(env.anthropicApiKey, systemPrompt, userText, maxTokens, claudeModel)
-    : chatGptComplete(env.openaiApiKey, env.openaiModel, systemPrompt, userText, maxTokens);
+): Promise<RoutedCompletionResult> {
+  if (model === "claude") {
+    const modelId = claudeModel ?? "claude-opus-5";
+    const result = await claudeComplete(env.anthropicApiKey, systemPrompt, userText, maxTokens, claudeModel);
+    return { ...result, model, modelId };
+  }
+  const result = await chatGptComplete(env.openaiApiKey, env.openaiModel, systemPrompt, userText, maxTokens);
+  return { ...result, model, modelId: env.openaiModel };
 }
 
 async function callVisionModel(
@@ -27,10 +37,14 @@ async function callVisionModel(
   imageMediaType: ImageMediaType,
   maxTokens?: number,
   claudeModel?: string
-): Promise<string> {
-  return model === "claude"
-    ? claudeVisionComplete(env.anthropicApiKey, systemPrompt, userText, imageBase64, imageMediaType, maxTokens, claudeModel)
-    : chatGptVisionComplete(env.openaiApiKey, env.openaiModel, systemPrompt, userText, imageBase64, imageMediaType, maxTokens);
+): Promise<RoutedCompletionResult> {
+  if (model === "claude") {
+    const modelId = claudeModel ?? "claude-opus-5";
+    const result = await claudeVisionComplete(env.anthropicApiKey, systemPrompt, userText, imageBase64, imageMediaType, maxTokens, claudeModel);
+    return { ...result, model, modelId };
+  }
+  const result = await chatGptVisionComplete(env.openaiApiKey, env.openaiModel, systemPrompt, userText, imageBase64, imageMediaType, maxTokens);
+  return { ...result, model, modelId: env.openaiModel };
 }
 
 /** Routes a single-turn completion using Step 3's model router, retrying on
@@ -38,7 +52,9 @@ async function callVisionModel(
  * uses, reused here for structured tasks (email action-item scanning, reply
  * drafting) that aren't a multi-turn conversation. `claudeModel` lets cheap
  * classification-style callers opt into a lighter model than Chat's default
- * Opus (falls back to claudeComplete's own default when omitted). */
+ * Opus (falls back to claudeComplete's own default when omitted). Returns
+ * which model actually served the request (post-fallback) plus token usage,
+ * for the cost dashboard's call log — callers log it, this function doesn't. */
 export async function routedComplete(
   env: LlmEnv,
   routingText: string,
@@ -46,7 +62,7 @@ export async function routedComplete(
   userText: string,
   maxTokens?: number,
   claudeModel?: string
-): Promise<string> {
+): Promise<RoutedCompletionResult> {
   const intended = routeToModel(routingText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
   try {
@@ -69,7 +85,7 @@ export async function routedVisionComplete(
   imageMediaType: ImageMediaType,
   maxTokens?: number,
   claudeModel?: string
-): Promise<string> {
+): Promise<RoutedCompletionResult> {
   const intended = routeToModel(routingText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
   try {

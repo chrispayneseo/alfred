@@ -25,8 +25,15 @@ export const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compos
 // its own. Needed to label each connected account by its real address rather
 // than asking the user to name it (server/google/accounts.ts).
 export const USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
+// Read-only Search Console access — property discovery + search analytics,
+// nothing that can add/remove a site or change settings. Accounts connected
+// before this scope existed only hold the old grant; a Search Console call
+// against one fails with Google's insufficient-scope 403, already handled as
+// GoogleReconnectRequiredError by isGoogleAuthError (errors.ts), same
+// self-healing-via-reconnect story as CALENDAR_EVENTS_SCOPE's upgrade above.
+export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 
-const SCOPES = [CALENDAR_EVENTS_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE];
+const SCOPES = [CALENDAR_EVENTS_SCOPE, GMAIL_READONLY_SCOPE, GMAIL_COMPOSE_SCOPE, USERINFO_EMAIL_SCOPE, SEARCH_CONSOLE_SCOPE];
 
 // Stateless CSRF protection for the OAuth flow: a timestamp + random nonce,
 // HMAC-signed with the app's own GOOGLE_CLIENT_SECRET (already a private

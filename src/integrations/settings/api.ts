@@ -18,6 +18,49 @@ export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {
   return res.json();
 }
 
+export interface ProviderCostSummary {
+  provider: "claude" | "chatgpt";
+  configured: boolean;
+  spendUsd?: number;
+  capUsd?: number;
+  percentOfCap?: number;
+  error?: string;
+}
+
+export type ModelFeature =
+  | "chat"
+  | "capture"
+  | "gmail_scan_classify"
+  | "gmail_scan_reply"
+  | "photo_extraction"
+  | "nudges"
+  | "digest"
+  | "recurring_detection"
+  | "project_grouping"
+  | "search_console_query";
+
+export interface FeatureBreakdownEntry {
+  feature: ModelFeature;
+  claudeTokens: number;
+  chatgptTokens: number;
+  claudeEstimatedUsd?: number;
+  chatgptEstimatedUsd?: number;
+}
+
+export interface CostDashboard {
+  generatedAt: string;
+  providers: ProviderCostSummary[];
+  featureBreakdown: FeatureBreakdownEntry[];
+  modelComparison: { claudeTokens: number; chatgptTokens: number };
+  alertThresholdPct: number;
+}
+
+export async function fetchCostDashboard(): Promise<CostDashboard> {
+  const res = await fetch("/api/settings/cost-dashboard");
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  return res.json();
+}
+
 export async function wipeEverything(): Promise<void> {
   const res = await fetch("/api/settings/wipe", {
     method: "POST",

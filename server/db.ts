@@ -123,6 +123,29 @@ const SCHEMA_STATEMENTS = [
   )`,
   `INSERT INTO sync_job (id) VALUES ('singleton') ON CONFLICT (id) DO NOTHING`,
   `INSERT INTO scan_job (id) VALUES ('singleton') ON CONFLICT (id) DO NOTHING`,
+  // Neither Anthropic's nor OpenAI's Admin/Cost APIs can attribute spend to
+  // Alfred's own feature categories (Chat, Capture, Gmail scan, ...) — they
+  // only group by model/workspace/api key. This table is Alfred's own
+  // record of every LLM call, used to compute the proportion of each
+  // provider's real dollar spend attributable to each feature.
+  `CREATE TABLE IF NOT EXISTS llm_call_log (
+    id BIGSERIAL PRIMARY KEY,
+    provider TEXT NOT NULL,
+    feature TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INT NOT NULL,
+    output_tokens INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_llm_call_log_created_at ON llm_call_log(created_at)`,
+  // One row per provider per billing-cycle-crossed-threshold, so the
+  // proactive cost alert fires once per threshold per month, not every
+  // 30 minutes the cron happens to notice it's still over.
+  `CREATE TABLE IF NOT EXISTS cost_alerts_sent (
+    provider TEXT NOT NULL,
+    month_key TEXT NOT NULL,
+    PRIMARY KEY (provider, month_key)
+  )`,
 ];
 
 let schemaReady: Promise<void> | undefined;

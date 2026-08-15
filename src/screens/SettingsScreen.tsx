@@ -1,6 +1,7 @@
 import { AppLockSettings } from "../components/AppLockSettings";
 import { DataControls } from "../components/DataControls";
 import { GoogleAccountsSettings } from "../components/GoogleAccountsSettings";
+import { ModelCostDashboard } from "../components/ModelCostDashboard";
 import { ProjectGroupingSettings } from "../components/ProjectGroupingSettings";
 import { RecurringTaskSettings } from "../components/RecurringTaskSettings";
 import { Screen } from "../components/Screen";
@@ -42,6 +43,13 @@ export function SettingsScreen() {
           Project groupings
         </h2>
         <ProjectGroupingSettings />
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+          Model cost
+        </h2>
+        <ModelCostDashboard />
       </section>
 
       <section>

@@ -5,6 +5,7 @@
 // pattern: clusters of captured Tasks/Notes that share a theme but don't
 // fit neatly under an existing Project.
 import { ensureSchema, getSql, type Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import type { LlmEnv } from "../llm/env.js";
 import { routedComplete } from "../llm/routedComplete.js";
 import type { NotionRepo } from "../notion/queries.js";
@@ -74,10 +75,18 @@ function isRawGrouping(value: unknown): value is RawGrouping {
   );
 }
 
-async function detectGroupings(llmEnv: LlmEnv, candidateText: string): Promise<RawGrouping[]> {
+async function detectGroupings(dbEnv: Env, llmEnv: LlmEnv, candidateText: string): Promise<RawGrouping[]> {
   let raw: string;
   try {
-    raw = await routedComplete(llmEnv, "project grouping detection", GROUPING_SYSTEM_PROMPT, candidateText, 600, "claude-haiku-4-5");
+    const result = await routedComplete(llmEnv, "project grouping detection", GROUPING_SYSTEM_PROMPT, candidateText, 600, "claude-haiku-4-5");
+    raw = result.text;
+    await logModelCall(dbEnv, {
+      provider: result.model,
+      feature: "project_grouping",
+      model: result.modelId,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
   } catch (error) {
     console.error("[projectGroupings] detection call failed:", error);
     return [];
@@ -147,7 +156,7 @@ export async function scanForProjectGroupings(dbEnv: Env, llmEnv: LlmEnv, repo: 
   const candidateText = buildCandidateText(tasks, notes);
   if (!candidateText) return { created: 0 };
 
-  const candidates = await detectGroupings(llmEnv, candidateText);
+  const candidates = await detectGroupings(dbEnv, llmEnv, candidateText);
   const tasksById = new Map(tasks.slice(0, MAX_CANDIDATE_ITEMS).map((t) => [t.id, t.title]));
   const notesById = new Map(notes.slice(0, MAX_CANDIDATE_ITEMS).map((n) => [n.id, n.title]));
   const created = await storeNewSuggestions(dbEnv, candidates, tasksById, notesById);

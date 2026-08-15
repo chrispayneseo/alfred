@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ChatTurn } from "./types.js";
+import type { ChatTurn, CompletionResult } from "./types.js";
 
 let client: Anthropic | undefined;
 
@@ -11,7 +11,7 @@ export function getAnthropicClient(apiKey: string): Anthropic {
 const CHAT_SYSTEM_PROMPT =
   "You are Alfred, a calm and concise personal-assistant chat surface. Keep replies short and direct — a sentence or two for simple questions, more only when the question genuinely needs it. Do not include internal or system XML tags in your response.";
 
-export async function claudeChat(apiKey: string, messages: ChatTurn[], extraContext?: string): Promise<string> {
+export async function claudeChat(apiKey: string, messages: ChatTurn[], extraContext?: string): Promise<CompletionResult> {
   const anthropic = getAnthropicClient(apiKey);
   const response = await anthropic.messages.create({
     model: "claude-opus-5",
@@ -23,7 +23,7 @@ export async function claudeChat(apiKey: string, messages: ChatTurn[], extraCont
 
   const text = response.content.find((block) => block.type === "text")?.text;
   if (!text) throw new Error("Claude returned no text content");
-  return text;
+  return { text, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
 }
 
 /** Single-turn completion with a caller-supplied system prompt — no Alfred
@@ -37,7 +37,7 @@ export async function claudeComplete(
   userText: string,
   maxTokens = 512,
   model = "claude-opus-5"
-): Promise<string> {
+): Promise<CompletionResult> {
   const anthropic = getAnthropicClient(apiKey);
   const response = await anthropic.messages.create({
     model,
@@ -49,7 +49,7 @@ export async function claudeComplete(
 
   const text = response.content.find((block) => block.type === "text")?.text;
   if (!text) throw new Error("Claude returned no text content");
-  return text;
+  return { text, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
 }
 
 /** Same shape as claudeComplete, plus a single image alongside the text —
@@ -63,7 +63,7 @@ export async function claudeVisionComplete(
   imageMediaType: "image/jpeg" | "image/png" | "image/webp",
   maxTokens = 1024,
   model = "claude-opus-5"
-): Promise<string> {
+): Promise<CompletionResult> {
   const anthropic = getAnthropicClient(apiKey);
   const response = await anthropic.messages.create({
     model,
@@ -83,5 +83,5 @@ export async function claudeVisionComplete(
 
   const text = response.content.find((block) => block.type === "text")?.text;
   if (!text) throw new Error("Claude returned no text content");
-  return text;
+  return { text, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
 }

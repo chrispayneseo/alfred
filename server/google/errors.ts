@@ -41,7 +41,7 @@ interface GoogleApiErrorShape {
   };
 }
 
-function isServiceDisabledError(error: unknown): boolean {
+export function isServiceDisabledError(error: unknown): boolean {
   const data = (error as GoogleApiErrorShape).response?.data?.error;
   if (!data || typeof data === "string") return false;
   return data.errors?.some((e) => e.reason === "accessNotConfigured") ?? false;

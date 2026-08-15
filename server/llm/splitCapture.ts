@@ -1,5 +1,7 @@
 import { classify as ruleBasedClassify } from "../notion/classify.js";
 import { CLASSIFY_PROJECT_NAMES, DIGEST_PROJECTS, UNSORTED_PROJECT } from "../notion/schema.js";
+import type { Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import type { LlmEnv } from "./env.js";
 import { routedComplete } from "./routedComplete.js";
 
@@ -57,10 +59,18 @@ function fallbackSingleItem(text: string): CaptureItem[] {
  * fallback), so a multi-item brain dump costs the same one round-trip as a
  * single item, not N+1. Always returns at least one item; length 1 means
  * "file directly as before," length > 1 means "show for review first." */
-export async function splitAndClassifyCapture(env: LlmEnv, text: string): Promise<CaptureItem[]> {
+export async function splitAndClassifyCapture(dbEnv: Env, env: LlmEnv, text: string): Promise<CaptureItem[]> {
   let raw: string;
   try {
-    raw = await routedComplete(env, text, SPLIT_SYSTEM_PROMPT, text, 700, "claude-haiku-4-5");
+    const result = await routedComplete(env, text, SPLIT_SYSTEM_PROMPT, text, 700, "claude-haiku-4-5");
+    raw = result.text;
+    await logModelCall(dbEnv, {
+      provider: result.model,
+      feature: "capture",
+      model: result.modelId,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
   } catch (error) {
     console.error("[splitCapture] model call failed, falling back to rule-based single-item classification:", error);
     return fallbackSingleItem(text);

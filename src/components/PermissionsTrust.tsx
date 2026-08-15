@@ -91,6 +91,13 @@ export function PermissionsTrust() {
       show: true,
     },
     {
+      name: "Google Search Console",
+      detail: hasGoogle
+        ? `Read-only, on every connected account (${accountList(accounts)}) that grants it. Alfred discovers whichever properties that account has access to and can answer questions about clicks, impressions, and search performance — it can never change a property's settings or add/remove sites.`
+        : "Not connected — connect a Google account to enable this.",
+      show: true,
+    },
+    {
       name: "CoachPlan",
       detail:
         "Read-only, scoped to one team's upcoming training sessions and matches. Alfred never writes back to CoachPlan.",

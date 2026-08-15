@@ -3,6 +3,7 @@
 // the client asks. Idempotent per ISO week via the weekly_digest table, so
 // re-opening the app doesn't regenerate (or re-push to ntfy) repeatedly.
 import { ensureSchema, getSql, type Env } from "../db.js";
+import { logModelCall } from "../costTracking/callLog.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
 import { listEventsAllAccounts, type CalendarEventRecord } from "../google/calendar.js";
 import { getFlaggedEmails } from "../google/gmailStore.js";
@@ -96,6 +97,7 @@ function formatTasksByProject(tasks: TaskRecord[]): string {
 const DIGEST_SYSTEM_PROMPT = `You write a short weekly digest for a personal-assistant app, in the same calm, warm, plain-spoken voice as its daily nudges — never corporate, never a bulleted status report, never alarmist. Synthesize the raw data you're given into a few short readable paragraphs (roughly 120-200 words): what's coming up this week (calendar), what's open across each area of the person's life, anything flagged in email worth a second look, and a one-line note on what got captured/filed this week. Skip a section entirely if it has nothing in it rather than saying "nothing here." No headers, no markdown, plain prose paragraphs, no greeting, no sign-off.`;
 
 async function synthesize(
+  dbEnv: Env,
   llmEnv: LlmEnv,
   events: CalendarEventRecord[],
   tasksByProject: string,
@@ -109,7 +111,15 @@ async function synthesize(
     `Captured and filed into Notion this week: ${captured.tasks} task${captured.tasks === 1 ? "" : "s"}, ${captured.notes} note${captured.notes === 1 ? "" : "s"}`,
   ].join("\n\n");
 
-  return routedComplete(llmEnv, "weekly digest personal assistant summary", DIGEST_SYSTEM_PROMPT, userText, 400);
+  const result = await routedComplete(llmEnv, "weekly digest personal assistant summary", DIGEST_SYSTEM_PROMPT, userText, 400);
+  await logModelCall(dbEnv, {
+    provider: result.model,
+    feature: "digest",
+    model: result.modelId,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  });
+  return result.text;
 }
 
 /** Check-on-open entry point: returns the cached digest for the current
@@ -183,7 +193,7 @@ async function generateAndStore(
   const flaggedThisWeek = flaggedEmails.filter((e) => new Date(e.date).getTime() >= sevenDaysAgo).length;
   const tasksByProject = formatTasksByProject(allTasks);
 
-  const summary = await synthesize(llmEnv, eventsResult.events, tasksByProject, flaggedThisWeek, captured);
+  const summary = await synthesize(dbEnv, llmEnv, eventsResult.events, tasksByProject, flaggedThisWeek, captured);
 
   const sql = await db(dbEnv);
   await sql.query(

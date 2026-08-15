@@ -17,6 +17,14 @@ import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
 type CaptureMode = "text" | "voice" | "scan-calendar";
 
+// If backgrounding for the camera causes the OS to reload the page (see
+// lib/lock.ts's comment on expectBackgrounding), all component state —
+// including which tab was selected — is wiped along with everything else.
+// The photo itself can't be recovered either way (a File object can't
+// survive that), but landing back on "Scan calendar" instead of the default
+// "Text" tab at least means retaking it is one tap, not three.
+const SCAN_MODE_PENDING_KEY = "alfred.capture.scanCalendarPending";
+
 interface RecentCapture {
   id: string;
   text: string;
@@ -160,7 +168,7 @@ export function CaptureScreen() {
   const [filing, setFiling] = useState(false);
   const [reviewError, setReviewError] = useState<string>();
 
-  const [mode, setMode] = useState<CaptureMode>("text");
+  const [mode, setMode] = useState<CaptureMode>(() => (sessionStorage.getItem(SCAN_MODE_PENDING_KEY) ? "scan-calendar" : "text"));
   const [extracting, setExtracting] = useState(false);
   const [scanResult, setScanResult] = useState<ExtractResult>();
   const [scanError, setScanError] = useState<string>();
@@ -265,12 +273,14 @@ export function CaptureScreen() {
   }
 
   function handleModeChange(next: CaptureMode) {
+    sessionStorage.removeItem(SCAN_MODE_PENDING_KEY);
     setMode(next);
     setScanResult(undefined);
     setScanError(undefined);
   }
 
   async function handlePhotoSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    sessionStorage.removeItem(SCAN_MODE_PENDING_KEY);
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -355,6 +365,7 @@ export function CaptureScreen() {
                   type="button"
                   onClick={() => {
                     expectBackgrounding();
+                    sessionStorage.setItem(SCAN_MODE_PENDING_KEY, "1");
                     photoInputRef.current?.click();
                   }}
                   disabled={extracting}

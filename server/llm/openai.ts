@@ -1,5 +1,5 @@
 import OpenAI, { toFile } from "openai";
-import type { ChatTurn } from "./types.js";
+import type { ChatTurn, CompletionResult } from "./types.js";
 
 let client: OpenAI | undefined;
 
@@ -11,7 +11,7 @@ function getOpenAiClient(apiKey: string): OpenAI {
 const CHAT_SYSTEM_PROMPT =
   "You are Alfred, a calm and concise personal-assistant chat surface. Keep replies short and direct — a sentence or two for simple questions, more only when the question genuinely needs it.";
 
-export async function chatGptChat(apiKey: string, model: string, messages: ChatTurn[], extraContext?: string): Promise<string> {
+export async function chatGptChat(apiKey: string, model: string, messages: ChatTurn[], extraContext?: string): Promise<CompletionResult> {
   const openai = getOpenAiClient(apiKey);
   const systemContent = extraContext ? `${CHAT_SYSTEM_PROMPT}\n\n${extraContext}` : CHAT_SYSTEM_PROMPT;
   const response = await openai.chat.completions.create({
@@ -22,7 +22,7 @@ export async function chatGptChat(apiKey: string, model: string, messages: ChatT
 
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error("ChatGPT returned no text content");
-  return text;
+  return { text, inputTokens: response.usage?.prompt_tokens ?? 0, outputTokens: response.usage?.completion_tokens ?? 0 };
 }
 
 function extensionForMimeType(mimeType: string): string {
@@ -53,7 +53,7 @@ export async function chatGptComplete(
   systemPrompt: string,
   userText: string,
   maxTokens = 512
-): Promise<string> {
+): Promise<CompletionResult> {
   const openai = getOpenAiClient(apiKey);
   const response = await openai.chat.completions.create({
     model,
@@ -66,7 +66,7 @@ export async function chatGptComplete(
 
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error("ChatGPT returned no text content");
-  return text;
+  return { text, inputTokens: response.usage?.prompt_tokens ?? 0, outputTokens: response.usage?.completion_tokens ?? 0 };
 }
 
 /** Same shape as chatGptComplete, plus a single image alongside the text —
@@ -79,7 +79,7 @@ export async function chatGptVisionComplete(
   imageBase64: string,
   imageMediaType: "image/jpeg" | "image/png" | "image/webp",
   maxTokens = 1024
-): Promise<string> {
+): Promise<CompletionResult> {
   const openai = getOpenAiClient(apiKey);
   const response = await openai.chat.completions.create({
     model,
@@ -98,5 +98,5 @@ export async function chatGptVisionComplete(
 
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error("ChatGPT returned no text content");
-  return text;
+  return { text, inputTokens: response.usage?.prompt_tokens ?? 0, outputTokens: response.usage?.completion_tokens ?? 0 };
 }

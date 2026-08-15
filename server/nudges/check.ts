@@ -36,7 +36,7 @@ export async function runNudgeCheck(dbEnv: Env, llmEnv: LlmEnv, ntfyEnv: NtfyEnv
 
   return Promise.all(
     overdue.map(async (task): Promise<NudgeItem> => {
-      const message = await phraseNudge(llmEnv, task);
+      const message = await phraseNudge(dbEnv, llmEnv, task);
       let pushed = false;
 
       if (ntfyEnv.topic && (await shouldPush(dbEnv, task.id, today))) {

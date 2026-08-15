@@ -6,6 +6,9 @@
 // into an ApiRequest and turn an ApiResult back into a real response.
 import { getUpcomingMatches, getUpcomingSessions } from "./coachplan/coachplan.js";
 import { isCoachPlanConfigured, loadCoachPlanEnv } from "./coachplan/env.js";
+import { checkCostAlerts } from "./costTracking/alerts.js";
+import { getCostDashboard } from "./costTracking/dashboard.js";
+import { loadCostTrackingEnv } from "./costTracking/env.js";
 import type { Env } from "./db.js";
 import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts.js";
 import {
@@ -204,6 +207,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     const repo = notionEnv.token ? new NotionRepo(createNotionClient(notionEnv.token), notionEnv) : undefined;
     const coachPlanEnv = loadCoachPlanEnv(env);
     const weatherEnv = loadWeatherEnv(env);
+    const costTrackingEnv = loadCostTrackingEnv(env);
 
     if (method === "POST" && pathname === "/api/chat") {
       const body = await readBody();
@@ -397,7 +401,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
       let extraction;
       try {
-        extraction = await extractCalendarPhoto(llmEnv, imageBase64, mimeType as "image/jpeg" | "image/png" | "image/webp");
+        extraction = await extractCalendarPhoto(env, llmEnv, imageBase64, mimeType as "image/jpeg" | "image/png" | "image/webp");
       } catch (error) {
         console.error("[calendarPhoto] extraction failed:", error);
         return json(502, { error: "Couldn't read that photo — try again, or a clearer shot of the page." });
@@ -527,6 +531,13 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       });
     }
 
+    // Polled on-demand (Settings screen open), not continuously — see
+    // server/costTracking/dashboard.ts for why the per-feature breakdown is
+    // an estimate rather than exact provider-reported figures.
+    if (method === "GET" && pathname === "/api/settings/cost-dashboard") {
+      return json(200, await getCostDashboard(env, costTrackingEnv));
+    }
+
     if (method === "GET" && pathname === "/api/settings/export") {
       const accounts = await loadGoogleAccounts(env);
       return json(200, await buildExport(env, accounts, notionEnv, loadNtfyEnv(env)));
@@ -583,6 +594,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
       const sync = await startSync(env, accounts, 30, backgroundTask);
       const scan = await startScan(env, llmEnv, accounts, repo, 50, backgroundTask);
+      backgroundTask(
+        checkCostAlerts(env, costTrackingEnv, loadNtfyEnv(env)).catch((error) => {
+          console.error("[costTracking] alert check failed:", error);
+        })
+      );
       return json(200, { ok: true, sync, scan });
     }
 
@@ -670,7 +686,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const source = body.source === "share-target" ? "share-target" : "manual";
       if (!text) return json(400, { error: "text is required" });
 
-      const items = await splitAndClassifyCapture(llmEnv, text);
+      const items = await splitAndClassifyCapture(env, llmEnv, text);
 
       // Common case: one item, no review needed — files immediately, exact
       // same shape/behavior as before this feature existed. Uses the
