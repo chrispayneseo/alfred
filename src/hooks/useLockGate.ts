@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RELOCK_AFTER_MS, isLockEnabled } from "../lib/lock";
+import { consumeRelockSuppression, RELOCK_AFTER_MS, isLockEnabled } from "../lib/lock";
 
 /** Locked on cold start whenever the lock is enabled. Re-locks after coming
  * back from being backgrounded for more than RELOCK_AFTER_MS — a brief
@@ -17,6 +17,7 @@ export function useLockGate() {
       if (hiddenAtRef.current === null) return;
       const elapsed = Date.now() - hiddenAtRef.current;
       hiddenAtRef.current = null;
+      if (consumeRelockSuppression()) return;
       if (elapsed > RELOCK_AFTER_MS && isLockEnabled()) setLocked(true);
     }
 

@@ -11,6 +11,7 @@ import {
   type CaptureItem,
 } from "../integrations/notion/api";
 import { compressImage } from "../lib/compressImage";
+import { expectBackgrounding } from "../lib/lock";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
 import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
@@ -340,7 +341,10 @@ export function CaptureScreen() {
                 />
                 <button
                   type="button"
-                  onClick={() => photoInputRef.current?.click()}
+                  onClick={() => {
+                    expectBackgrounding();
+                    photoInputRef.current?.click();
+                  }}
                   disabled={extracting}
                   className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
                 >

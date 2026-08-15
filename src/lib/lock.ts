@@ -8,6 +8,24 @@ const ENABLED_KEY = "alfred.lock.enabled";
 // re-unlock; leaving it backgrounded for real should.
 export const RELOCK_AFTER_MS = 60_000;
 
+// A native OS picker (camera, file chooser) backgrounds the app for as long
+// as the user needs to frame a shot or browse photos — often well past
+// RELOCK_AFTER_MS on its own. That's not "left unattended," it's a
+// continuation of something the user just did from inside the (already
+// unlocked) app, so it shouldn't force a re-unlock. Call expectBackgrounding()
+// right before triggering the picker; useLockGate consumes it on return.
+let relockSuppressed = false;
+
+export function expectBackgrounding(): void {
+  relockSuppressed = true;
+}
+
+export function consumeRelockSuppression(): boolean {
+  const wasSuppressed = relockSuppressed;
+  relockSuppressed = false;
+  return wasSuppressed;
+}
+
 export function isLockEnabled(): boolean {
   return localStorage.getItem(ENABLED_KEY) === "1";
 }
