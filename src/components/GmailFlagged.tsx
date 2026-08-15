@@ -19,7 +19,7 @@ import { AccountTag } from "./AccountTag";
 type PanelState = "loading" | "not_connected" | "ready" | "error";
 
 const SYNC_DAYS = 30;
-const SCAN_BATCH_SIZE = 20;
+const SCAN_BATCH_SIZE = 50;
 const POLL_MS = 1000;
 
 function gmailThreadUrl(threadId: string, accountEmail: string): string {

@@ -294,7 +294,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       if (accounts.length === 0) return json(409, { error: "not_connected" });
       if (!repo) return json(503, { error: "Notion isn't configured yet." });
       const body = await readBody();
-      const limit = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 100) : 20;
+      const limit = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 100) : 50;
       return json(200, await startScan(env, llmEnv, accounts, repo, limit, backgroundTask));
     }
 
