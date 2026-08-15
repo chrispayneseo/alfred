@@ -165,3 +165,51 @@ export async function fetchWeatherBriefing(env: WeatherEnv): Promise<WeatherBrie
     return undefined;
   }
 }
+
+export interface WeatherAtMoment {
+  description: string;
+  tempC: number;
+}
+
+interface HourlyForecastResponse {
+  hourly: { time: string[]; temperature_2m: number[]; weather_code: number[] };
+}
+
+/** Forecast for an arbitrary location at a specific date/time — used for
+ * calendar-event weather (Part 2), as opposed to fetchWeatherBriefing's
+ * fixed home-location "right now + 2 days" summary. Picks the hourly
+ * reading closest to the requested time (or midday for an all-day event).
+ * Never throws — same "undefined means omit" contract as the rest of this
+ * module. */
+export async function fetchWeatherAt(lat: number, lon: number, date: string, time?: string): Promise<WeatherAtMoment | undefined> {
+  try {
+    const url = new URL(OPEN_METEO_BASE_URL);
+    url.searchParams.set("latitude", String(lat));
+    url.searchParams.set("longitude", String(lon));
+    url.searchParams.set("hourly", "temperature_2m,weather_code");
+    url.searchParams.set("timezone", "auto");
+    url.searchParams.set("forecast_days", "3"); // comfortably covers today + tomorrow
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Open-Meteo request failed (${res.status})`);
+    const data = (await res.json()) as HourlyForecastResponse;
+
+    const targetHour = time ? Number(time.split(":")[0]) : 12;
+    let bestIdx = -1;
+    let bestDiff = Infinity;
+    data.hourly.time.forEach((iso, i) => {
+      if (!iso.startsWith(date)) return;
+      const diff = Math.abs(new Date(iso).getHours() - targetHour);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    });
+    if (bestIdx === -1) return undefined;
+
+    return { tempC: data.hourly.temperature_2m[bestIdx], description: describeCode(data.hourly.weather_code[bestIdx]) };
+  } catch (error) {
+    console.error("[weather] failed to fetch event-location forecast:", error);
+    return undefined;
+  }
+}

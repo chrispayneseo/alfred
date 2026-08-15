@@ -71,8 +71,9 @@ import { FREELANCE_CLIENTS } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
-import { loadWeatherEnv } from "./weather/env.js";
+import { loadWeatherEnv, type WeatherEnv } from "./weather/env.js";
 import { fetchWeatherBriefing } from "./weather/openMeteo.js";
+import { fetchEventWeather } from "./weather/eventWeather.js";
 
 export interface ApiRequest {
   method: string;
@@ -164,6 +165,17 @@ async function createEventsForApprovedItem(
   }
 }
 
+/** A live client-supplied lat/lon (Part 1: live location) overrides the
+ * fixed home-location env var for that one request — never stored, just
+ * used for this response. Falls back to `fallback` (the env-configured
+ * home location) when absent or malformed. */
+function resolveWeatherLocation(rawLat: unknown, rawLon: unknown, fallback: WeatherEnv): WeatherEnv {
+  const lat = typeof rawLat === "number" ? rawLat : typeof rawLat === "string" ? Number(rawLat) : NaN;
+  const lon = typeof rawLon === "number" ? rawLon : typeof rawLon === "string" ? Number(rawLon) : NaN;
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+  return fallback;
+}
+
 function isChatTurn(value: unknown): value is ChatTurn {
   if (typeof value !== "object" || value === null) return false;
   const { role, content } = value as { role?: unknown; content?: unknown };
@@ -194,10 +206,12 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const body = await readBody();
       const messages = Array.isArray(body.messages) ? body.messages.filter(isChatTurn) : [];
       if (messages.length === 0) return json(400, { error: "messages is required" });
+      const location = typeof body.location === "object" && body.location !== null ? (body.location as Record<string, unknown>) : undefined;
+      const effectiveWeatherEnv = resolveWeatherLocation(location?.lat, location?.lon, weatherEnv);
 
       try {
         const accounts = await loadGoogleAccounts(env);
-        const result = await runChat(llmEnv, env, accounts, repo, coachPlanEnv, weatherEnv, messages);
+        const result = await runChat(llmEnv, env, accounts, repo, coachPlanEnv, effectiveWeatherEnv, messages);
         return json(200, result);
       } catch (error) {
         if (error instanceof Error && error.message === "both_unavailable") {
@@ -219,8 +233,28 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     }
 
     if (method === "GET" && pathname === "/api/weather/today") {
-      const briefing = await fetchWeatherBriefing(weatherEnv);
+      const effectiveWeatherEnv = resolveWeatherLocation(searchParams.get("lat"), searchParams.get("lon"), weatherEnv);
+      const briefing = await fetchWeatherBriefing(effectiveWeatherEnv);
       return json(200, briefing ?? null);
+    }
+
+    // Part 2: weather for upcoming (today/tomorrow) calendar events that
+    // have a geocodable location — merged across every connected account,
+    // same as /api/calendar/today and /api/calendar/tomorrow. Never errors
+    // on a per-event basis (see eventWeather.ts) — an empty array just
+    // means no near-term event had a usable location.
+    if (method === "GET" && pathname === "/api/weather/events") {
+      try {
+        const accounts = await loadGoogleAccounts(env);
+        const [today, tomorrow] = await Promise.all([getTodayEventsAllAccounts(env, accounts), getTomorrowEventsAllAccounts(env, accounts)]);
+        const items = await fetchEventWeather([...today.events, ...tomorrow.events]);
+        return json(200, { items });
+      } catch (error) {
+        if (error instanceof GoogleNotConnectedError || error instanceof GoogleReconnectRequiredError) {
+          return json(200, { items: [] });
+        }
+        throw error;
+      }
     }
 
     if (method === "POST" && pathname === "/api/capture/transcribe") {

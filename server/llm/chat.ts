@@ -140,7 +140,7 @@ async function buildContext(
   if (needsEmailContext(lastText)) blocks.push(await buildEmailContext(dbEnv, googleAccounts, lastText));
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
   if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
-  if (needsWeatherContext(lastText)) blocks.push(await buildWeatherContext(weatherEnv));
+  if (needsWeatherContext(lastText)) blocks.push(await buildWeatherContext(weatherEnv, dbEnv, googleAccounts));
 
   return [...blocks, EVENT_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }

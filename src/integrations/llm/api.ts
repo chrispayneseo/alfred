@@ -14,11 +14,11 @@ export interface ChatApiResult {
   eventProposal?: EventProposal;
 }
 
-export async function sendChatMessage(messages: ChatApiTurn[]): Promise<ChatApiResult> {
+export async function sendChatMessage(messages: ChatApiTurn[], location?: { lat: number; lon: number }): Promise<ChatApiResult> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, location }),
   });
 
   if (!res.ok) {

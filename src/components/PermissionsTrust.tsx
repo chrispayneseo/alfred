@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
 import { fetchIntegrationStatus, type IntegrationStatus } from "../integrations/settings/api";
+import { locationDecision, setLocationEnabled } from "../lib/geolocation";
 
 interface PermissionRow {
   name: string;
@@ -12,9 +13,43 @@ function accountList(accounts: GoogleAccount[]): string {
   return accounts.map((a) => a.email).join(", ");
 }
 
-/** Purely informational — reads the same connection/scope facts every other
+/** The one row here with an actual control (Part 1: live location) — every
+ * other row is purely informational, reading facts other parts of Settings
+ * already read. There's no server-side toggle to gate; this just decides
+ * whether Alfred attempts navigator.geolocation at all. */
+function LocationRow() {
+  const [enabled, setEnabled] = useState(() => locationDecision() === "enabled");
+
+  function toggle() {
+    const next = !enabled;
+    setLocationEnabled(next);
+    setEnabled(next);
+  }
+
+  return (
+    <div className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-ink dark:text-ink-dark">Location</p>
+        <button
+          onClick={toggle}
+          className="rounded-full border border-line px-3 py-1 text-xs text-ink-soft dark:border-line-dark dark:text-ink-soft-dark"
+        >
+          {enabled ? "Turn off" : "Turn on"}
+        </button>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-ink-soft dark:text-ink-soft-dark">
+        Used for weather and local context. Only fetched while Alfred is open — on launch, and when you switch back
+        to it — never continuously or in the background (a browser/PWA limitation, not a choice). On a phone this is
+        precise GPS; on a desktop it's typically a much rougher, network-based estimate. When off, or if permission
+        is denied, Alfred falls back to your fixed home location instead.
+      </p>
+    </div>
+  );
+}
+
+/** Mostly informational — reads the same connection/scope facts every other
  * part of Settings already reads, just gathered in one calm place. Doesn't
- * change or gate anything itself. */
+ * change or gate anything itself, except the Location row above. */
 export function PermissionsTrust() {
   const [status, setStatus] = useState<IntegrationStatus>();
   const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
@@ -91,6 +126,7 @@ export function PermissionsTrust() {
             <p className="mt-1 text-xs leading-relaxed text-ink-soft dark:text-ink-soft-dark">{row.detail}</p>
           </div>
         ))}
+      <LocationRow />
     </div>
   );
 }

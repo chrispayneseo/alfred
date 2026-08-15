@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AccountTag } from "../components/AccountTag";
 import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
 import { GmailFlagged } from "../components/GmailFlagged";
+import { LocationPrompt } from "../components/LocationPrompt";
 import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
@@ -11,7 +12,9 @@ import { WeatherSummary } from "../components/WeatherSummary";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
+import { fetchEventWeather, type EventWeather } from "../integrations/weather/api";
 import { buildAccountColorMap } from "../lib/accountColor";
+import { useLiveLocation } from "../hooks/useLiveLocation";
 import { deleteNote, deleteTask, fetchNotes, fetchTasks, updateTaskStatus, type ApiNote, type ApiTask } from "../integrations/notion/api";
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
@@ -35,10 +38,12 @@ function EventList({
   events,
   colorMap,
   showAccountTags,
+  eventWeather,
 }: {
   events: CalendarApiEvent[];
   colorMap: ReturnType<typeof buildAccountColorMap>;
   showAccountTags: boolean;
+  eventWeather: Map<string, EventWeather>;
 }) {
   if (events.length === 0) {
     return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing scheduled.</p>;
@@ -49,6 +54,7 @@ function EventList({
     <ul className="space-y-3">
       {events.map((event) => {
         const isPast = !event.allDay && new Date(event.end).getTime() < now;
+        const weather = eventWeather.get(event.id);
         return (
           <li key={`${event.accountEmail}:${event.id}`} className={`flex items-baseline gap-3 ${isPast ? "opacity-40" : ""}`}>
             <span className="w-14 shrink-0 text-xs tabular-nums text-ink-soft dark:text-ink-soft-dark">
@@ -62,6 +68,11 @@ function EventList({
                   <AccountTag email={event.accountEmail} color={colorMap.get(event.accountEmail) ?? "a"} />
                 )}
               </div>
+              {weather && (
+                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
+                  {weather.description}, {Math.round(weather.tempC)}°C
+                </p>
+              )}
             </div>
           </li>
         );
@@ -81,6 +92,14 @@ export function TodayScreen() {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [tasksError, setTasksError] = useState<string>();
   const [notes, setNotes] = useState<ApiNote[]>([]);
+  const [eventWeather, setEventWeather] = useState<Map<string, EventWeather>>(new Map());
+  const { coords, refetch: refetchLocation } = useLiveLocation();
+
+  useEffect(() => {
+    fetchEventWeather()
+      .then((items) => setEventWeather(new Map(items.map((w) => [w.eventId, w]))))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -185,7 +204,9 @@ export function TodayScreen() {
         </p>
       )}
 
-      <WeatherSummary />
+      <LocationPrompt onAllow={refetchLocation} />
+
+      <WeatherSummary coords={coords} />
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
@@ -218,12 +239,12 @@ export function TodayScreen() {
 
         {calendarState === "ok" && (
           <>
-            <EventList events={todayEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} />
+            <EventList events={todayEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} eventWeather={eventWeather} />
             <div className="mt-5">
               <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-faint/80 dark:text-ink-faint-dark/80">
                 Tomorrow
               </h3>
-              <EventList events={tomorrowEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} />
+              <EventList events={tomorrowEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} eventWeather={eventWeather} />
             </div>
             {failedAccounts.length > 0 && (
               <p className="mt-4 text-xs text-ink-faint dark:text-ink-faint-dark">

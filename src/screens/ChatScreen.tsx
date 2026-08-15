@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { sendChatMessage, type ChatApiTurn } from "../integrations/llm/api";
+import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type { ChatMessage, EventProposal } from "../types";
@@ -42,6 +43,7 @@ export function ChatScreen() {
   const [isThinking, setIsThinking] = useState(false);
   const [submittingEventId, setSubmittingEventId] = useState<string>();
   const online = useOnlineStatus();
+  const { coords } = useLiveLocation();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -78,7 +80,7 @@ export function ChatScreen() {
 
     setIsThinking(true);
     try {
-      const result = await sendChatMessage(history);
+      const result = await sendChatMessage(history, coords);
       setMessages((prev) => [
         ...prev,
         {
