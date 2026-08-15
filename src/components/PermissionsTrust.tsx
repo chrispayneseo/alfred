@@ -44,7 +44,7 @@ export function PermissionsTrust() {
     {
       name: "Google Calendar",
       detail: hasGoogle
-        ? `Read on every connected account (${accountList(accounts)}), plus creating events — but only when you explicitly ask in Chat and confirm the exact details Alfred proposes first. Alfred never edits or deletes an event, and never creates one without that confirmation.`
+        ? `Read on every connected account (${accountList(accounts)}). Writing is different: Alfred only ever creates events on cpayneer@gmail.com — never chrispayneseo@gmail.com — enforced in Alfred's own code regardless of what Google's grant allows either account. Two ways to create an event, both requiring your explicit approval first: asking in Chat and confirming the exact details proposed, or taking a photo of a handwritten calendar (Capture → Scan calendar) and approving each entry individually before it's written. Alfred never edits or deletes an event, and never creates one without that confirmation.`
         : "Not connected — connect a Google account to enable this.",
       show: true,
     },

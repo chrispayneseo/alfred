@@ -51,3 +51,37 @@ export async function claudeComplete(
   if (!text) throw new Error("Claude returned no text content");
   return text;
 }
+
+/** Same shape as claudeComplete, plus a single image alongside the text —
+ * used for the calendar-photo extraction pipeline. Claude's vision input
+ * takes the image as its own content block ahead of the text instruction. */
+export async function claudeVisionComplete(
+  apiKey: string,
+  systemPrompt: string,
+  userText: string,
+  imageBase64: string,
+  imageMediaType: "image/jpeg" | "image/png" | "image/webp",
+  maxTokens = 1024,
+  model = "claude-opus-5"
+): Promise<string> {
+  const anthropic = getAnthropicClient(apiKey);
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: maxTokens,
+    thinking: { type: "disabled" },
+    system: systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: imageMediaType, data: imageBase64 } },
+          { type: "text", text: userText },
+        ],
+      },
+    ],
+  });
+
+  const text = response.content.find((block) => block.type === "text")?.text;
+  if (!text) throw new Error("Claude returned no text content");
+  return text;
+}

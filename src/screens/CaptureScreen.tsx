@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CalendarScanReview } from "../components/CalendarScanReview";
 import { Screen } from "../components/Screen";
+import { extractCalendarPhoto, type ExtractResult } from "../integrations/calendarPhoto/api";
 import {
   fetchProjects,
   isMultiCaptureResult,
@@ -10,6 +12,20 @@ import {
 } from "../integrations/notion/api";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
 import { useVoiceRecorder } from "../lib/useVoiceRecorder";
+
+type CaptureMode = "text" | "voice" | "scan-calendar";
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Couldn't read that photo."));
+    reader.readAsDataURL(file);
+  });
+}
 
 interface RecentCapture {
   id: string;
@@ -142,6 +158,12 @@ export function CaptureScreen() {
   const [filing, setFiling] = useState(false);
   const [reviewError, setReviewError] = useState<string>();
 
+  const [mode, setMode] = useState<CaptureMode>("text");
+  const [extracting, setExtracting] = useState(false);
+  const [scanResult, setScanResult] = useState<ExtractResult>();
+  const [scanError, setScanError] = useState<string>();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
   const handleTranscribed = useCallback((transcript: string) => {
     const trimmed = transcript.trim();
     if (!trimmed) return;
@@ -240,6 +262,35 @@ export function CaptureScreen() {
     }
   }
 
+  function handleModeChange(next: CaptureMode) {
+    setMode(next);
+    setScanResult(undefined);
+    setScanError(undefined);
+  }
+
+  async function handlePhotoSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setExtracting(true);
+    setScanError(undefined);
+    try {
+      const base64 = await fileToBase64(file);
+      const result = await extractCalendarPhoto(base64, file.type || "image/jpeg");
+      setScanResult(result);
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Couldn't read that photo.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  function handleScanDone() {
+    setScanResult(undefined);
+    setMode("text");
+  }
+
   return (
     <Screen title="Capture" subtitle="Jot it down — sort it out later">
       <div className="flex flex-col gap-3">
@@ -258,89 +309,130 @@ export function CaptureScreen() {
             filing={filing}
             error={reviewError}
           />
+        ) : scanResult ? (
+          <CalendarScanReview result={scanResult} onDone={handleScanDone} onCancel={() => setScanResult(undefined)} />
         ) : (
           <>
-            <textarea
-              ref={inputRef}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault();
-                  handleSave();
-                }
-              }}
-              placeholder="What's on your mind?"
-              rows={5}
-              className="w-full resize-none rounded-2xl border border-line bg-paper-raised px-4 py-3 text-base text-ink outline-none placeholder:text-ink-faint focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:placeholder:text-ink-faint-dark"
-            />
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={voice.state === "recording" ? voice.stop : voice.start}
-                disabled={voice.state === "transcribing" || voice.state === "unsupported"}
-                aria-label={
-                  voice.state === "recording"
-                    ? "Stop recording"
-                    : voice.state === "transcribing"
-                      ? "Transcribing…"
-                      : "Start voice capture"
-                }
-                title={voice.state === "unsupported" ? "Voice capture isn't supported in this browser" : undefined}
-                className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
-                  voice.state === "recording"
-                    ? "border-claude bg-claude/10 text-claude"
-                    : "border-line text-ink-faint hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
-                }`}
-              >
-                {voice.state === "recording" && (
-                  <span className="absolute inset-0 animate-ping rounded-full bg-claude/30" aria-hidden="true" />
-                )}
-                {voice.state === "transcribing" ? (
-                  <svg viewBox="0 0 24 24" width="18" height="18" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" width="18" height="18" className="relative" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                    <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3" strokeLinecap="round" />
-                  </svg>
-                )}
-              </button>
-              <button
-                type="button"
-                disabled
-                aria-disabled
-                title="Attach image — coming soon"
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-line text-ink-faint opacity-50 dark:border-line-dark dark:text-ink-faint-dark"
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="5" width="18" height="14" rx="2" />
-                  <circle cx="9" cy="10" r="1.5" />
-                  <path d="m4 17 5-5 4 4 3-3 4 4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!text.trim() || isSaving}
-                className="ml-auto rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
-              >
-                {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
-              </button>
+            <div className="flex gap-1 rounded-full border border-line p-1 dark:border-line-dark">
+              {(
+                [
+                  { value: "text", label: "Text" },
+                  { value: "voice", label: "Voice" },
+                  { value: "scan-calendar", label: "Scan calendar" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => handleModeChange(opt.value)}
+                  className={`flex-1 rounded-full py-1.5 text-xs font-medium transition-colors ${
+                    mode === opt.value
+                      ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
+                      : "text-ink-soft dark:text-ink-soft-dark"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
-            {voice.state === "recording" && (
-              <p className="text-xs text-claude">Recording… tap the mic again to stop.</p>
-            )}
-            {voice.state === "transcribing" && (
-              <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Transcribing…</p>
-            )}
-            {voice.error && <p className="text-xs text-claude">{voice.error}</p>}
+            {mode === "scan-calendar" ? (
+              <div className="flex flex-col items-center gap-3 rounded-2xl border border-line px-4 py-8 text-center dark:border-line-dark">
+                <p className="text-sm text-ink-soft dark:text-ink-soft-dark">
+                  Take a photo of a handwritten wall calendar — Alfred will read it and let you review each entry
+                  before anything's added to your calendar.
+                </p>
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handlePhotoSelected}
+                />
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={extracting}
+                  className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                >
+                  {extracting ? "Reading photo…" : "Take or choose a photo"}
+                </button>
+                {scanError && <p className="text-xs text-claude">{scanError}</p>}
+              </div>
+            ) : (
+              <>
+                <textarea
+                  ref={inputRef}
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault();
+                      handleSave();
+                    }
+                  }}
+                  placeholder="What's on your mind?"
+                  rows={5}
+                  className="w-full resize-none rounded-2xl border border-line bg-paper-raised px-4 py-3 text-base text-ink outline-none placeholder:text-ink-faint focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:placeholder:text-ink-faint-dark"
+                />
 
-            {error && <p className="text-xs text-claude">{error}</p>}
+                <div className="flex items-center gap-2">
+                  {mode === "voice" && (
+                    <button
+                      type="button"
+                      onClick={voice.state === "recording" ? voice.stop : voice.start}
+                      disabled={voice.state === "transcribing" || voice.state === "unsupported"}
+                      aria-label={
+                        voice.state === "recording"
+                          ? "Stop recording"
+                          : voice.state === "transcribing"
+                            ? "Transcribing…"
+                            : "Start voice capture"
+                      }
+                      title={voice.state === "unsupported" ? "Voice capture isn't supported in this browser" : undefined}
+                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                        voice.state === "recording"
+                          ? "border-claude bg-claude/10 text-claude"
+                          : "border-line text-ink-faint hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
+                      }`}
+                    >
+                      {voice.state === "recording" && (
+                        <span className="absolute inset-0 animate-ping rounded-full bg-claude/30" aria-hidden="true" />
+                      )}
+                      {voice.state === "transcribing" ? (
+                        <svg viewBox="0 0 24 24" width="18" height="18" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" width="18" height="18" className="relative" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3" strokeLinecap="round" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={!text.trim() || isSaving}
+                    className="ml-auto rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-opacity disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
+                  >
+                    {isSaving ? "Saving…" : justSaved ? "Saved" : "Save"}
+                  </button>
+                </div>
+
+                {voice.state === "recording" && (
+                  <p className="text-xs text-claude">Recording… tap the mic again to stop.</p>
+                )}
+                {voice.state === "transcribing" && (
+                  <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Transcribing…</p>
+                )}
+                {voice.error && <p className="text-xs text-claude">{voice.error}</p>}
+
+                {error && <p className="text-xs text-claude">{error}</p>}
+              </>
+            )}
           </>
         )}
 

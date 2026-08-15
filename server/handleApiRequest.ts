@@ -8,9 +8,20 @@ import { getUpcomingMatches, getUpcomingSessions } from "./coachplan/coachplan.j
 import { isCoachPlanConfigured, loadCoachPlanEnv } from "./coachplan/env.js";
 import type { Env } from "./db.js";
 import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts.js";
-import { createEvent, getTodayEventsAllAccounts, getTomorrowEventsAllAccounts, type MultiAccountEvents } from "./google/calendar.js";
+import {
+  createEvent,
+  getTodayEventsAllAccounts,
+  getTomorrowEventsAllAccounts,
+  listEvents,
+  type CalendarEventRecord,
+  type MultiAccountEvents,
+  type NewEventInput,
+} from "./google/calendar.js";
+import { assertWritableAccount, CalendarAccountNotWritableError, WRITABLE_CALENDAR_ACCOUNT } from "./google/calendarWriteGuard.js";
 import { loadGoogleEnv } from "./google/env.js";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "./google/errors.js";
+import { extractCalendarPhoto } from "./calendarPhoto/extract.js";
+import { buildReviewItems, extractionDateRange } from "./calendarPhoto/review.js";
 import { exchangeCodeForRefreshToken, getAuthUrl, isValidState, revokeToken } from "./google/oauth.js";
 import { getSyncStatus, startSync } from "./google/gmailSync.js";
 import {
@@ -90,6 +101,58 @@ function redirect(location: string): ApiResult {
 // minutes at most) — well under Vercel's request body limits, just a sanity
 // check against something going wrong client-side.
 const MAX_AUDIO_BASE64_CHARS = 15_000_000;
+// A phone photo of a calendar page comfortably fits well under this.
+const MAX_PHOTO_BASE64_CHARS = 15_000_000;
+const VALID_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+interface ApprovedPhotoItem {
+  kind: "single" | "recurring";
+  title: string;
+  date: string;
+  endDate: string | null;
+  time: string | null;
+  weekday?: string;
+  dates?: string[];
+  asRecurring?: boolean;
+}
+
+function isApprovedPhotoItem(value: unknown): value is ApprovedPhotoItem {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if ((v.kind !== "single" && v.kind !== "recurring") || typeof v.title !== "string" || typeof v.date !== "string") return false;
+  if (v.kind === "recurring" && (typeof v.weekday !== "string" || !Array.isArray(v.dates))) return false;
+  return true;
+}
+
+/** One approved review item may become one or several actual calendar
+ * events (a "just these instances" recurring group becomes one event per
+ * date) — this always writes every one of them, reporting per-event
+ * success/failure, so a partial failure within one item is visible rather
+ * than silently dropped. */
+async function createEventsForApprovedItem(
+  account: Parameters<typeof createEvent>[0],
+  item: ApprovedPhotoItem
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const base: NewEventInput = { title: item.title, date: item.date, endDate: item.endDate ?? undefined, startTime: item.time ?? undefined };
+
+  try {
+    if (item.kind === "single") {
+      await createEvent(account, base);
+      return { ok: true };
+    }
+    if (item.asRecurring) {
+      await createEvent(account, { ...base, date: item.dates![0], recurringWeekday: item.weekday });
+      return { ok: true };
+    }
+    for (const date of item.dates!) {
+      await createEvent(account, { ...base, date });
+    }
+    return { ok: true };
+  } catch (error) {
+    console.error("[calendarPhoto] failed to create event:", error);
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn't create that event." };
+  }
+}
 
 function isChatTurn(value: unknown): value is ChatTurn {
   if (typeof value !== "object" || value === null) return false;
@@ -252,6 +315,13 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const endTime = typeof body.endTime === "string" ? body.endTime : undefined;
       if (!title || !date || !accountEmail) return json(400, { error: "title, date, and account are required" });
 
+      try {
+        assertWritableAccount(accountEmail);
+      } catch (error) {
+        if (error instanceof CalendarAccountNotWritableError) return json(403, { error: error.message });
+        throw error;
+      }
+
       const accounts = await loadGoogleAccounts(env);
       const account = accounts.find((a) => a.email === accountEmail);
       if (!account) return json(404, { error: `${accountEmail} isn't a connected account.` });
@@ -264,6 +334,65 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         if (error instanceof GoogleNotConnectedError) return json(409, { error: "not_connected" });
         throw error;
       }
+    }
+
+    // Explicit "Scan calendar" capture mode only — never triggered by a
+    // normal photo capture. Reads the photo, never writes anything; the
+    // actual calendar write only happens after the user reviews and
+    // approves in /api/calendar/photo-scan/create below.
+    if (method === "POST" && pathname === "/api/calendar/photo-scan/extract") {
+      const body = await readBody();
+      const imageBase64 = typeof body.imageBase64 === "string" ? body.imageBase64 : "";
+      const mimeType = typeof body.mimeType === "string" ? body.mimeType : "";
+      if (!imageBase64) return json(400, { error: "No photo was provided." });
+      if (imageBase64.length > MAX_PHOTO_BASE64_CHARS) return json(413, { error: "That photo is too large." });
+      if (!VALID_IMAGE_MIME_TYPES.has(mimeType)) return json(400, { error: "Unsupported image type." });
+
+      let extraction;
+      try {
+        extraction = await extractCalendarPhoto(llmEnv, imageBase64, mimeType as "image/jpeg" | "image/png" | "image/webp");
+      } catch (error) {
+        console.error("[calendarPhoto] extraction failed:", error);
+        return json(502, { error: "Couldn't read that photo — try again, or a clearer shot of the page." });
+      }
+
+      const accounts = await loadGoogleAccounts(env);
+      const account = accounts.find((a) => a.email === WRITABLE_CALENDAR_ACCOUNT);
+      if (!account) return json(409, { error: "not_connected" });
+
+      const range = extractionDateRange(extraction);
+      let existingEvents: CalendarEventRecord[] = [];
+      if (range) {
+        try {
+          existingEvents = await listEvents(account, {
+            start: new Date(`${range.start}T00:00:00`),
+            end: new Date(`${range.end}T23:59:59`),
+          });
+        } catch (error) {
+          if (error instanceof GoogleReconnectRequiredError) return json(409, { error: "reconnect_required" });
+          throw error;
+        }
+      }
+
+      const reviewItems = buildReviewItems(extraction, existingEvents);
+      return json(200, { monthYear: extraction.monthYear, items: reviewItems });
+    }
+
+    if (method === "POST" && pathname === "/api/calendar/photo-scan/create") {
+      const body = await readBody();
+      const items = Array.isArray(body.items) ? body.items.filter(isApprovedPhotoItem) : [];
+      if (items.length === 0) return json(400, { error: "No approved items were provided." });
+
+      const accounts = await loadGoogleAccounts(env);
+      const account = accounts.find((a) => a.email === WRITABLE_CALENDAR_ACCOUNT);
+      if (!account) return json(409, { error: "not_connected" });
+
+      const results = await Promise.all(
+        items.map(async (item) => ({ item, result: await createEventsForApprovedItem(account, item) }))
+      );
+      return json(200, {
+        results: results.map(({ item, result }) => ({ title: item.title, date: item.date, ...result })),
+      });
     }
 
     if (method === "GET" && pathname === "/api/gmail/status") {

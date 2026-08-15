@@ -2,6 +2,7 @@ import type { CoachPlanEnv } from "../coachplan/env.js";
 import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
 import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
+import { WRITABLE_CALENDAR_ACCOUNT } from "../google/calendarWriteGuard.js";
 import type { NotionRepo } from "../notion/queries.js";
 import type { WeatherEnv } from "../weather/env.js";
 import { claudeChat } from "./anthropic.js";
@@ -61,18 +62,15 @@ function extractConfidence(rawText: string): { text: string; confidence: Confide
   };
 }
 
-// No per-account-preference infrastructure exists (single-user app) — same
-// reasoning as calendar.ts's DEFAULT_TIME_ZONE. The model is told to use
-// this account unless the user names the other one explicitly.
-const DEFAULT_CALENDAR_ACCOUNT = "cpayneer@gmail.com";
-
 // Chat cannot create a calendar event itself — this only ever produces a
 // *proposal*, which the frontend renders as an explicit confirm/cancel
 // card (never auto-created). The actual write happens in
-// /api/calendar/create-event, and only after that confirmation.
-const EVENT_PROPOSAL_INSTRUCTION = `If the user is asking you to add, create, schedule, or book something on their calendar, you cannot create it directly — you can only propose it for their confirmation. If you have enough detail (at minimum a title and a date; assume 1 hour for a timed event with no stated end time; treat it as all-day if no time is given at all; default to the account "${DEFAULT_CALENDAR_ACCOUNT}" unless the user names the other connected account explicitly), write one short sentence proposing it (e.g. "Want me to add this to your calendar?"), then — after that sentence, and before the final confidence line — output exactly this block:
+// /api/calendar/create-event, which enforces WRITABLE_CALENDAR_ACCOUNT
+// server-side regardless of what account is named here — this prompt just
+// keeps the model from proposing something it can't actually deliver.
+const EVENT_PROPOSAL_INSTRUCTION = `If the user is asking you to add, create, schedule, or book something on their calendar, you cannot create it directly — you can only propose it for their confirmation. Alfred can only ever write events to the "${WRITABLE_CALENDAR_ACCOUNT}" calendar — never any other connected account, even if asked. If the user specifically asks for a different account, tell them that isn't possible rather than proposing it anyway. Otherwise, if you have enough detail (at minimum a title and a date; assume 1 hour for a timed event with no stated end time; treat it as all-day if no time is given at all), write one short sentence proposing it (e.g. "Want me to add this to your calendar?"), then — after that sentence, and before the final confidence line — output exactly this block:
 [[CALENDAR_EVENT_PROPOSAL]]
-{"title": "...", "date": "YYYY-MM-DD", "startTime": "HH:MM" or null, "endTime": "HH:MM" or null, "account": "..."}
+{"title": "...", "date": "YYYY-MM-DD", "startTime": "HH:MM" or null, "endTime": "HH:MM" or null, "account": "${WRITABLE_CALENDAR_ACCOUNT}"}
 [[/CALENDAR_EVENT_PROPOSAL]]
 If you're missing the title or date, ask a clarifying question instead — do not output this block until you actually have enough detail to propose a specific event. Never output it for any reason other than genuinely proposing an event the user just asked for.`;
 

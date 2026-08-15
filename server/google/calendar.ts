@@ -91,11 +91,19 @@ export interface NewEventInput {
   title: string;
   /** YYYY-MM-DD */
   date: string;
+  /** YYYY-MM-DD — last day (inclusive) of a multi-day all-day span, e.g. a
+   * calendar-photo entry whose handwritten line crosses several cells.
+   * Ignored for timed events; only meaningful when startTime is omitted. */
+  endDate?: string;
   /** HH:MM, 24h — omit for an all-day event. */
   startTime?: string;
   /** HH:MM — defaults to startTime + 1 hour when a timed event omits it. */
   endTime?: string;
   location?: string;
+  /** Weekly recurrence on a single weekday (e.g. "TU"), no end date —
+   * calendar-photo entries flagged as a recurring pattern. Google's
+   * two-letter RRULE BYDAY codes: MO/TU/WE/TH/FR/SA/SU. */
+  recurringWeekday?: string;
 }
 
 // No per-user timezone setting exists anywhere in this app (a single-user
@@ -131,18 +139,22 @@ export async function createEvent(env: GoogleAccountEnv, input: NewEventInput): 
   const auth = createAuthenticatedClient(env);
   const calendar = new calendar_v3.Calendar({ auth });
 
+  const recurrence = input.recurringWeekday ? [`RRULE:FREQ=WEEKLY;BYDAY=${input.recurringWeekday}`] : undefined;
+
   const requestBody: calendar_v3.Schema$Event = input.startTime
     ? {
         summary: input.title,
         location: input.location,
         start: { dateTime: `${input.date}T${input.startTime}:00`, timeZone: DEFAULT_TIME_ZONE },
         end: { dateTime: `${input.date}T${input.endTime ?? addOneHour(input.startTime)}:00`, timeZone: DEFAULT_TIME_ZONE },
+        recurrence,
       }
     : {
         summary: input.title,
         location: input.location,
         start: { date: input.date },
-        end: { date: addOneDay(input.date) },
+        end: { date: addOneDay(input.endDate ?? input.date) },
+        recurrence,
       };
 
   try {

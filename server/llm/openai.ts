@@ -68,3 +68,35 @@ export async function chatGptComplete(
   if (!text) throw new Error("ChatGPT returned no text content");
   return text;
 }
+
+/** Same shape as chatGptComplete, plus a single image alongside the text —
+ * used for the calendar-photo extraction pipeline. */
+export async function chatGptVisionComplete(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userText: string,
+  imageBase64: string,
+  imageMediaType: "image/jpeg" | "image/png" | "image/webp",
+  maxTokens = 1024
+): Promise<string> {
+  const openai = getOpenAiClient(apiKey);
+  const response = await openai.chat.completions.create({
+    model,
+    max_completion_tokens: maxTokens,
+    messages: [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userText },
+          { type: "image_url", image_url: { url: `data:${imageMediaType};base64,${imageBase64}` } },
+        ],
+      },
+    ],
+  });
+
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error("ChatGPT returned no text content");
+  return text;
+}
