@@ -1,0 +1,22 @@
+name: Gmail refresh
+
+# Vercel Hobby's own Cron Jobs are capped at once/day, which isn't often
+# enough to keep the Today screen's Flagged section fresh. This calls
+# Alfred's token-gated /api/cron/gmail-refresh webhook instead, which
+# chains the same sync + scan the manual buttons trigger. GitHub's own
+# scheduling isn't exact either (a run can slip a few minutes, and GitHub
+# may pause schedules on repos with no commits for 60+ days) but it's good
+# enough for keeping email roughly up to date.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Gmail sync + scan
+        run: |
+          curl -sS -o /dev/null -w "status: %{http_code}\n" -X POST \
+            "https://alfred-five-livid.vercel.app/api/cron/gmail-refresh?token=${{ secrets.GMAIL_CRON_SECRET }}"

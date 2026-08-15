@@ -74,7 +74,9 @@ import { wipeEverything } from "./settings/wipe.js";
 import { loadWeatherEnv, type WeatherEnv } from "./weather/env.js";
 import { fetchWeatherBriefing } from "./weather/openMeteo.js";
 import { fetchEventWeather } from "./weather/eventWeather.js";
-import { isValidLocationTriggerToken, loadLocationTriggerSecret, processLocationTrigger } from "./locationTrigger/webhook.js";
+import { loadLocationTriggerSecret, processLocationTrigger } from "./locationTrigger/webhook.js";
+import { isValidToken } from "./shared/verifyToken.js";
+import { loadGmailCronSecret } from "./cron/env.js";
 
 export interface ApiRequest {
   method: string;
@@ -549,7 +551,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     // finds it.
     if (method === "GET" && pathname === "/api/location-trigger") {
       const token = searchParams.get("token") ?? "";
-      if (!isValidLocationTriggerToken(token, loadLocationTriggerSecret(env))) {
+      if (!isValidToken(token, loadLocationTriggerSecret(env))) {
         return json(403, { error: "Invalid or missing token." });
       }
       const location = (searchParams.get("location") ?? "").trim();
@@ -562,6 +564,26 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         console.error("[locationTrigger] failed to process trigger:", error);
         return json(502, { error: "Couldn't send that reminder right now." });
       }
+    }
+
+    // Public but token-gated, same posture as location-trigger above. Called
+    // on a timer by a GitHub Actions workflow rather than Vercel's own Cron
+    // Jobs, since Hobby-plan cron is capped at once/day — this just chains
+    // the same startSync/startScan the manual Today-screen buttons call, so
+    // the Flagged list stays fresh without a tap. Both are safe to call even
+    // when nothing's new: startSync/startScan no-op if already running, and
+    // startScan only ever processes emails still marked unscanned.
+    if (method === "POST" && pathname === "/api/cron/gmail-refresh") {
+      const token = searchParams.get("token") ?? "";
+      if (!isValidToken(token, loadGmailCronSecret(env))) {
+        return json(403, { error: "Invalid or missing token." });
+      }
+      const accounts = await loadGoogleAccounts(env);
+      if (accounts.length === 0) return json(200, { ok: true, skipped: "not_connected" });
+
+      const sync = await startSync(env, accounts, 30, backgroundTask);
+      const scan = await startScan(env, llmEnv, accounts, repo, 50, backgroundTask);
+      return json(200, { ok: true, sync, scan });
     }
 
     if (method === "GET" && pathname === "/api/digest/weekly") {

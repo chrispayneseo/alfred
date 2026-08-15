@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import type { NotionRepo } from "../notion/queries.js";
 import type { NtfyEnv } from "../notify/env.js";
 import { notify } from "../notify/ntfy.js";
@@ -7,21 +6,6 @@ import { notify } from "../notify/ntfy.js";
  * google/env.ts for why (dev uses Vite's loadEnv(), prod uses process.env). */
 export function loadLocationTriggerSecret(source: Record<string, string | undefined>): string {
   return source.LOCATION_TRIGGER_SECRET ?? "";
-}
-
-/** This is a public, unauthenticated-beyond-the-token webhook — anyone who
- * finds the URL and guesses right gets to fire reminders. A constant-time
- * comparison matters here for the same reason as oauth.ts's signed state:
- * an early-exit string compare leaks how many leading characters of a
- * guess were correct via response timing. Fails closed (false) if the
- * secret isn't configured at all, rather than treating "no secret set" as
- * "no secret required." */
-export function isValidLocationTriggerToken(provided: string, expected: string): boolean {
-  if (!expected) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
 }
 
 function normalize(location: string): string {
