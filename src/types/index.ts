@@ -11,6 +11,14 @@ export interface EventProposal {
 
 export type EventProposalStatus = "pending" | "created" | "cancelled" | "error";
 
+export interface LocationReminderProposal {
+  text: string;
+  locationTrigger: string;
+  project: string;
+}
+
+export type LocationReminderProposalStatus = "pending" | "created" | "cancelled" | "error";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -23,4 +31,7 @@ export interface ChatMessage {
   eventProposal?: EventProposal;
   eventProposalStatus?: EventProposalStatus;
   eventProposalError?: string;
+  locationReminderProposal?: LocationReminderProposal;
+  locationReminderProposalStatus?: LocationReminderProposalStatus;
+  locationReminderProposalError?: string;
 }

@@ -103,6 +103,18 @@ function CaptureReview({
                 {!projects.some((p) => p.name === item.project) && <option value={item.project}>{item.project}</option>}
               </select>
             </div>
+
+            {item.locationTrigger !== undefined && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="shrink-0 text-[11px] text-ink-faint dark:text-ink-faint-dark">When at</span>
+                <input
+                  value={item.locationTrigger}
+                  onChange={(e) => onChange(item.id, { locationTrigger: e.target.value })}
+                  placeholder="location"
+                  className="flex-1 rounded-full border border-line bg-paper-raised px-2.5 py-1 text-[11px] text-ink-soft outline-none focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-soft-dark"
+                />
+              </div>
+            )}
           </li>
         ))}
         {items.length === 0 && (
@@ -231,7 +243,7 @@ export function CaptureScreen() {
     setReviewError(undefined);
     try {
       const { results } = await submitMultiCapture(
-        reviewItems.map(({ text: t, type, project }) => ({ text: t, type, project })),
+        reviewItems.map(({ text: t, type, project, locationTrigger }) => ({ text: t, type, project, locationTrigger })),
         reviewSource
       );
       setRecent((prev) => [

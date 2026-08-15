@@ -4,6 +4,7 @@ import type { GoogleAccountEnv } from "../google/accounts.js";
 import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
 import { WRITABLE_CALENDAR_ACCOUNT } from "../google/calendarWriteGuard.js";
 import type { NotionRepo } from "../notion/queries.js";
+import { DIGEST_PROJECTS, UNSORTED_PROJECT } from "../notion/schema.js";
 import type { WeatherEnv } from "../weather/env.js";
 import { claudeChat } from "./anthropic.js";
 import { buildCalendarContext, needsCalendarContext } from "./calendarContext.js";
@@ -28,6 +29,12 @@ export interface EventProposal {
   account: string;
 }
 
+export interface LocationReminderProposal {
+  text: string;
+  locationTrigger: string;
+  project: string;
+}
+
 export interface ChatResult {
   text: string;
   model: ModelChoice;
@@ -35,6 +42,7 @@ export interface ChatResult {
   fellBack: boolean;
   confidence: Confidence;
   eventProposal?: EventProposal;
+  locationReminderProposal?: LocationReminderProposal;
 }
 
 // Asked of every answer, not just ones with injected context — a plain
@@ -106,6 +114,43 @@ function extractEventProposal(text: string): { text: string; eventProposal?: Eve
   }
 }
 
+// Chat cannot create a location-triggered reminder itself — same
+// propose-then-confirm shape as calendar events. The actual write happens
+// in /api/capture/location-reminder, only after the frontend renders this
+// as a confirm/cancel card and the user confirms; Tasker never talks to
+// Chat at all, only to /api/location-trigger (a completely different,
+// token-authenticated route — see locationTrigger/webhook.ts).
+const LOCATION_REMINDER_PROPOSAL_INSTRUCTION = `If the user asks to be reminded of something when they arrive at, get to, or are next at a specific place (e.g. "remind me to phone the doctors when I get home", "when I'm at the sports ground remind me to grab the cones"), you cannot set it up directly — you can only propose it for their confirmation. If you have both the reminder text and a clear place name, write one short sentence proposing it (e.g. "Want me to remind you to phone the doctors next time you're home?"), then — after that sentence, and before the final confidence line — output exactly this block:
+[[LOCATION_REMINDER_PROPOSAL]]
+{"text": "...", "locationTrigger": "...", "project": one of ${DIGEST_PROJECTS.join(", ")} or "${UNSORTED_PROJECT}"}
+[[/LOCATION_REMINDER_PROPOSAL]]
+"text" is just the action itself (e.g. "phone the doctors"), never the trigger clause. "locationTrigger" is the place name exactly as they said it. If the place is unclear or missing, ask a clarifying question instead — do not output this block until you have both. Never output it for any reason other than genuinely proposing a location reminder the user just asked for, and never output both this block and the calendar event block in the same reply.`;
+
+const LOCATION_REMINDER_PROPOSAL_RE = /\[\[LOCATION_REMINDER_PROPOSAL\]\]\s*([\s\S]*?)\s*\[\[\/LOCATION_REMINDER_PROPOSAL\]\]/;
+
+/** Strips the [[LOCATION_REMINDER_PROPOSAL]] block (if present) and parses
+ * it — same "drop silently on a malformed block" philosophy as
+ * extractEventProposal. */
+function extractLocationReminderProposal(text: string): { text: string; locationReminderProposal?: LocationReminderProposal } {
+  const match = text.match(LOCATION_REMINDER_PROPOSAL_RE);
+  if (!match) return { text };
+
+  const cleanText = (text.slice(0, match.index) + text.slice(match.index! + match[0].length)).trim();
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (typeof parsed.text !== "string" || typeof parsed.locationTrigger !== "string" || typeof parsed.project !== "string") {
+      return { text: cleanText };
+    }
+    return {
+      text: cleanText,
+      locationReminderProposal: { text: parsed.text, locationTrigger: parsed.locationTrigger, project: parsed.project },
+    };
+  } catch (error) {
+    console.error("[chat] couldn't parse location reminder proposal JSON:", error, match[1]);
+    return { text: cleanText };
+  }
+}
+
 async function callModel(model: ModelChoice, env: LlmEnv, messages: ChatTurn[], extraContext?: string): Promise<string> {
   return model === "claude"
     ? claudeChat(env.anthropicApiKey, messages, extraContext)
@@ -142,7 +187,7 @@ async function buildContext(
   if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
   if (needsWeatherContext(lastText)) blocks.push(await buildWeatherContext(weatherEnv, dbEnv, googleAccounts));
 
-  return [...blocks, EVENT_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
+  return [...blocks, EVENT_PROPOSAL_INSTRUCTION, LOCATION_REMINDER_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }
 
 /**
@@ -173,15 +218,17 @@ export async function runChat(
   try {
     const raw = await callModel(intended, env, messages, extraContext);
     const { text: afterConfidence, confidence } = extractConfidence(raw);
-    const { text, eventProposal } = extractEventProposal(afterConfidence);
-    return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal };
+    const { text: afterEvent, eventProposal } = extractEventProposal(afterConfidence);
+    const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
+    return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal, locationReminderProposal };
   } catch (primaryError) {
     console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
     try {
       const raw = await callModel(fallback, env, messages, extraContext);
       const { text: afterConfidence, confidence } = extractConfidence(raw);
-      const { text, eventProposal } = extractEventProposal(afterConfidence);
-      return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal };
+      const { text: afterEvent, eventProposal } = extractEventProposal(afterConfidence);
+      const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
+      return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal, locationReminderProposal };
     } catch (fallbackError) {
       console.error(`[chat] ${fallback} fallback also failed:`, fallbackError);
       throw new Error("both_unavailable");

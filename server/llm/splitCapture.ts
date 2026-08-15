@@ -7,14 +7,22 @@ export interface CaptureItem {
   text: string;
   type: "task" | "note";
   project: string;
+  /** Set only when this item is a location-triggered reminder ("remind me
+   * to X when I get to/home/at Y") — the free-form place name Y, exactly
+   * as the person described it. Always paired with type "task". Never
+   * guessed hard: the item still always goes through the reviewable list
+   * (see handleApiRequest.ts's /api/capture), where the place name is
+   * editable, so an imperfect extraction is easy to fix before filing. */
+  locationTrigger?: string;
 }
 
 const SPLIT_SYSTEM_PROMPT = `You process a free-form capture from a personal assistant's "jot it down" screen. The person may have typed or spoken several unrelated things at once (a brain dump), or just one thing — you need to tell the difference and classify each item.
 
 For each genuinely distinct, unrelated item, output an object with:
-- "text": the item's own text, close to the original wording, with connecting words like "also" or "and then" removed but nothing else changed or paraphrased
+- "text": the item's own text, close to the original wording, with connecting words like "also" or "and then" removed but nothing else changed or paraphrased. For a location-triggered reminder (see below), this is just the action itself ("phone the doctors"), not the trigger clause.
 - "type": "task" if it's an action the person needs to do, "note" if it's information, an idea, or something to remember
 - "project": whichever of ${DIGEST_PROJECTS.join(", ")} it most likely belongs to — if none clearly fits, use "${UNSORTED_PROJECT}"
+- "locationTrigger": if, and only if, the item is phrased as something to be reminded of on arriving at or being at a specific place ("remind me to X when I get home", "when I'm at the sports ground, remind me to X", "next time I'm at Rafique Aesthetics, X") — the place name exactly as they said it (e.g. "home", "the sports ground", "Rafique Aesthetics"), short, no extra words. Omit this field entirely for anything else, including a task that merely mentions a place in passing ("buy milk from Tesco" is not a location trigger — nothing there is asking to be reminded on arrival).
 
 Only split into multiple items when they are genuinely separate and unrelated things — a single sentence with normal clause structure, or one task with incidental detail, is NOT multiple items and must stay as one. When in doubt, don't split.
 
@@ -25,6 +33,7 @@ Respond with ONLY a JSON array of these objects, one per item, in the order they
 export function isCaptureItem(value: unknown): value is CaptureItem {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
+  if (v.locationTrigger !== undefined && (typeof v.locationTrigger !== "string" || v.locationTrigger.trim().length === 0)) return false;
   return (
     typeof v.text === "string" &&
     v.text.trim().length > 0 &&

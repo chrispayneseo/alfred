@@ -5,6 +5,9 @@ export interface ApiTask {
   due?: string;
   projectId?: string;
   projectName?: string;
+  /** Set only for a location-triggered reminder — the place name, exactly
+   * as described when it was created. */
+  locationTrigger?: string;
 }
 
 export interface ApiNote {
@@ -30,6 +33,9 @@ export interface CaptureItem {
   text: string;
   type: "task" | "note";
   project: string;
+  /** Set only when this item is a location-triggered reminder — the place
+   * name, editable in the review list before filing. */
+  locationTrigger?: string;
 }
 
 export interface MultiCaptureResult {
@@ -94,4 +100,11 @@ export async function deleteNote(noteId: string): Promise<void> {
 
 export async function deleteProject(projectId: string): Promise<{ reassigned: number }> {
   return request(`/api/projects/${projectId}`, { method: "DELETE" });
+}
+
+/** Files a location reminder Chat proposed, only ever called after the
+ * user confirms — mirrors createCalendarEvent's trust relationship with
+ * its own propose-then-confirm flow. */
+export function createLocationReminder(text: string, locationTrigger: string, project: string): Promise<{ id: string }> {
+  return request("/api/capture/location-reminder", { method: "POST", body: JSON.stringify({ text, locationTrigger, project }) });
 }

@@ -67,13 +67,14 @@ import {
 import { createNotionClient } from "./notion/client.js";
 import { loadNotionEnv } from "./notion/env.js";
 import { NotionRepo } from "./notion/queries.js";
-import { FREELANCE_CLIENTS } from "./notion/schema.js";
+import { FREELANCE_CLIENTS, UNSORTED_PROJECT } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
 import { loadWeatherEnv, type WeatherEnv } from "./weather/env.js";
 import { fetchWeatherBriefing } from "./weather/openMeteo.js";
 import { fetchEventWeather } from "./weather/eventWeather.js";
+import { isValidLocationTriggerToken, loadLocationTriggerSecret, processLocationTrigger } from "./locationTrigger/webhook.js";
 
 export interface ApiRequest {
   method: string;
@@ -541,6 +542,28 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(503, { error: "Notion isn't configured yet — check NOTION_TOKEN and the *_DB_ID vars in .env." });
     }
 
+    // Public webhook — Tasker (running natively on the phone, doing the
+    // actual geofence detection a PWA can't do reliably in the background)
+    // calls this when a geofence fires. The token is checked first, before
+    // touching Notion at all, since this URL is reachable by anyone who
+    // finds it.
+    if (method === "GET" && pathname === "/api/location-trigger") {
+      const token = searchParams.get("token") ?? "";
+      if (!isValidLocationTriggerToken(token, loadLocationTriggerSecret(env))) {
+        return json(403, { error: "Invalid or missing token." });
+      }
+      const location = (searchParams.get("location") ?? "").trim();
+      if (!location) return json(400, { error: "location is required" });
+
+      try {
+        const result = await processLocationTrigger(repo, loadNtfyEnv(env), location);
+        return json(200, { ok: true, matched: result.matched });
+      } catch (error) {
+        console.error("[locationTrigger] failed to process trigger:", error);
+        return json(502, { error: "Couldn't send that reminder right now." });
+      }
+    }
+
     if (method === "GET" && pathname === "/api/digest/weekly") {
       const accounts = await loadGoogleAccounts(env);
       return json(200, await checkWeeklyDigest(env, llmEnv, loadNtfyEnv(env), accounts, repo));
@@ -630,8 +653,12 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       // Common case: one item, no review needed — files immediately, exact
       // same shape/behavior as before this feature existed. Uses the
       // original text verbatim (not the model's per-item text, which is
-      // only meaningfully different when there's more than one item).
-      if (items.length === 1) {
+      // only meaningfully different when there's more than one item). A
+      // location-triggered reminder is the one exception: it always goes
+      // through review instead, since the place name has to be right for
+      // the eventual Tasker geofence to actually match it, and review is
+      // also how "ask to clarify" is satisfied for an ambiguous location.
+      if (items.length === 1 && !items[0].locationTrigger) {
         const inbox = await repo.createInboxPage(text, source);
         const filed = await repo.fileClassifiedItem(inbox.id, text, { type: items[0].type, project: items[0].project });
         return json(200, { inbox, filed });
@@ -652,10 +679,31 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const filed = [];
       for (const item of items) {
         const inbox = await repo.createInboxPage(item.text, source);
-        const filedItem = await repo.fileClassifiedItem(inbox.id, item.text, { type: item.type, project: item.project });
+        const filedItem = await repo.fileClassifiedItem(
+          inbox.id,
+          item.text,
+          { type: item.type, project: item.project },
+          undefined,
+          item.locationTrigger
+        );
         filed.push({ inbox, filed: filedItem });
       }
       return json(200, { results: filed });
+    }
+
+    // Only ever called after the user explicitly confirms a proposal Chat
+    // showed them (see server/llm/chat.ts's LOCATION_REMINDER_PROPOSAL_INSTRUCTION)
+    // — this route has no confirmation step of its own, same trust
+    // relationship as /api/calendar/create-event.
+    if (method === "POST" && pathname === "/api/capture/location-reminder") {
+      const body = await readBody();
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      const locationTrigger = typeof body.locationTrigger === "string" ? body.locationTrigger.trim() : "";
+      const project = typeof body.project === "string" ? body.project : UNSORTED_PROJECT;
+      if (!text || !locationTrigger) return json(400, { error: "text and locationTrigger are required" });
+
+      const created = await repo.createLocationReminderTask(text, project, locationTrigger);
+      return json(200, { id: created.id });
     }
 
     if (method === "GET" && pathname === "/api/projects") {

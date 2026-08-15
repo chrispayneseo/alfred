@@ -21,6 +21,9 @@ function getDate(page: AnyPage, prop: string): string | undefined {
 function getRelationIds(page: AnyPage, prop: string): string[] {
   return (page.properties?.[prop]?.relation ?? []).map((r: AnyPage) => r.id);
 }
+function getRichText(page: AnyPage, prop: string): string {
+  return (page.properties?.[prop]?.rich_text ?? []).map((t: AnyPage) => t.plain_text).join("");
+}
 
 const richText = (content: string) => [{ type: "text" as const, text: { content } }];
 
@@ -38,6 +41,7 @@ export interface TaskRecord {
   projectId?: string;
   projectName?: string;
   client?: string;
+  locationTrigger?: string;
 }
 
 export interface NoteRecord {
@@ -127,7 +131,8 @@ export class NotionRepo {
     inboxId: string,
     text: string,
     classification: Classification,
-    sourceUrl?: string
+    sourceUrl?: string,
+    locationTrigger?: string
   ): Promise<{ kind: "task" | "note"; id: string; project: string }> {
     const { type, project } = classification;
     const projectId = await this.findProjectIdByName(project);
@@ -143,6 +148,9 @@ export class NotionRepo {
           [TASKS_PROPS.project]: { relation: projectRelation },
           [TASKS_PROPS.fromInbox]: { relation: [{ id: inboxId }] },
           ...(emailLinkProp ? { [TASKS_PROPS.emailLink]: emailLinkProp } : {}),
+          ...(locationTrigger
+            ? { [TASKS_PROPS.locationTrigger]: { rich_text: richText(locationTrigger) }, [TASKS_PROPS.locationTriggered]: { checkbox: false } }
+            : {}),
         },
       } as never);
       await this.markInboxTriaged(inboxId);
@@ -160,6 +168,57 @@ export class NotionRepo {
     } as never);
     await this.markInboxTriaged(inboxId);
     return { kind: "note", id: page.id, project };
+  }
+
+  /** Creates a location-triggered reminder Task directly (no Inbox page) —
+   * used by Chat's propose-then-confirm flow, which never went through
+   * Capture's Inbox pipeline in the first place. */
+  async createLocationReminderTask(text: string, project: string, locationTrigger: string): Promise<{ id: string }> {
+    const projectId = await this.findProjectIdByName(project);
+    const page = await this.notion.pages.create({
+      parent: { type: "data_source_id", data_source_id: this.env.tasksDbId },
+      properties: {
+        [TITLE_PROP]: { title: richText(text) },
+        [TASKS_PROPS.status]: { select: { name: TASK_STATUS.OPEN } },
+        [TASKS_PROPS.project]: { relation: projectId ? [{ id: projectId }] : [] },
+        [TASKS_PROPS.locationTrigger]: { rich_text: richText(locationTrigger) },
+        [TASKS_PROPS.locationTriggered]: { checkbox: false },
+      },
+    } as never);
+    return { id: page.id };
+  }
+
+  /** Every open, not-yet-fired location reminder — the webhook route
+   * matches these against the location name Tasker sends, case-insensitively,
+   * itself (rather than relying on Notion's rich_text filter, which is an
+   * exact/contains match, not case-insensitive). */
+  async listOpenLocationReminders(): Promise<{ id: string; title: string; locationTrigger: string }[]> {
+    const res = await this.notion.dataSources.query({
+      data_source_id: this.env.tasksDbId,
+      filter: {
+        and: [
+          { property: TASKS_PROPS.status, select: { equals: TASK_STATUS.OPEN } },
+          { property: TASKS_PROPS.locationTriggered, checkbox: { equals: false } },
+          { property: TASKS_PROPS.locationTrigger, rich_text: { is_not_empty: true } },
+        ],
+      },
+    } as never);
+    return (res.results as AnyPage[]).map((page) => ({
+      id: page.id,
+      title: getTitle(page),
+      locationTrigger: getRichText(page, TASKS_PROPS.locationTrigger),
+    }));
+  }
+
+  /** One-shot: flips "Location Triggered" so this reminder won't fire again
+   * on the next geofence event for the same place. Never a hard delete —
+   * the Task itself stays, same archive-not-delete philosophy as
+   * everywhere else in this app. */
+  async markLocationReminderTriggered(taskId: string): Promise<void> {
+    await this.notion.pages.update({
+      page_id: taskId,
+      properties: { [TASKS_PROPS.locationTriggered]: { checkbox: true } },
+    } as never);
   }
 
   private async markInboxTriaged(inboxId: string): Promise<void> {
@@ -197,6 +256,7 @@ export class NotionRepo {
         projectId: projId,
         projectName: projId ? projectById.get(projId) : undefined,
         client: getSelect(page, TASKS_PROPS.client),
+        locationTrigger: getRichText(page, TASKS_PROPS.locationTrigger) || undefined,
       };
     });
   }

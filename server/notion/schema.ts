@@ -16,6 +16,8 @@ export const TASKS_PROPS = {
   fromInbox: "From Inbox",
   emailLink: "Email Link",
   client: "Client",
+  locationTrigger: "Location Trigger",
+  locationTriggered: "Location Triggered",
 } as const;
 
 export const NOTES_PROPS = {

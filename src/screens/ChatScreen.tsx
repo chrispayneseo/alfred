@@ -2,10 +2,11 @@ import { useState, type FormEvent } from "react";
 import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { sendChatMessage, type ChatApiTurn } from "../integrations/llm/api";
+import { createLocationReminder } from "../integrations/notion/api";
 import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
-import type { ChatMessage, EventProposal } from "../types";
+import type { ChatMessage, EventProposal, LocationReminderProposal } from "../types";
 
 function formatEventProposal(p: EventProposal): string {
   const d = new Date(`${p.date}T00:00:00`);
@@ -42,6 +43,7 @@ export function ChatScreen() {
   const [draft, setDraft] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [submittingEventId, setSubmittingEventId] = useState<string>();
+  const [submittingLocationReminderId, setSubmittingLocationReminderId] = useState<string>();
   const online = useOnlineStatus();
   const { coords } = useLiveLocation();
 
@@ -94,6 +96,8 @@ export function ChatScreen() {
             : undefined,
           eventProposal: result.eventProposal,
           eventProposalStatus: result.eventProposal ? "pending" : undefined,
+          locationReminderProposal: result.locationReminderProposal,
+          locationReminderProposalStatus: result.locationReminderProposal ? "pending" : undefined,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -145,6 +149,32 @@ export function ChatScreen() {
 
   function handleCancelEvent(messageId: string) {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, eventProposalStatus: "cancelled" } : m)));
+  }
+
+  async function handleConfirmLocationReminder(messageId: string, proposal: LocationReminderProposal) {
+    setSubmittingLocationReminderId(messageId);
+    try {
+      await createLocationReminder(proposal.text, proposal.locationTrigger, proposal.project);
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, locationReminderProposalStatus: "created" } : m)));
+    } catch (error) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                locationReminderProposalStatus: "error",
+                locationReminderProposalError: error instanceof Error ? error.message : "Couldn't save that reminder.",
+              }
+            : m
+        )
+      );
+    } finally {
+      setSubmittingLocationReminderId(undefined);
+    }
+  }
+
+  function handleCancelLocationReminder(messageId: string) {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, locationReminderProposalStatus: "cancelled" } : m)));
   }
 
   return (
@@ -217,6 +247,53 @@ export function ChatScreen() {
                     <button
                       onClick={() => handleCancelEvent(message.id)}
                       disabled={submittingEventId === message.id}
+                      className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft disabled:opacity-50 dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {message.locationReminderProposal && (
+              <div className="mt-2 inline-block w-full max-w-[85%] rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
+                <p className="text-sm text-ink dark:text-ink-dark">{message.locationReminderProposal.text}</p>
+                <p className="mt-0.5 text-xs text-ink-faint dark:text-ink-faint-dark">
+                  When: {message.locationReminderProposal.locationTrigger}
+                </p>
+
+                {message.locationReminderProposalStatus === "created" && (
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">Reminder saved.</p>
+                )}
+                {message.locationReminderProposalStatus === "cancelled" && (
+                  <p className="mt-2 text-xs text-ink-faint dark:text-ink-faint-dark">Not added.</p>
+                )}
+                {message.locationReminderProposalStatus === "error" && (
+                  <>
+                    <p className="mt-2 text-xs text-claude">{message.locationReminderProposalError}</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <button
+                        onClick={() => handleConfirmLocationReminder(message.id, message.locationReminderProposal!)}
+                        disabled={submittingLocationReminderId === message.id}
+                        className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  </>
+                )}
+                {message.locationReminderProposalStatus === "pending" && (
+                  <div className="mt-2 flex items-center gap-3">
+                    <button
+                      onClick={() => handleConfirmLocationReminder(message.id, message.locationReminderProposal!)}
+                      disabled={submittingLocationReminderId === message.id}
+                      className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                    >
+                      {submittingLocationReminderId === message.id ? "Saving…" : "Add reminder"}
+                    </button>
+                    <button
+                      onClick={() => handleCancelLocationReminder(message.id)}
+                      disabled={submittingLocationReminderId === message.id}
                       className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft disabled:opacity-50 dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
                     >
                       Cancel
