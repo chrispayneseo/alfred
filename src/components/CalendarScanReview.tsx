@@ -8,10 +8,15 @@ import {
 } from "../integrations/calendarPhoto/api";
 
 type Status = "pending" | "approved" | "deleted";
+type RecurrenceOption = "none" | "weekly" | "monthly" | "yearly";
+
 interface LocalItem extends ReviewItem {
   status: Status;
+  person: string;
+  recurrence: RecurrenceOption;
 }
 
+const PEOPLE = ["Jo", "Jack", "Chris", "Evie", "Family"];
 const WEEKDAY_LABEL: Record<string, string> = { MO: "Monday", TU: "Tuesday", WE: "Wednesday", TH: "Thursday", FR: "Friday", SA: "Saturday", SU: "Sunday" };
 
 function formatDate(iso: string | null): string {
@@ -19,29 +24,38 @@ function formatDate(iso: string | null): string {
   return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function recurrenceLabel(item: LocalItem): string {
+  if (item.recurrence === "monthly") return "Monthly";
+  if (item.recurrence === "yearly") return "Yearly";
+  if (item.recurrence === "weekly") {
+    const weekday = item.weekday
+      ? (WEEKDAY_LABEL[item.weekday] ?? item.weekday)
+      : item.date
+        ? new Date(`${item.date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long" })
+        : undefined;
+    return weekday ? `Every ${weekday}` : "Weekly";
+  }
+  return "Not repeating";
+}
+
 function summaryLine(item: LocalItem): string {
   if (item.kind === "recurring") {
-    const weekday = WEEKDAY_LABEL[item.weekday ?? ""] ?? item.weekday;
-    return `Every ${weekday} · ${item.dates?.length ?? 0} occurrences${item.time ? ` · ${item.time}` : ""}`;
+    if (item.recurrence === "none") {
+      return `${item.dates?.length ?? 0} occurrences, added individually${item.time ? ` · ${item.time}` : ""}`;
+    }
+    return `${recurrenceLabel(item)}${item.time ? ` · ${item.time}` : ""}`;
   }
   const dateLabel = item.endDate ? `${formatDate(item.date)} – ${formatDate(item.endDate)}` : formatDate(item.date);
   return `${dateLabel}${item.time ? ` · ${item.time}` : ""}`;
 }
 
 function toApproved(item: LocalItem): ApprovedItem {
+  const person = item.person.trim() || undefined;
+  const recurrence = item.recurrence === "none" ? undefined : item.recurrence;
   if (item.kind === "recurring") {
-    return {
-      kind: "recurring",
-      title: item.title,
-      date: item.date!,
-      endDate: null,
-      time: item.time,
-      weekday: item.weekday,
-      dates: item.dates,
-      asRecurring: item.asRecurring,
-    };
+    return { kind: "recurring", title: item.title, date: item.date!, endDate: null, time: item.time, person, recurrence, dates: item.dates };
   }
-  return { kind: "single", title: item.title, date: item.date!, endDate: item.endDate, time: item.time };
+  return { kind: "single", title: item.title, date: item.date!, endDate: item.endDate, time: item.time, person, recurrence };
 }
 
 function ItemCard({
@@ -56,6 +70,8 @@ function ItemCard({
   onDelete: () => void;
 }) {
   const canApprove = item.title.trim().length > 0 && Boolean(item.date);
+  const selectClass =
+    "rounded-lg border border-line bg-paper-raised px-2 py-1 text-xs text-ink outline-none dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark";
 
   return (
     <li
@@ -112,26 +128,26 @@ function ItemCard({
         </div>
       )}
 
-      {item.kind === "recurring" && (
-        <div className="mt-2 flex gap-1 rounded-full border border-line p-0.5 dark:border-line-dark">
-          {[
-            { value: true, label: "Create as recurring" },
-            { value: false, label: "Just these instances" },
-          ].map((opt) => (
-            <button
-              key={String(opt.value)}
-              onClick={() => onChange({ asRecurring: opt.value })}
-              className={`flex-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                item.asRecurring === opt.value
-                  ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                  : "text-ink-soft dark:text-ink-soft-dark"
-              }`}
-            >
-              {opt.label}
-            </button>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select value={item.person} onChange={(e) => onChange({ person: e.target.value })} className={selectClass}>
+          <option value="">Who</option>
+          {PEOPLE.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
           ))}
-        </div>
-      )}
+        </select>
+        <select
+          value={item.recurrence}
+          onChange={(e) => onChange({ recurrence: e.target.value as RecurrenceOption })}
+          className={selectClass}
+        >
+          <option value="none">Not repeating</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
 
       <div className="mt-3 flex items-center gap-3">
         {item.status === "approved" ? (
@@ -157,7 +173,9 @@ function ItemCard({
 }
 
 export function CalendarScanReview({ result, onDone, onCancel }: { result: ExtractResult; onDone: () => void; onCancel: () => void }) {
-  const [items, setItems] = useState<LocalItem[]>(result.items.map((i) => ({ ...i, status: "pending" })));
+  const [items, setItems] = useState<LocalItem[]>(
+    result.items.map((i) => ({ ...i, status: "pending", person: "", recurrence: i.kind === "recurring" ? "weekly" : "none" }))
+  );
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string>();
   const [results, setResults] = useState<CreateResultItem[]>();

@@ -100,10 +100,24 @@ export interface NewEventInput {
   /** HH:MM — defaults to startTime + 1 hour when a timed event omits it. */
   endTime?: string;
   location?: string;
-  /** Weekly recurrence on a single weekday (e.g. "TU"), no end date —
-   * calendar-photo entries flagged as a recurring pattern. Google's
-   * two-letter RRULE BYDAY codes: MO/TU/WE/TH/FR/SA/SU. */
-  recurringWeekday?: string;
+  /** No end date — repeats indefinitely on the cadence implied by `date`:
+   * WEEKLY repeats on `date`'s weekday, MONTHLY on its day-of-month, YEARLY
+   * on its month+day. */
+  recurrence?: "WEEKLY" | "MONTHLY" | "YEARLY";
+}
+
+const WEEKDAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+
+function rruleForDate(dateStr: string, frequency: "WEEKLY" | "MONTHLY" | "YEARLY"): string {
+  if (frequency === "WEEKLY") {
+    const weekday = WEEKDAY_CODES[new Date(`${dateStr}T00:00:00`).getDay()];
+    return `RRULE:FREQ=WEEKLY;BYDAY=${weekday}`;
+  }
+  if (frequency === "MONTHLY") {
+    const day = Number(dateStr.slice(8, 10));
+    return `RRULE:FREQ=MONTHLY;BYMONTHDAY=${day}`;
+  }
+  return "RRULE:FREQ=YEARLY";
 }
 
 // No per-user timezone setting exists anywhere in this app (a single-user
@@ -139,7 +153,7 @@ export async function createEvent(env: GoogleAccountEnv, input: NewEventInput): 
   const auth = createAuthenticatedClient(env);
   const calendar = new calendar_v3.Calendar({ auth });
 
-  const recurrence = input.recurringWeekday ? [`RRULE:FREQ=WEEKLY;BYDAY=${input.recurringWeekday}`] : undefined;
+  const recurrence = input.recurrence ? [rruleForDate(input.date, input.recurrence)] : undefined;
 
   const requestBody: calendar_v3.Schema$Event = input.startTime
     ? {

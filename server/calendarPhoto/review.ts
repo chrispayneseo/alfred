@@ -16,9 +16,6 @@ export interface ReviewItem {
   weekday?: string;
   /** Every occurrence date visible on the page — set only for kind "recurring". */
   dates?: string[];
-  /** Whether this recurring group should become one repeating event
-   * (default) or individual one-off events for just these dates. */
-  asRecurring?: boolean;
   duplicate: boolean;
   /** Title of the existing event that looked like a match, for display. */
   duplicateOf?: string;
@@ -88,7 +85,6 @@ export function buildReviewItems(extraction: CalendarExtraction, existingEvents:
       time: group.time,
       weekday: group.weekday,
       dates: group.dates,
-      asRecurring: true,
       duplicate: Boolean(matchTitle),
       duplicateOf: matchTitle,
     });

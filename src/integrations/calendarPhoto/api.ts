@@ -7,7 +7,6 @@ export interface ReviewItem {
   time: string | null;
   weekday?: string;
   dates?: string[];
-  asRecurring?: boolean;
   duplicate: boolean;
   duplicateOf?: string;
   unclearReason?: string;
@@ -48,9 +47,9 @@ export interface ApprovedItem {
   date: string;
   endDate: string | null;
   time: string | null;
-  weekday?: string;
+  person?: string;
+  recurrence?: "weekly" | "monthly" | "yearly";
   dates?: string[];
-  asRecurring?: boolean;
 }
 
 export function createCalendarPhotoEvents(items: ApprovedItem[]): Promise<{ results: CreateResultItem[] }> {

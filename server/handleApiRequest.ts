@@ -105,22 +105,31 @@ const MAX_AUDIO_BASE64_CHARS = 15_000_000;
 const MAX_PHOTO_BASE64_CHARS = 15_000_000;
 const VALID_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
+const RECURRENCE_VALUES = new Set(["weekly", "monthly", "yearly"]);
+
 interface ApprovedPhotoItem {
   kind: "single" | "recurring";
   title: string;
   date: string;
   endDate: string | null;
   time: string | null;
-  weekday?: string;
+  /** Free text — the dropdown constrains it client-side, but nothing
+   * security-sensitive hinges on it server-side (it only ever ends up as a
+   * prefix on a title written to the user's own writable-account calendar). */
+  person?: string;
+  recurrence?: "weekly" | "monthly" | "yearly";
+  /** Every occurrence date from a detected recurring group — used to expand
+   * into individual events when the user picks no recurrence for one. */
   dates?: string[];
-  asRecurring?: boolean;
 }
 
 function isApprovedPhotoItem(value: unknown): value is ApprovedPhotoItem {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if ((v.kind !== "single" && v.kind !== "recurring") || typeof v.title !== "string" || typeof v.date !== "string") return false;
-  if (v.kind === "recurring" && (typeof v.weekday !== "string" || !Array.isArray(v.dates))) return false;
+  if (v.person !== undefined && typeof v.person !== "string") return false;
+  if (v.recurrence !== undefined && !RECURRENCE_VALUES.has(v.recurrence as string)) return false;
+  if (v.dates !== undefined && !Array.isArray(v.dates)) return false;
   return true;
 }
 
@@ -133,20 +142,21 @@ async function createEventsForApprovedItem(
   account: Parameters<typeof createEvent>[0],
   item: ApprovedPhotoItem
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const base: NewEventInput = { title: item.title, date: item.date, endDate: item.endDate ?? undefined, startTime: item.time ?? undefined };
+  const title = item.person ? `${item.person}: ${item.title}` : item.title;
+  const base: NewEventInput = { title, date: item.date, endDate: item.endDate ?? undefined, startTime: item.time ?? undefined };
 
   try {
-    if (item.kind === "single") {
-      await createEvent(account, base);
+    if (item.recurrence) {
+      await createEvent(account, { ...base, recurrence: item.recurrence.toUpperCase() as "WEEKLY" | "MONTHLY" | "YEARLY" });
       return { ok: true };
     }
-    if (item.asRecurring) {
-      await createEvent(account, { ...base, date: item.dates![0], recurringWeekday: item.weekday });
+    if (item.kind === "recurring" && item.dates && item.dates.length > 0) {
+      for (const date of item.dates) {
+        await createEvent(account, { ...base, date });
+      }
       return { ok: true };
     }
-    for (const date of item.dates!) {
-      await createEvent(account, { ...base, date });
-    }
+    await createEvent(account, base);
     return { ok: true };
   } catch (error) {
     console.error("[calendarPhoto] failed to create event:", error);
