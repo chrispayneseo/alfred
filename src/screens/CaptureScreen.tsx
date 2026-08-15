@@ -10,22 +10,11 @@ import {
   type ApiProject,
   type CaptureItem,
 } from "../integrations/notion/api";
+import { compressImage } from "../lib/compressImage";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
 import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
 type CaptureMode = "text" | "voice" | "scan-calendar";
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      resolve(result.slice(result.indexOf(",") + 1));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Couldn't read that photo."));
-    reader.readAsDataURL(file);
-  });
-}
 
 interface RecentCapture {
   id: string;
@@ -276,8 +265,8 @@ export function CaptureScreen() {
     setExtracting(true);
     setScanError(undefined);
     try {
-      const base64 = await fileToBase64(file);
-      const result = await extractCalendarPhoto(base64, file.type || "image/jpeg");
+      const { base64, mimeType } = await compressImage(file);
+      const result = await extractCalendarPhoto(base64, mimeType);
       setScanResult(result);
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "Couldn't read that photo.");
