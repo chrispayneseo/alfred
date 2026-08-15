@@ -12,8 +12,7 @@ import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
 import { buildAccountColorMap } from "../lib/accountColor";
-import { mockNotes } from "../mocks/today";
-import { deleteTask, fetchTasks, updateTaskStatus, type ApiTask } from "../integrations/notion/api";
+import { deleteNote, deleteTask, fetchNotes, fetchTasks, updateTaskStatus, type ApiNote, type ApiTask } from "../integrations/notion/api";
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
 
@@ -81,6 +80,7 @@ export function TodayScreen() {
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [tasksError, setTasksError] = useState<string>();
+  const [notes, setNotes] = useState<ApiNote[]>([]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -116,6 +116,12 @@ export function TodayScreen() {
       .finally(() => setTasksLoading(false));
   }, []);
 
+  useEffect(() => {
+    fetchNotes()
+      .then(setNotes)
+      .catch(() => undefined);
+  }, []);
+
   async function toggleTask(task: ApiTask) {
     const done = !task.done;
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done } : t)));
@@ -136,7 +142,20 @@ export function TodayScreen() {
     }
   }
 
+  async function removeNote(note: ApiNote) {
+    const prev = notes;
+    setNotes((p) => p.filter((n) => n.id !== note.id));
+    try {
+      await deleteNote(note.id);
+    } catch {
+      setNotes(prev);
+    }
+  }
+
   const openTasks = tasks.filter((task) => !task.done);
+  const recentNotes = [...notes]
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 5);
   const accountColorMap = buildAccountColorMap(accounts);
   const showAccountTags = accounts.length > 1;
 
@@ -290,10 +309,26 @@ export function TodayScreen() {
           Recent notes
         </h2>
         <ul className="space-y-3">
-          {mockNotes.map((note) => (
-            <li key={note.id}>
-              <p className="text-sm text-ink dark:text-ink-dark">{note.title}</p>
-              <p className="truncate text-xs text-ink-faint dark:text-ink-faint-dark">{note.excerpt}</p>
+          {recentNotes.length === 0 && (
+            <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</p>
+          )}
+          {recentNotes.map((note) => (
+            <li key={note.id} className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-ink dark:text-ink-dark">{note.title}</p>
+                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
+                  {note.projectName ?? "Unsorted"}
+                </p>
+              </div>
+              <button
+                onClick={() => removeNote(note)}
+                aria-label="Remove note"
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
             </li>
           ))}
         </ul>

@@ -517,6 +517,20 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       if (typeof body.projectId === "string") await repo.setNoteProject(noteMatch[1], body.projectId);
       return json(200, { ok: true });
     }
+    if (method === "DELETE" && noteMatch) {
+      await repo.archiveNote(noteMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+    if (method === "DELETE" && projectMatch) {
+      try {
+        const result = await repo.deleteProject(projectMatch[1]);
+        return json(200, { ok: true, ...result });
+      } catch (error) {
+        return json(400, { error: error instanceof Error ? error.message : "Couldn't delete that project." });
+      }
+    }
 
     return json(404, { error: "not found" });
   } catch (error) {

@@ -1,7 +1,7 @@
 import type { Client } from "@notionhq/client";
 import type { Classification } from "./classify.js";
 import type { NotionEnv } from "./env.js";
-import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP } from "./schema.js";
+import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP, UNSORTED_PROJECT } from "./schema.js";
 
 // The API returns a deep discriminated-union PageObjectResponse per property
 // type; these helpers pull out plain values without fighting that union for
@@ -341,5 +341,31 @@ export class NotionRepo {
       page_id: noteId,
       properties: { [NOTES_PROPS.project]: { relation: [{ id: projectId }] } },
     } as never);
+  }
+
+  /** Archives the Notion page — Notion's own trash, recoverable there for 30
+   * days, not a permanent delete. Same mechanism as archiveTask. */
+  async archiveNote(noteId: string): Promise<void> {
+    await this.notion.pages.update({ page_id: noteId, archived: true } as never);
+  }
+
+  /** Deletes a Project: re-tags every Task/Note currently under it to
+   * Unsorted (so nothing is left pointing at an archived page), then
+   * archives the Project itself. Never called without the user's explicit
+   * confirmation in the UI — this is a structural change, not a single-item
+   * removal. Refuses to delete Unsorted itself, since it's the fallback
+   * every other project (including this one) reassigns into. */
+  async deleteProject(projectId: string): Promise<{ reassigned: number }> {
+    const unsortedId = await this.findProjectIdByName(UNSORTED_PROJECT);
+    if (!unsortedId) throw new Error("Unsorted project not found");
+    if (projectId === unsortedId) throw new Error("Can't delete the Unsorted project");
+
+    const [tasks, notes] = await Promise.all([this.listTasks(projectId), this.listNotes(projectId)]);
+    await Promise.all([
+      ...tasks.map((t) => this.setTaskProject(t.id, unsortedId)),
+      ...notes.map((n) => this.setNoteProject(n.id, unsortedId)),
+    ]);
+    await this.notion.pages.update({ page_id: projectId, archived: true } as never);
+    return { reassigned: tasks.length + notes.length };
   }
 }

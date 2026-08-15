@@ -9,21 +9,6 @@ export interface EventProposal {
   account: string;
 }
 
-export interface TaskItem {
-  id: string;
-  title: string;
-  done: boolean;
-  due?: string;
-  project?: string;
-}
-
-export interface NoteItem {
-  id: string;
-  title: string;
-  excerpt: string;
-  updatedAt: string;
-}
-
 export type EventProposalStatus = "pending" | "created" | "cancelled" | "error";
 
 export interface ChatMessage {

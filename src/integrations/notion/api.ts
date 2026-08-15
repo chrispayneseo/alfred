@@ -87,3 +87,11 @@ export async function updateTaskStatus(taskId: string, done: boolean): Promise<v
 export async function deleteTask(taskId: string): Promise<void> {
   await request(`/api/tasks/${taskId}`, { method: "DELETE" });
 }
+
+export async function deleteNote(noteId: string): Promise<void> {
+  await request(`/api/notes/${noteId}`, { method: "DELETE" });
+}
+
+export async function deleteProject(projectId: string): Promise<{ reassigned: number }> {
+  return request(`/api/projects/${projectId}`, { method: "DELETE" });
+}

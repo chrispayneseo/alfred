@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Screen } from "../components/Screen";
 import {
+  deleteNote,
+  deleteProject,
   deleteTask,
   fetchNotes,
   fetchProjects,
@@ -56,6 +58,38 @@ export function BrowseScreen() {
       await deleteTask(task.id);
     } catch {
       setTasks(prev);
+    }
+  }
+
+  async function removeNote(note: ApiNote) {
+    const prev = notes;
+    setNotes((p) => p.filter((n) => n.id !== note.id));
+    try {
+      await deleteNote(note.id);
+    } catch {
+      setNotes(prev);
+    }
+  }
+
+  async function removeProject(project: ApiProject) {
+    const openCount = tasks.filter((t) => t.projectId === project.id).length + notes.filter((n) => n.projectId === project.id).length;
+    const itemsNote = openCount > 0 ? ` ${openCount} item${openCount === 1 ? "" : "s"} in it will move to Unsorted.` : "";
+    if (!window.confirm(`Delete the "${project.name}" project?${itemsNote}`)) return;
+
+    const prevProjects = projects;
+    const prevTasks = tasks;
+    const prevNotes = notes;
+    setProjects((p) => p.filter((pr) => pr.id !== project.id));
+    setTasks((p) => p.map((t) => (t.projectId === project.id ? { ...t, projectId: undefined, projectName: "Unsorted" } : t)));
+    setNotes((p) => p.map((n) => (n.projectId === project.id ? { ...n, projectId: undefined, projectName: "Unsorted" } : n)));
+    if (selectedProjectId === project.id) setSelectedProjectId(undefined);
+    try {
+      await deleteProject(project.id);
+    } catch (err) {
+      setProjects(prevProjects);
+      setTasks(prevTasks);
+      setNotes(prevNotes);
+      setError(err instanceof Error ? err.message : "Couldn't delete that project.");
     }
   }
 
@@ -160,12 +194,23 @@ export function BrowseScreen() {
             <li className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</li>
           )}
           {filteredNotes.map((note) => (
-            <li key={note.id}>
-              <p className="text-sm text-ink dark:text-ink-dark">{note.title}</p>
-              <p className="mt-0.5 text-[11px] text-ink-faint/80 dark:text-ink-faint-dark/80">
-                {note.projectName ? `${note.projectName} · ` : ""}
-                {formatUpdatedAt(note.updatedAt)}
-              </p>
+            <li key={note.id} className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-ink dark:text-ink-dark">{note.title}</p>
+                <p className="mt-0.5 text-[11px] text-ink-faint/80 dark:text-ink-faint-dark/80">
+                  {note.projectName ? `${note.projectName} · ` : ""}
+                  {formatUpdatedAt(note.updatedAt)}
+                </p>
+              </div>
+              <button
+                onClick={() => removeNote(note)}
+                aria-label="Remove note"
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
             </li>
           ))}
         </ul>
@@ -190,6 +235,17 @@ export function BrowseScreen() {
                     </Link>
                   )}
                   <span className="text-xs text-ink-soft dark:text-ink-soft-dark">{project.status}</span>
+                  {project.name !== "Unsorted" && (
+                    <button
+                      onClick={() => removeProject(project)}
+                      aria-label="Delete project"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+                    >
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </li>
             );
