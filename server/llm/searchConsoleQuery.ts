@@ -31,7 +31,8 @@ function buildSystemPrompt(todayIso: string, sites: { siteUrl: string; displayNa
 Available Search Console properties:
 ${siteList}
 
-Given the user's question:
+You'll be given the last few turns of a conversation (may be just one message, may include Alfred's own replies) ending in the user's latest message. Use the whole thing to resolve what they're asking — e.g. if the user's latest message is just "yes" confirming something Alfred asked two lines above, resolve the site/date from that earlier line, not from "yes" alone.
+
 1. Determine which property they mean, matching what they said (often just a product or site name, not the literal domain) against the properties listed above.
    - If exactly one property clearly matches — or there's only one property listed and nothing suggests otherwise — set "siteMatch" to "single" and "matchedSiteUrl" to its exact siteUrl string from the list above.
    - If more than one property could plausibly match and it's genuinely unclear which they mean, set "siteMatch" to "ambiguous" and list every plausible siteUrl in "candidateSiteUrls".

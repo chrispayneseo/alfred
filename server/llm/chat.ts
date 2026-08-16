@@ -173,10 +173,25 @@ function todayGrounding(): string {
   return `Today's date is ${dateStr} (${weekday}) — resolve "today"/"tomorrow"/"next Friday" etc. against this, not your own training cutoff.`;
 }
 
+// Search Console questions are often multi-turn in a way calendar/email
+// questions usually aren't — "since the beginning of August?" or a bare "yes"
+// confirming a site/date guess carries no GSC keyword and no date/site
+// mention on its own. A short recent window (both roles, so Alfred's own
+// clarifying questions count as signal too) is what both the
+// needsSearchConsoleContext check and the extraction step actually need to
+// resolve a follow-up correctly instead of asking the user to repeat themselves.
+function recentConversationWindow(messages: ChatTurn[], maxMessages = 6): string {
+  return messages
+    .slice(-maxMessages)
+    .map((m) => `${m.role === "user" ? "User" : "Alfred"}: ${m.content}`)
+    .join("\n");
+}
+
 async function buildContext(
   llmEnv: LlmEnv,
   dbEnv: Env,
   lastText: string,
+  messages: ChatTurn[],
   googleAccounts: GoogleAccountEnv[],
   notionRepo: NotionRepo | undefined,
   coachPlanEnv: CoachPlanEnv,
@@ -189,7 +204,8 @@ async function buildContext(
   if (notionRepo && needsNotionContext(lastText)) blocks.push(await buildNotionContext(notionRepo, lastText));
   if (needsCoachPlanContext(lastText)) blocks.push(await buildCoachPlanContext(coachPlanEnv));
   if (needsWeatherContext(lastText)) blocks.push(await buildWeatherContext(weatherEnv, dbEnv, googleAccounts));
-  if (needsSearchConsoleContext(lastText)) blocks.push(await buildSearchConsoleContext(dbEnv, llmEnv, googleAccounts, lastText));
+  const searchConsoleWindow = recentConversationWindow(messages);
+  if (needsSearchConsoleContext(searchConsoleWindow)) blocks.push(await buildSearchConsoleContext(dbEnv, llmEnv, googleAccounts, searchConsoleWindow));
 
   return [...blocks, EVENT_PROPOSAL_INSTRUCTION, LOCATION_REMINDER_PROPOSAL_INSTRUCTION, CONFIDENCE_INSTRUCTION].join("\n\n---\n\n");
 }
@@ -217,7 +233,7 @@ export async function runChat(
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = await buildContext(env, dbEnv, lastText, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
+  const extraContext = await buildContext(env, dbEnv, lastText, messages, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
 
   try {
     const { text: raw, inputTokens, outputTokens } = await callModel(intended, env, messages, extraContext);
