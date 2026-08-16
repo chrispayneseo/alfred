@@ -74,6 +74,12 @@ const STOPWORDS = new Set([
   "you",
   "your",
   "thanks",
+  "say",
+  "says",
+  "said",
+  "mean",
+  "means",
+  "written",
   // generic nouns too broad to be useful search terms on their own
   "email",
   "emails",

@@ -290,12 +290,24 @@ export class NotionRepo {
     });
   }
 
-  /** Title-contains search across Tasks and Notes, for Q&A retrieval (Step 5). */
+  /** Title search across Tasks and Notes, for Q&A retrieval (Step 5). ANDs a
+   * `contains` condition per word rather than matching the whole derived
+   * phrase as one literal substring — a single-string match breaks the
+   * moment word order differs from the title ("guide for Steadfast
+   * Collective" vs. title "Steadfast Collective ... Guide") or a leftover
+   * non-stopword sneaks into the derived query, even though every
+   * significant term is genuinely present in the title. */
   async searchTasksAndNotes(query: string, limit = 5): Promise<{ tasks: TaskRecord[]; notes: NoteRecord[] }> {
-    const trimmed = query.trim();
-    if (!trimmed) return { tasks: [], notes: [] };
+    const words = query
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 0);
+    if (words.length === 0) return { tasks: [], notes: [] };
 
-    const filter = { property: TITLE_PROP, title: { contains: trimmed } };
+    const filter =
+      words.length === 1
+        ? { property: TITLE_PROP, title: { contains: words[0] } }
+        : { and: words.map((w) => ({ property: TITLE_PROP, title: { contains: w } })) };
     const [taskRes, noteRes, projects] = await Promise.all([
       this.notion.dataSources.query({ data_source_id: this.env.tasksDbId, filter, page_size: limit } as never),
       this.notion.dataSources.query({ data_source_id: this.env.notesDbId, filter, page_size: limit } as never),
@@ -327,6 +339,28 @@ export class NotionRepo {
     });
 
     return { tasks, notes };
+  }
+
+  /** Plain text of a Note's page body (paragraph blocks only — the shape
+   * every Note in this app is written with, whether via Capture's inbox
+   * pipeline or the folder-scan script). Paginates since Notion caps each
+   * list call at 100 blocks; a long scanned document can span several
+   * pages' worth. Returns everything — the caller decides how much of it
+   * is worth including in a given context window. */
+  async getNoteBody(noteId: string): Promise<string> {
+    const lines: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const res = await this.notion.blocks.children.list({ block_id: noteId, start_cursor: cursor, page_size: 100 } as never);
+      for (const block of res.results as AnyPage[]) {
+        if (block.type === "paragraph") {
+          const text = (block.paragraph?.rich_text ?? []).map((t: AnyPage) => t.plain_text).join("");
+          if (text) lines.push(text);
+        }
+      }
+      cursor = res.has_more ? (res.next_cursor ?? undefined) : undefined;
+    } while (cursor);
+    return lines.join("\n");
   }
 
   /** Open Tasks with a due date before today — always re-derived live from
