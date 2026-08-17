@@ -14,6 +14,7 @@
     "test": "node --import tsx --test server/**/*.test.ts",
     "notion:setup": "tsx server/notion/setupWorkspace.ts",
     "notion:add-email-fields": "tsx server/notion/addEmailFields.ts",
+    "notion:add-recipes": "tsx server/notion/addRecipesDatabase.ts",
     "scan-to-notion": "tsx scripts/scanFoldersToNotion/index.ts"
   },
   "dependencies": {

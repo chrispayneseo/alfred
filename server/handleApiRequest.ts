@@ -70,8 +70,10 @@ import {
 import { createNotionClient } from "./notion/client.js";
 import { loadNotionEnv } from "./notion/env.js";
 import { NotionRepo } from "./notion/queries.js";
-import { FREELANCE_CLIENTS, UNSORTED_PROJECT } from "./notion/schema.js";
+import { FREELANCE_CLIENTS, MEAL_TYPES, UNSORTED_PROJECT, type MealType } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
+import { loadRecipeEmailEnv } from "./recipes/env.js";
+import { checkRecipeEmail, generateAndSendRecipeEmail } from "./recipes/weeklyEmail.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
 import { loadWeatherEnv, type WeatherEnv } from "./weather/env.js";
@@ -188,6 +190,10 @@ function isChatTurn(value: unknown): value is ChatTurn {
   return (role === "user" || role === "assistant") && typeof content === "string";
 }
 
+function isMealType(value: unknown): value is MealType {
+  return typeof value === "string" && (MEAL_TYPES as readonly string[]).includes(value);
+}
+
 async function calendarEventsResult(fetchEvents: () => Promise<MultiAccountEvents>): Promise<ApiResult> {
   try {
     return json(200, await fetchEvents());
@@ -208,6 +214,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     const coachPlanEnv = loadCoachPlanEnv(env);
     const weatherEnv = loadWeatherEnv(env);
     const costTrackingEnv = loadCostTrackingEnv(env);
+    const recipeEmailEnv = loadRecipeEmailEnv(env);
 
     if (method === "POST" && pathname === "/api/chat") {
       const body = await readBody();
@@ -599,6 +606,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
           console.error("[costTracking] alert check failed:", error);
         })
       );
+      backgroundTask(
+        checkRecipeEmail(env, recipeEmailEnv, repo).catch((error) => {
+          console.error("[recipes] weekly email check failed:", error);
+        })
+      );
       return json(200, { ok: true, sync, scan });
     }
 
@@ -779,6 +791,42 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     if (method === "DELETE" && noteMatch) {
       await repo.archiveNote(noteMatch[1]);
       return json(200, { ok: true });
+    }
+
+    if (method === "GET" && pathname === "/api/recipes") {
+      const mealType = searchParams.get("mealType");
+      return json(200, await repo.listRecipes(isMealType(mealType) ? mealType : undefined));
+    }
+
+    if (method === "POST" && pathname === "/api/recipes") {
+      const body = await readBody();
+      const recipeTitle = typeof body.title === "string" ? body.title.trim() : "";
+      if (!recipeTitle || !isMealType(body.mealType)) return json(400, { error: "title and a valid mealType are required" });
+      const created = await repo.createRecipe(recipeTitle, body.mealType);
+      return json(200, { id: created.id });
+    }
+
+    const recipeMatch = pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    if (method === "DELETE" && recipeMatch) {
+      await repo.archiveRecipe(recipeMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    // On-demand recipe email — same selection + send logic as the automatic
+    // Sunday-noon check, but bypasses its day/time/idempotency gate entirely
+    // (server/recipes/weeklyEmail.ts's generateAndSendRecipeEmail, called
+    // directly rather than through checkRecipeEmail).
+    if (method === "POST" && pathname === "/api/recipes/generate") {
+      if (!recipeEmailEnv.resendApiKey || !recipeEmailEnv.destinationEmail) {
+        return json(503, { error: "Recipe email isn't configured yet — set RESEND_API_KEY and RECIPE_EMAIL_TO in .env." });
+      }
+      try {
+        const selection = await generateAndSendRecipeEmail(env, recipeEmailEnv, repo);
+        return json(200, { ok: true, sentTo: recipeEmailEnv.destinationEmail, selection });
+      } catch (error) {
+        console.error("[recipes] generate/send failed:", error);
+        return json(502, { error: error instanceof Error ? error.message : "Couldn't send the recipe email right now." });
+      }
     }
 
     const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);

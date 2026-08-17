@@ -6,6 +6,7 @@ export interface NotionEnv {
   notesDbId: string;
   journalDbId: string;
   projectsDbId: string;
+  recipesDbId: string;
 }
 
 /** Takes a raw env source rather than loading one itself — see
@@ -19,5 +20,6 @@ export function loadNotionEnv(source: Record<string, string | undefined>): Notio
     notesDbId: source.NOTION_NOTES_DB_ID ?? "",
     journalDbId: source.NOTION_JOURNAL_DB_ID ?? "",
     projectsDbId: source.NOTION_PROJECTS_DB_ID ?? "",
+    recipesDbId: source.NOTION_RECIPES_DB_ID ?? "",
   };
 }

@@ -13,9 +13,20 @@ import {
   type ApiProject,
   type ApiTask,
 } from "../integrations/notion/api";
+import {
+  createRecipe,
+  deleteRecipe,
+  fetchRecipes,
+  generateRecipeSuggestions,
+  type ApiRecipe,
+  type MealType,
+  type RecipeEmailResult,
+} from "../integrations/recipes/api";
 
-const tabs = ["Tasks", "Notes", "Projects"] as const;
+const tabs = ["Tasks", "Notes", "Projects", "Recipes"] as const;
 type Tab = (typeof tabs)[number];
+
+const MEAL_TYPES: MealType[] = ["Dinner", "Lunch", "Breakfast"];
 
 function formatUpdatedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -30,16 +41,65 @@ export function BrowseScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
+  const [recipes, setRecipes] = useState<ApiRecipe[]>([]);
+  const [addingRecipe, setAddingRecipe] = useState(false);
+  const [newRecipeTitle, setNewRecipeTitle] = useState("");
+  const [newRecipeMealType, setNewRecipeMealType] = useState<MealType>("Dinner");
+  const [savingRecipe, setSavingRecipe] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<RecipeEmailResult>();
+  const [generateError, setGenerateError] = useState<string>();
+
   useEffect(() => {
-    Promise.all([fetchProjects(), fetchTasks(), fetchNotes()])
-      .then(([projectsRes, tasksRes, notesRes]) => {
+    Promise.all([fetchProjects(), fetchTasks(), fetchNotes(), fetchRecipes()])
+      .then(([projectsRes, tasksRes, notesRes, recipesRes]) => {
         setProjects(projectsRes);
         setTasks(tasksRes);
         setNotes(notesRes);
+        setRecipes(recipesRes);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load from Notion."))
       .finally(() => setLoading(false));
   }, []);
+
+  async function addRecipe() {
+    const title = newRecipeTitle.trim();
+    if (!title) return;
+    setSavingRecipe(true);
+    try {
+      const { id } = await createRecipe(title, newRecipeMealType);
+      setRecipes((prev) => [...prev, { id, title, mealType: newRecipeMealType, url: "" }]);
+      setNewRecipeTitle("");
+      setAddingRecipe(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't add that recipe.");
+    } finally {
+      setSavingRecipe(false);
+    }
+  }
+
+  async function removeRecipe(recipe: ApiRecipe) {
+    const prev = recipes;
+    setRecipes((p) => p.filter((r) => r.id !== recipe.id));
+    try {
+      await deleteRecipe(recipe.id);
+    } catch {
+      setRecipes(prev);
+    }
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateError(undefined);
+    setGenerateResult(undefined);
+    try {
+      setGenerateResult(await generateRecipeSuggestions());
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : "Couldn't send the recipe email right now.");
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function toggleTask(task: ApiTask) {
     const done = !task.done;
@@ -114,7 +174,7 @@ export function BrowseScreen() {
         ))}
       </div>
 
-      {tab !== "Projects" && projects.length > 0 && (
+      {tab !== "Projects" && tab !== "Recipes" && projects.length > 0 && (
         <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
           <button
             onClick={() => setSelectedProjectId(undefined)}
@@ -251,6 +311,117 @@ export function BrowseScreen() {
             );
           })}
         </ul>
+      )}
+
+      {!loading && !error && tab === "Recipes" && (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-line p-3 dark:border-line-dark">
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="w-full rounded-full bg-ink py-2 text-xs font-medium text-paper transition-colors disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+            >
+              {generating ? "Sending…" : "Generate recipe suggestions"}
+            </button>
+            {generateResult && (
+              <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">Sent to {generateResult.sentTo}.</p>
+            )}
+            {generateError && <p className="mt-2 text-xs text-claude">{generateError}</p>}
+          </div>
+
+          {MEAL_TYPES.map((mealType) => {
+            const forMealType = recipes.filter((r) => r.mealType === mealType);
+            return (
+              <div key={mealType}>
+                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+                  {mealType}
+                </h3>
+                {forMealType.length === 0 && (
+                  <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</p>
+                )}
+                <ul className="space-y-2">
+                  {forMealType.map((recipe) => (
+                    <li key={recipe.id} className="flex items-center justify-between gap-3">
+                      {recipe.url ? (
+                        <a
+                          href={recipe.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="min-w-0 flex-1 truncate text-sm text-ink underline-offset-2 hover:underline dark:text-ink-dark"
+                        >
+                          {recipe.title}
+                        </a>
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate text-sm text-ink dark:text-ink-dark">{recipe.title}</span>
+                      )}
+                      <button
+                        onClick={() => removeRecipe(recipe)}
+                        aria-label="Remove recipe"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+                      >
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M6 6l12 12M18 6L6 18" />
+                        </svg>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+
+          {addingRecipe ? (
+            <div className="space-y-2 rounded-xl border border-line p-3 dark:border-line-dark">
+              <input
+                autoFocus
+                value={newRecipeTitle}
+                onChange={(e) => setNewRecipeTitle(e.target.value)}
+                placeholder="Recipe title"
+                className="w-full rounded-lg border border-line bg-transparent px-3 py-1.5 text-sm text-ink outline-none focus:border-ink-faint dark:border-line-dark dark:text-ink-dark dark:focus:border-ink-faint-dark"
+              />
+              <div className="flex gap-1 rounded-full border border-line p-1 dark:border-line-dark">
+                {MEAL_TYPES.map((mt) => (
+                  <button
+                    key={mt}
+                    onClick={() => setNewRecipeMealType(mt)}
+                    className={`flex-1 rounded-full py-1 text-xs font-medium transition-colors ${
+                      newRecipeMealType === mt
+                        ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
+                        : "text-ink-soft dark:text-ink-soft-dark"
+                    }`}
+                  >
+                    {mt}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={addRecipe}
+                  disabled={savingRecipe || !newRecipeTitle.trim()}
+                  className="flex-1 rounded-full bg-ink py-1.5 text-xs font-medium text-paper transition-colors disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                >
+                  {savingRecipe ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={() => {
+                    setAddingRecipe(false);
+                    setNewRecipeTitle("");
+                  }}
+                  className="flex-1 rounded-full border border-line py-1.5 text-xs font-medium text-ink-soft dark:border-line-dark dark:text-ink-soft-dark"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingRecipe(true)}
+              className="w-full rounded-full border border-line py-1.5 text-xs font-medium text-ink-soft transition-colors hover:border-ink-faint dark:border-line-dark dark:text-ink-soft-dark dark:hover:border-ink-faint-dark"
+            >
+              + Add recipe
+            </button>
+          )}
+        </div>
       )}
     </Screen>
   );

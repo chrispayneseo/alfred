@@ -146,6 +146,24 @@ const SCHEMA_STATEMENTS = [
     month_key TEXT NOT NULL,
     PRIMARY KEY (provider, month_key)
   )`,
+  // Append-only log of every recipe included in a sent email (scheduled or
+  // on-demand) — the weekly selection sorts by MAX(sent_at) per recipe_id
+  // (least-recently-sent first) to avoid repeats without needing a separate
+  // "have enough recipes?" check; it degrades to repeats naturally once a
+  // meal type's pool is smaller than the number needed.
+  `CREATE TABLE IF NOT EXISTS recipe_sends (
+    recipe_id TEXT NOT NULL,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_recipe_sends_recipe_id ON recipe_sends(recipe_id)`,
+  // One row per ISO week the automatic Sunday-noon email actually sent —
+  // gates the scheduled check so repeated cron pings after the first send
+  // that week don't send again. The on-demand button bypasses this table
+  // entirely (it always sends), so it never blocks on it either.
+  `CREATE TABLE IF NOT EXISTS recipe_email_weekly_log (
+    week_key TEXT PRIMARY KEY,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
 ];
 
 let schemaReady: Promise<void> | undefined;

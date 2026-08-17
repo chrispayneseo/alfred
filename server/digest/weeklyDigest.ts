@@ -36,8 +36,11 @@ function isTriggerDayReached(triggerDay: DigestTriggerDay, now: Date): boolean {
 /** ISO 8601 week key, e.g. "2026-W33" — used purely as an idempotency key
  * (has a new digest already been generated for "this" trigger window), not
  * as an analytical week boundary. The digest's actual content window is
- * always "the next 7 days from generation time," independent of this. */
-function getIsoWeekKey(date: Date): string {
+ * always "the next 7 days from generation time," independent of this.
+ * Exported since the recipe email's weekly idempotency check (a different
+ * feature, same "once per ISO week" shape) reuses it rather than
+ * duplicating the definition. */
+export function getIsoWeekKey(date: Date): string {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);

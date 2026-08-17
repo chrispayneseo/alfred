@@ -1,7 +1,7 @@
 import type { Client } from "@notionhq/client";
 import type { Classification } from "./classify.js";
 import type { NotionEnv } from "./env.js";
-import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP, UNSORTED_PROJECT } from "./schema.js";
+import { INBOX_PROPS, INBOX_STATUS, NOTES_PROPS, PROJECTS_PROPS, RECIPES_PROPS, TASKS_PROPS, TASK_STATUS, TITLE_PROP, UNSORTED_PROJECT, type MealType } from "./schema.js";
 
 // The API returns a deep discriminated-union PageObjectResponse per property
 // type; these helpers pull out plain values without fighting that union for
@@ -57,6 +57,13 @@ export interface ProjectRecord {
   id: string;
   name: string;
   status: string;
+}
+
+export interface RecipeRecord {
+  id: string;
+  title: string;
+  mealType: MealType;
+  url: string;
 }
 
 export class NotionRepo {
@@ -441,6 +448,36 @@ export class NotionRepo {
    * days, not a permanent delete. Same mechanism as archiveTask. */
   async archiveNote(noteId: string): Promise<void> {
     await this.notion.pages.update({ page_id: noteId, archived: true } as never);
+  }
+
+  /** All recipes, optionally filtered to one meal type — used by the
+   * weekly recipe email's selection logic and the Recipe Bank view. */
+  async listRecipes(mealType?: MealType): Promise<RecipeRecord[]> {
+    const filter = mealType ? { property: RECIPES_PROPS.mealType, select: { equals: mealType } } : undefined;
+    const res = await this.notion.dataSources.query({ data_source_id: this.env.recipesDbId, filter } as never);
+    return (res.results as AnyPage[]).map((page) => ({
+      id: page.id,
+      title: getTitle(page),
+      mealType: (getSelect(page, RECIPES_PROPS.mealType) as MealType | undefined) ?? "Dinner",
+      url: page.url as string,
+    }));
+  }
+
+  async createRecipe(title: string, mealType: MealType): Promise<{ id: string }> {
+    const page = await this.notion.pages.create({
+      parent: { type: "data_source_id", data_source_id: this.env.recipesDbId },
+      properties: {
+        [TITLE_PROP]: { title: richText(title) },
+        [RECIPES_PROPS.mealType]: { select: { name: mealType } },
+      },
+    } as never);
+    return { id: page.id };
+  }
+
+  /** Archives the Notion page — Notion's own trash, recoverable there for 30
+   * days, not a permanent delete. Same mechanism as archiveTask/archiveNote. */
+  async archiveRecipe(recipeId: string): Promise<void> {
+    await this.notion.pages.update({ page_id: recipeId, archived: true } as never);
   }
 
   /** Deletes a Project: re-tags every Task/Note currently under it to
