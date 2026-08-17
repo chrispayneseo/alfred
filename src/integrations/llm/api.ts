@@ -1,4 +1,4 @@
-import type { Confidence, EventProposal, LocationReminderProposal, ModelSource } from "../../types";
+import type { Confidence, EventProposal, LocationReminderProposal, ModelSource, RecipeProposal } from "../../types";
 
 export interface ChatApiTurn {
   role: "user" | "assistant";
@@ -13,6 +13,7 @@ export interface ChatApiResult {
   confidence: Confidence;
   eventProposal?: EventProposal;
   locationReminderProposal?: LocationReminderProposal;
+  recipeProposal?: RecipeProposal;
 }
 
 export async function sendChatMessage(messages: ChatApiTurn[], location?: { lat: number; lon: number }): Promise<ChatApiResult> {

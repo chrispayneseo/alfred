@@ -10,12 +10,15 @@ import {
   type ApiProject,
   type CaptureItem,
 } from "../integrations/notion/api";
+import { createRecipe, extractRecipeFromUrl, type MealType } from "../integrations/recipes/api";
 import { compressImage } from "../lib/compressImage";
 import { expectBackgrounding } from "../lib/lock";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
 import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
-type CaptureMode = "text" | "voice" | "scan-calendar";
+type CaptureMode = "text" | "voice" | "scan-calendar" | "recipe";
+
+const MEAL_TYPES: MealType[] = ["Dinner", "Lunch", "Breakfast"];
 
 // If backgrounding for the camera causes the OS to reload the page (see
 // lib/lock.ts's comment on expectBackgrounding), all component state —
@@ -174,6 +177,13 @@ export function CaptureScreen() {
   const [scanError, setScanError] = useState<string>();
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  const [recipeUrl, setRecipeUrl] = useState("");
+  const [extractingRecipe, setExtractingRecipe] = useState(false);
+  const [recipeExtractError, setRecipeExtractError] = useState<string>();
+  const [recipeReview, setRecipeReview] = useState<{ title: string; mealType: MealType; bodyText: string; sourceUrl: string }>();
+  const [savingRecipe, setSavingRecipe] = useState(false);
+  const [recipeSaved, setRecipeSaved] = useState(false);
+
   const handleTranscribed = useCallback((transcript: string) => {
     const trimmed = transcript.trim();
     if (!trimmed) return;
@@ -277,6 +287,40 @@ export function CaptureScreen() {
     setMode(next);
     setScanResult(undefined);
     setScanError(undefined);
+    setRecipeUrl("");
+    setRecipeExtractError(undefined);
+    setRecipeReview(undefined);
+  }
+
+  async function handleExtractRecipe() {
+    const url = recipeUrl.trim();
+    if (!url) return;
+    setExtractingRecipe(true);
+    setRecipeExtractError(undefined);
+    try {
+      const result = await extractRecipeFromUrl(url);
+      setRecipeReview({ title: result.title, mealType: result.mealType ?? "Dinner", bodyText: result.recipeText, sourceUrl: result.sourceUrl });
+    } catch (err) {
+      setRecipeExtractError(err instanceof Error ? err.message : "Couldn't read that page.");
+    } finally {
+      setExtractingRecipe(false);
+    }
+  }
+
+  async function handleSaveRecipe() {
+    if (!recipeReview) return;
+    setSavingRecipe(true);
+    try {
+      await createRecipe(recipeReview.title, recipeReview.mealType, { sourceUrl: recipeReview.sourceUrl, bodyText: recipeReview.bodyText });
+      setRecipeUrl("");
+      setRecipeReview(undefined);
+      setRecipeSaved(true);
+      window.setTimeout(() => setRecipeSaved(false), 1200);
+    } catch (err) {
+      setRecipeExtractError(err instanceof Error ? err.message : "Couldn't save that recipe.");
+    } finally {
+      setSavingRecipe(false);
+    }
   }
 
   async function handlePhotoSelected(event: React.ChangeEvent<HTMLInputElement>) {
@@ -331,6 +375,7 @@ export function CaptureScreen() {
                   { value: "text", label: "Text" },
                   { value: "voice", label: "Voice" },
                   { value: "scan-calendar", label: "Scan calendar" },
+                  { value: "recipe", label: "Recipe" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -374,6 +419,77 @@ export function CaptureScreen() {
                   {extracting ? "Reading photo…" : "Take or choose a photo"}
                 </button>
                 {scanError && <p className="text-xs text-claude">{scanError}</p>}
+              </div>
+            ) : mode === "recipe" ? (
+              <div className="flex flex-col gap-3 rounded-2xl border border-line px-4 py-6 dark:border-line-dark">
+                {!recipeReview ? (
+                  <>
+                    <p className="text-sm text-ink-soft dark:text-ink-soft-dark">
+                      Paste a link to a recipe — Alfred will read the page and pull out the recipe for your Recipe
+                      Bank.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        value={recipeUrl}
+                        onChange={(e) => setRecipeUrl(e.target.value)}
+                        placeholder="https://…"
+                        className="min-w-0 flex-1 rounded-full border border-line bg-paper-raised px-4 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:placeholder:text-ink-faint-dark"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleExtractRecipe}
+                        disabled={extractingRecipe || !recipeUrl.trim()}
+                        className="shrink-0 rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-opacity disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                      >
+                        {extractingRecipe ? "Reading…" : "Read recipe"}
+                      </button>
+                    </div>
+                    {recipeExtractError && <p className="text-xs text-claude">{recipeExtractError}</p>}
+                    {recipeSaved && <p className="text-xs text-ink-soft dark:text-ink-soft-dark">Saved to your Recipe Bank.</p>}
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={recipeReview.title}
+                      onChange={(e) => setRecipeReview({ ...recipeReview, title: e.target.value })}
+                      className="w-full rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-sm text-ink outline-none focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:focus:border-ink-faint-dark"
+                    />
+                    <div className="flex gap-1 rounded-full border border-line p-1 dark:border-line-dark">
+                      {MEAL_TYPES.map((mt) => (
+                        <button
+                          key={mt}
+                          onClick={() => setRecipeReview({ ...recipeReview, mealType: mt })}
+                          className={`flex-1 rounded-full py-1 text-xs font-medium transition-colors ${
+                            recipeReview.mealType === mt
+                              ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
+                              : "text-ink-soft dark:text-ink-soft-dark"
+                          }`}
+                        >
+                          {mt}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="rounded-lg bg-paper-raised px-3 py-2 text-xs text-ink-soft dark:bg-paper-raised-dark dark:text-ink-soft-dark">
+                      {recipeReview.bodyText.slice(0, 220)}…
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSaveRecipe}
+                        disabled={savingRecipe || !recipeReview.title.trim()}
+                        className="flex-1 rounded-full bg-ink py-1.5 text-xs font-medium text-paper transition-colors disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                      >
+                        {savingRecipe ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        onClick={() => setRecipeReview(undefined)}
+                        className="flex-1 rounded-full border border-line py-1.5 text-xs font-medium text-ink-soft dark:border-line-dark dark:text-ink-soft-dark"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {recipeExtractError && <p className="text-xs text-claude">{recipeExtractError}</p>}
+                  </>
+                )}
               </div>
             ) : (
               <>

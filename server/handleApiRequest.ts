@@ -73,6 +73,7 @@ import { NotionRepo } from "./notion/queries.js";
 import { FREELANCE_CLIENTS, MEAL_TYPES, UNSORTED_PROJECT, type MealType } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
 import { loadRecipeEmailEnv } from "./recipes/env.js";
+import { extractRecipeFromUrl } from "./recipes/urlExtract.js";
 import { checkRecipeEmail, generateAndSendRecipeEmail } from "./recipes/weeklyEmail.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
@@ -802,8 +803,23 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const body = await readBody();
       const recipeTitle = typeof body.title === "string" ? body.title.trim() : "";
       if (!recipeTitle || !isMealType(body.mealType)) return json(400, { error: "title and a valid mealType are required" });
-      const created = await repo.createRecipe(recipeTitle, body.mealType);
+      const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl : undefined;
+      const bodyText = typeof body.bodyText === "string" ? body.bodyText : undefined;
+      const created = await repo.createRecipe(recipeTitle, body.mealType, { sourceUrl, bodyText });
       return json(200, { id: created.id });
+    }
+
+    // Fetches a recipe webpage and extracts title/meal-type/recipe text —
+    // used by the Recipe Bank's "add from URL" flow and Capture's recipe
+    // mode. Never writes to Notion itself; the caller reviews the result
+    // and POSTs to /api/recipes above to actually save it.
+    if (method === "POST" && pathname === "/api/recipes/extract") {
+      const body = await readBody();
+      const url = typeof body.url === "string" ? body.url.trim() : "";
+      if (!url) return json(400, { error: "url is required" });
+      const extraction = await extractRecipeFromUrl(env, llmEnv, url);
+      if (!extraction) return json(502, { error: "Couldn't read a recipe from that page." });
+      return json(200, extraction);
     }
 
     const recipeMatch = pathname.match(/^\/api\/recipes\/([^/]+)$/);

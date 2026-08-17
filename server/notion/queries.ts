@@ -27,6 +27,29 @@ function getRichText(page: AnyPage, prop: string): string {
 
 const richText = (content: string) => [{ type: "text" as const, text: { content } }];
 
+// Notion caps a single rich_text segment at 2000 characters and a single
+// pages.create/blocks.append call at 100 blocks — chunk long body text into
+// paragraph blocks under both limits. Used for Recipe pages created from a
+// URL (the extracted recipe text goes in the body, not the title).
+const CHARS_PER_BLOCK = 1800;
+const BLOCKS_PER_CALL = 100;
+
+function paragraphTextBlocks(text: string): unknown[] {
+  const blocks: unknown[] = [];
+  for (let i = 0; i < text.length; i += CHARS_PER_BLOCK) {
+    blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: richText(text.slice(i, i + CHARS_PER_BLOCK)) } });
+  }
+  return blocks;
+}
+
+function sourceLinkBlock(url: string): unknown {
+  return {
+    object: "block",
+    type: "paragraph",
+    paragraph: { rich_text: [{ type: "text", text: { content: `Source: ${url}` }, annotations: { italic: true } }] },
+  };
+}
+
 export interface InboxRecord {
   id: string;
   text: string;
@@ -463,14 +486,31 @@ export class NotionRepo {
     }));
   }
 
-  async createRecipe(title: string, mealType: MealType): Promise<{ id: string }> {
+  /** `opts` is set when the recipe was added from a URL (Recipe Bank's
+   * "add from URL", Capture's recipe mode, or Chat's recipe proposal) — the
+   * extracted recipe text goes in the page body, with a source-link line
+   * first, rather than just the bare title a manual add gets. */
+  async createRecipe(title: string, mealType: MealType, opts?: { sourceUrl?: string; bodyText?: string }): Promise<{ id: string }> {
+    const blocks: unknown[] = [];
+    if (opts?.sourceUrl) blocks.push(sourceLinkBlock(opts.sourceUrl));
+    if (opts?.bodyText) blocks.push(...paragraphTextBlocks(opts.bodyText));
+
     const page = await this.notion.pages.create({
       parent: { type: "data_source_id", data_source_id: this.env.recipesDbId },
       properties: {
         [TITLE_PROP]: { title: richText(title) },
         [RECIPES_PROPS.mealType]: { select: { name: mealType } },
       },
+      children: blocks.slice(0, BLOCKS_PER_CALL),
     } as never);
+
+    if (blocks.length > BLOCKS_PER_CALL) {
+      const rest = blocks.slice(BLOCKS_PER_CALL);
+      for (let i = 0; i < rest.length; i += BLOCKS_PER_CALL) {
+        await this.notion.blocks.children.append({ block_id: page.id, children: rest.slice(i, i + BLOCKS_PER_CALL) } as never);
+      }
+    }
+
     return { id: page.id };
   }
 

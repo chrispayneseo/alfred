@@ -19,6 +19,17 @@ export interface LocationReminderProposal {
 
 export type LocationReminderProposalStatus = "pending" | "created" | "cancelled" | "error";
 
+export type MealType = "Dinner" | "Lunch" | "Breakfast";
+
+export interface RecipeProposal {
+  title: string;
+  mealType: MealType | null;
+  sourceUrl: string;
+  bodyText: string;
+}
+
+export type RecipeProposalStatus = "pending" | "created" | "cancelled" | "error";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -34,4 +45,11 @@ export interface ChatMessage {
   locationReminderProposal?: LocationReminderProposal;
   locationReminderProposalStatus?: LocationReminderProposalStatus;
   locationReminderProposalError?: string;
+  recipeProposal?: RecipeProposal;
+  recipeProposalStatus?: RecipeProposalStatus;
+  recipeProposalError?: string;
+  /** Editable meal-type pick shown alongside the proposal card — starts at
+   * the extracted guess (or "Dinner" if the extraction couldn't tell), but
+   * the user can correct it before confirming. */
+  recipeProposalMealType?: MealType;
 }

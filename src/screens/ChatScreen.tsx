@@ -3,10 +3,13 @@ import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { sendChatMessage, type ChatApiTurn } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
+import { createRecipe } from "../integrations/recipes/api";
 import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
-import type { ChatMessage, EventProposal, LocationReminderProposal } from "../types";
+import type { ChatMessage, EventProposal, LocationReminderProposal, MealType, RecipeProposal } from "../types";
+
+const MEAL_TYPES: MealType[] = ["Dinner", "Lunch", "Breakfast"];
 
 function formatEventProposal(p: EventProposal): string {
   const d = new Date(`${p.date}T00:00:00`);
@@ -44,6 +47,7 @@ export function ChatScreen() {
   const [isThinking, setIsThinking] = useState(false);
   const [submittingEventId, setSubmittingEventId] = useState<string>();
   const [submittingLocationReminderId, setSubmittingLocationReminderId] = useState<string>();
+  const [submittingRecipeId, setSubmittingRecipeId] = useState<string>();
   const online = useOnlineStatus();
   const { coords } = useLiveLocation();
 
@@ -98,6 +102,9 @@ export function ChatScreen() {
           eventProposalStatus: result.eventProposal ? "pending" : undefined,
           locationReminderProposal: result.locationReminderProposal,
           locationReminderProposalStatus: result.locationReminderProposal ? "pending" : undefined,
+          recipeProposal: result.recipeProposal,
+          recipeProposalStatus: result.recipeProposal ? "pending" : undefined,
+          recipeProposalMealType: result.recipeProposal?.mealType ?? "Dinner",
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -175,6 +182,32 @@ export function ChatScreen() {
 
   function handleCancelLocationReminder(messageId: string) {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, locationReminderProposalStatus: "cancelled" } : m)));
+  }
+
+  function handleRecipeMealTypeChange(messageId: string, mealType: MealType) {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, recipeProposalMealType: mealType } : m)));
+  }
+
+  async function handleConfirmRecipe(messageId: string, proposal: RecipeProposal, mealType: MealType) {
+    setSubmittingRecipeId(messageId);
+    try {
+      await createRecipe(proposal.title, mealType, { sourceUrl: proposal.sourceUrl, bodyText: proposal.bodyText });
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, recipeProposalStatus: "created" } : m)));
+    } catch (error) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, recipeProposalStatus: "error", recipeProposalError: error instanceof Error ? error.message : "Couldn't save that recipe." }
+            : m
+        )
+      );
+    } finally {
+      setSubmittingRecipeId(undefined);
+    }
+  }
+
+  function handleCancelRecipe(messageId: string) {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, recipeProposalStatus: "cancelled" } : m)));
   }
 
   return (
@@ -294,6 +327,68 @@ export function ChatScreen() {
                     <button
                       onClick={() => handleCancelLocationReminder(message.id)}
                       disabled={submittingLocationReminderId === message.id}
+                      className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft disabled:opacity-50 dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {message.recipeProposal && (
+              <div className="mt-2 inline-block w-full max-w-[85%] rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
+                <p className="text-sm text-ink dark:text-ink-dark">{message.recipeProposal.title}</p>
+
+                {(message.recipeProposalStatus === "pending" || message.recipeProposalStatus === "error") && (
+                  <div className="mt-2 flex gap-1 rounded-full border border-line p-1 dark:border-line-dark">
+                    {MEAL_TYPES.map((mt) => (
+                      <button
+                        key={mt}
+                        onClick={() => handleRecipeMealTypeChange(message.id, mt)}
+                        className={`flex-1 rounded-full py-1 text-[11px] font-medium transition-colors ${
+                          (message.recipeProposalMealType ?? "Dinner") === mt
+                            ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
+                            : "text-ink-soft dark:text-ink-soft-dark"
+                        }`}
+                      >
+                        {mt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {message.recipeProposalStatus === "created" && (
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">Added to your Recipe Bank.</p>
+                )}
+                {message.recipeProposalStatus === "cancelled" && (
+                  <p className="mt-2 text-xs text-ink-faint dark:text-ink-faint-dark">Not added.</p>
+                )}
+                {message.recipeProposalStatus === "error" && (
+                  <>
+                    <p className="mt-2 text-xs text-claude">{message.recipeProposalError}</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <button
+                        onClick={() => handleConfirmRecipe(message.id, message.recipeProposal!, message.recipeProposalMealType ?? "Dinner")}
+                        disabled={submittingRecipeId === message.id}
+                        className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  </>
+                )}
+                {message.recipeProposalStatus === "pending" && (
+                  <div className="mt-2 flex items-center gap-3">
+                    <button
+                      onClick={() => handleConfirmRecipe(message.id, message.recipeProposal!, message.recipeProposalMealType ?? "Dinner")}
+                      disabled={submittingRecipeId === message.id}
+                      className="rounded-full bg-ink px-3.5 py-1.5 text-xs font-medium text-paper disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+                    >
+                      {submittingRecipeId === message.id ? "Adding…" : "Add to Recipe Bank"}
+                    </button>
+                    <button
+                      onClick={() => handleCancelRecipe(message.id)}
+                      disabled={submittingRecipeId === message.id}
                       className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft disabled:opacity-50 dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
                     >
                       Cancel

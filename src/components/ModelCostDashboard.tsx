@@ -22,6 +22,7 @@ const FEATURE_DISPLAY_KEY: Record<FeatureBreakdownEntry["feature"], string> = {
   recurring_detection: "recurring_detection",
   project_grouping: "project_grouping",
   search_console_query: "search_console_query",
+  recipe_extraction: "recipe_extraction",
 };
 
 const FEATURE_LABEL: Record<string, string> = {
@@ -34,6 +35,7 @@ const FEATURE_LABEL: Record<string, string> = {
   recurring_detection: "Recurring task detection",
   project_grouping: "Project grouping suggestions",
   search_console_query: "Search Console Q&A",
+  recipe_extraction: "Recipe extraction",
 };
 
 function formatUsd(value: number): string {

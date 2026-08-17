@@ -4,7 +4,7 @@ import type { GoogleAccountEnv } from "../google/accounts.js";
 import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
 import { WRITABLE_CALENDAR_ACCOUNT } from "../google/calendarWriteGuard.js";
 import type { NotionRepo } from "../notion/queries.js";
-import { DIGEST_PROJECTS, UNSORTED_PROJECT } from "../notion/schema.js";
+import { DIGEST_PROJECTS, UNSORTED_PROJECT, type MealType } from "../notion/schema.js";
 import type { WeatherEnv } from "../weather/env.js";
 import { logModelCall } from "../costTracking/callLog.js";
 import { claudeChat } from "./anthropic.js";
@@ -14,6 +14,7 @@ import { buildEmailContext, needsEmailContext } from "./emailContext.js";
 import type { LlmEnv } from "./env.js";
 import { buildNotionContext, needsNotionContext } from "./notionContext.js";
 import { chatGptChat } from "./openai.js";
+import { buildRecipeUrlContext, needsRecipeUrlContext } from "./recipeUrlContext.js";
 import { routeToModel, type ModelChoice } from "./router.js";
 import { buildSearchConsoleContext, needsSearchConsoleContext } from "./searchConsoleContext.js";
 import type { ChatTurn, CompletionResult } from "./types.js";
@@ -37,6 +38,20 @@ export interface LocationReminderProposal {
   project: string;
 }
 
+// Unlike EventProposal/LocationReminderProposal (which the model itself
+// composes from the conversation), a RecipeProposal's content is resolved
+// deterministically by the fetch+extraction call in recipeUrlContext.ts —
+// the model never sees or transcribes bodyText, it only decides (via the
+// context instruction) whether to mention it in its reply. That sidesteps
+// asking a model to faithfully reproduce a multi-paragraph recipe inside a
+// JSON block, which is both a fidelity risk and wasted output tokens.
+export interface RecipeProposal {
+  title: string;
+  mealType: MealType | null;
+  sourceUrl: string;
+  bodyText: string;
+}
+
 export interface ChatResult {
   text: string;
   model: ModelChoice;
@@ -45,6 +60,7 @@ export interface ChatResult {
   confidence: Confidence;
   eventProposal?: EventProposal;
   locationReminderProposal?: LocationReminderProposal;
+  recipeProposal?: RecipeProposal;
 }
 
 // Asked of every answer, not just ones with injected context — a plain
@@ -233,7 +249,18 @@ export async function runChat(
   const intended = routeToModel(lastText);
   const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
 
-  const extraContext = await buildContext(env, dbEnv, lastText, messages, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
+  const recipeUrlResult = needsRecipeUrlContext(lastText) ? await buildRecipeUrlContext(dbEnv, env, lastText) : undefined;
+  const recipeProposal: RecipeProposal | undefined = recipeUrlResult?.extraction
+    ? {
+        title: recipeUrlResult.extraction.title,
+        mealType: recipeUrlResult.extraction.mealType,
+        sourceUrl: recipeUrlResult.extraction.sourceUrl,
+        bodyText: recipeUrlResult.extraction.recipeText,
+      }
+    : undefined;
+
+  const baseContext = await buildContext(env, dbEnv, lastText, messages, googleAccounts, notionRepo, coachPlanEnv, weatherEnv);
+  const extraContext = recipeUrlResult ? `${baseContext}\n\n---\n\n${recipeUrlResult.contextText}` : baseContext;
 
   try {
     const { text: raw, inputTokens, outputTokens } = await callModel(intended, env, messages, extraContext);
@@ -247,7 +274,7 @@ export async function runChat(
     const { text: afterConfidence, confidence } = extractConfidence(raw);
     const { text: afterEvent, eventProposal } = extractEventProposal(afterConfidence);
     const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
-    return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal, locationReminderProposal };
+    return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal, locationReminderProposal, recipeProposal };
   } catch (primaryError) {
     console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
     try {
@@ -262,7 +289,7 @@ export async function runChat(
       const { text: afterConfidence, confidence } = extractConfidence(raw);
       const { text: afterEvent, eventProposal } = extractEventProposal(afterConfidence);
       const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
-      return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal, locationReminderProposal };
+      return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal, locationReminderProposal, recipeProposal };
     } catch (fallbackError) {
       console.error(`[chat] ${fallback} fallback also failed:`, fallbackError);
       throw new Error("both_unavailable");

@@ -16,6 +16,7 @@ import {
 import {
   createRecipe,
   deleteRecipe,
+  extractRecipeFromUrl,
   fetchRecipes,
   generateRecipeSuggestions,
   type ApiRecipe,
@@ -46,6 +47,10 @@ export function BrowseScreen() {
   const [newRecipeTitle, setNewRecipeTitle] = useState("");
   const [newRecipeMealType, setNewRecipeMealType] = useState<MealType>("Dinner");
   const [savingRecipe, setSavingRecipe] = useState(false);
+  const [recipeUrl, setRecipeUrl] = useState("");
+  const [extractingRecipe, setExtractingRecipe] = useState(false);
+  const [extractError, setExtractError] = useState<string>();
+  const [extractedRecipe, setExtractedRecipe] = useState<{ sourceUrl: string; bodyText: string; preview: string }>();
   const [generating, setGenerating] = useState(false);
   const [generateResult, setGenerateResult] = useState<RecipeEmailResult>();
   const [generateError, setGenerateError] = useState<string>();
@@ -62,15 +67,40 @@ export function BrowseScreen() {
       .finally(() => setLoading(false));
   }, []);
 
+  function resetRecipeForm() {
+    setAddingRecipe(false);
+    setNewRecipeTitle("");
+    setNewRecipeMealType("Dinner");
+    setRecipeUrl("");
+    setExtractError(undefined);
+    setExtractedRecipe(undefined);
+  }
+
+  async function handleExtractRecipe() {
+    const url = recipeUrl.trim();
+    if (!url) return;
+    setExtractingRecipe(true);
+    setExtractError(undefined);
+    try {
+      const result = await extractRecipeFromUrl(url);
+      setNewRecipeTitle(result.title);
+      if (result.mealType) setNewRecipeMealType(result.mealType);
+      setExtractedRecipe({ sourceUrl: result.sourceUrl, bodyText: result.recipeText, preview: result.recipeText.slice(0, 200) });
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Couldn't read that page.");
+    } finally {
+      setExtractingRecipe(false);
+    }
+  }
+
   async function addRecipe() {
     const title = newRecipeTitle.trim();
     if (!title) return;
     setSavingRecipe(true);
     try {
-      const { id } = await createRecipe(title, newRecipeMealType);
+      const { id } = await createRecipe(title, newRecipeMealType, extractedRecipe && { sourceUrl: extractedRecipe.sourceUrl, bodyText: extractedRecipe.bodyText });
       setRecipes((prev) => [...prev, { id, title, mealType: newRecipeMealType, url: "" }]);
-      setNewRecipeTitle("");
-      setAddingRecipe(false);
+      resetRecipeForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't add that recipe.");
     } finally {
@@ -372,8 +402,30 @@ export function BrowseScreen() {
 
           {addingRecipe ? (
             <div className="space-y-2 rounded-xl border border-line p-3 dark:border-line-dark">
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={recipeUrl}
+                  onChange={(e) => setRecipeUrl(e.target.value)}
+                  placeholder="Paste a recipe URL (optional)"
+                  className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-3 py-1.5 text-sm text-ink outline-none focus:border-ink-faint dark:border-line-dark dark:text-ink-dark dark:focus:border-ink-faint-dark"
+                />
+                <button
+                  onClick={handleExtractRecipe}
+                  disabled={extractingRecipe || !recipeUrl.trim()}
+                  className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors disabled:opacity-50 dark:border-line-dark dark:text-ink-soft-dark"
+                >
+                  {extractingRecipe ? "Reading…" : "Extract"}
+                </button>
+              </div>
+              {extractError && <p className="text-xs text-claude">{extractError}</p>}
+              {extractedRecipe && (
+                <p className="rounded-lg bg-paper px-3 py-2 text-xs text-ink-soft dark:bg-paper-dark dark:text-ink-soft-dark">
+                  {extractedRecipe.preview}…
+                </p>
+              )}
+
               <input
-                autoFocus
                 value={newRecipeTitle}
                 onChange={(e) => setNewRecipeTitle(e.target.value)}
                 placeholder="Recipe title"
@@ -403,10 +455,7 @@ export function BrowseScreen() {
                   {savingRecipe ? "Saving…" : "Save"}
                 </button>
                 <button
-                  onClick={() => {
-                    setAddingRecipe(false);
-                    setNewRecipeTitle("");
-                  }}
+                  onClick={resetRecipeForm}
                   className="flex-1 rounded-full border border-line py-1.5 text-xs font-medium text-ink-soft dark:border-line-dark dark:text-ink-soft-dark"
                 >
                   Cancel
