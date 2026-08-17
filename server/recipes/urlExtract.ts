@@ -96,7 +96,7 @@ export async function extractRecipeFromUrl(dbEnv: Env, llmEnv: LlmEnv, url: stri
       outputTokens: result.outputTokens,
     });
     const parsed = ExtractionSchema.parse(parseJsonLoose(result.text));
-    return { ...parsed, sourceUrl: url };
+    return { title: parsed.title, mealType: parsed.mealType ?? null, recipeText: parsed.recipeText, sourceUrl: url };
   } catch (error) {
     console.error(`[recipes] extraction failed for ${url}:`, error instanceof Error ? error.message : error);
     return undefined;
