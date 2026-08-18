@@ -44,36 +44,84 @@ function parseJsonLoose(text: string): unknown {
   return JSON.parse(match ? match[0] : cleaned);
 }
 
+const BLOCKED_DOMAINS_PATTERN = /domains are not accessible to our user agent: \[([^\]]*)\]/i;
+
+/** The API 400s the *entire* request if even one allowed_domains entry is
+ * inaccessible to Claude's crawler (e.g. blocks it via robots.txt) — it
+ * doesn't just skip that domain. Anthropic's error message lists every
+ * inaccessible domain from the request in one go. */
+function parseBlockedDomains(message: string): string[] {
+  const match = message.match(BLOCKED_DOMAINS_PATTERN);
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+    .filter(Boolean);
+}
+
+function is400Error(error: unknown): error is { status: number; message?: string } {
+  return typeof error === "object" && error !== null && "status" in error && (error as { status: unknown }).status === 400;
+}
+
 /** Never throws — a search failure (network, refusal, bad JSON) just means
  * zero candidates for this topic today, which the caller treats the same as
- * "nothing new happened." */
-export async function searchNewsForTopic(apiKey: string, topic: string): Promise<WebSearchOutcome> {
+ * "nothing new happened." `domains`, when non-empty, constrains the search
+ * to that topic's user-curated trusted sources (Settings) via the
+ * web_search tool's allowed_domains — an open-web search otherwise. If any
+ * of those domains turn out to be inaccessible to Claude's crawler, retries
+ * once with just the blocked ones dropped rather than failing the topic
+ * outright (falls back to the open web if none remain). */
+export async function searchNewsForTopic(apiKey: string, topic: string, domains: string[] = []): Promise<WebSearchOutcome> {
   if (!apiKey) return { results: [], inputTokens: 0, outputTokens: 0 };
 
-  try {
-    const anthropic = getAnthropicClient(apiKey);
-    const response = await anthropic.messages.create({
-      model: SEARCH_MODEL,
-      max_tokens: 1500,
-      thinking: { type: "disabled" },
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
-      messages: [{ role: "user", content: searchPrompt(topic) }],
-    });
+  const anthropic = getAnthropicClient(apiKey);
+  let activeDomains = domains;
 
-    const textBlocks = response.content.filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text");
-    const lastText = textBlocks[textBlocks.length - 1]?.text ?? "[]";
-
-    let results: RawSearchResult[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const parsed = parseJsonLoose(lastText);
-      if (Array.isArray(parsed)) results = parsed.filter(isRawSearchResult);
-    } catch (error) {
-      console.error(`[newsFeed] couldn't parse search results for "${topic}":`, error, lastText);
-    }
+      const response = await anthropic.messages.create({
+        model: SEARCH_MODEL,
+        max_tokens: 1500,
+        thinking: { type: "disabled" },
+        tools: [
+          {
+            type: "web_search_20250305",
+            name: "web_search",
+            max_uses: 3,
+            ...(activeDomains.length > 0 ? { allowed_domains: activeDomains } : {}),
+          },
+        ],
+        messages: [{ role: "user", content: searchPrompt(topic) }],
+      });
 
-    return { results, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
-  } catch (error) {
-    console.error(`[newsFeed] web search failed for topic "${topic}":`, error);
-    return { results: [], inputTokens: 0, outputTokens: 0 };
+      const textBlocks = response.content.filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text");
+      const lastText = textBlocks[textBlocks.length - 1]?.text ?? "[]";
+
+      let results: RawSearchResult[] = [];
+      try {
+        const parsed = parseJsonLoose(lastText);
+        if (Array.isArray(parsed)) results = parsed.filter(isRawSearchResult);
+      } catch (error) {
+        console.error(`[newsFeed] couldn't parse search results for "${topic}":`, error, lastText);
+      }
+
+      return { results, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
+    } catch (error) {
+      if (attempt === 0 && is400Error(error)) {
+        const blocked = parseBlockedDomains(error.message ?? "");
+        if (blocked.length > 0) {
+          const remaining = activeDomains.filter((d) => !blocked.includes(d));
+          if (remaining.length !== activeDomains.length) {
+            console.warn(`[newsFeed] "${topic}": dropping inaccessible domains and retrying: ${blocked.join(", ")}`);
+            activeDomains = remaining;
+            continue;
+          }
+        }
+      }
+      console.error(`[newsFeed] web search failed for topic "${topic}":`, error);
+      return { results: [], inputTokens: 0, outputTokens: 0 };
+    }
   }
+
+  return { results: [], inputTokens: 0, outputTokens: 0 };
 }

@@ -215,6 +215,12 @@ const SCHEMA_STATEMENTS = [
     name TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  // Added after the initial launch — an editable per-topic allowlist of
+  // trusted domains (JSON string array) that constrains that topic's web
+  // search via the Anthropic web_search tool's allowed_domains param. Empty
+  // array (the default for any topic without curated sources) means search
+  // the open web, unchanged from before this existed.
+  `ALTER TABLE news_topics ADD COLUMN IF NOT EXISTS preferred_domains TEXT NOT NULL DEFAULT '[]'`,
   // Auto-suggested new topics — same pending/accepted/dismissed shape as
   // project_grouping_suggestions, requiring explicit accept before a topic
   // is actually added.

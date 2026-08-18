@@ -1,6 +1,7 @@
 export interface NewsTopic {
   id: string;
   name: string;
+  preferredDomains: string[];
 }
 
 export interface NewsFeedItem {
@@ -50,6 +51,18 @@ export async function addNewsTopic(name: string): Promise<NewsTopic> {
 export async function removeNewsTopic(id: string): Promise<void> {
   const res = await fetch(`/api/news-feed/topics/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Request failed (${res.status})`);
+}
+
+/** Replaces a topic's preferred-domains list wholesale — an empty array
+ * clears the restriction back to an open-web search for that topic. */
+export async function setNewsTopicDomains(id: string, domains: string[]): Promise<NewsTopic> {
+  const res = await fetch(`/api/news-feed/topics/${encodeURIComponent(id)}/domains`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ domains }),
+  });
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  return res.json();
 }
 
 export async function checkTopicSuggestions(): Promise<PendingTopicSuggestion[]> {

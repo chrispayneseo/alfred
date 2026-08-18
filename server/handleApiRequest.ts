@@ -64,7 +64,7 @@ import {
 import { actionTicketWindow, checkLeedsTickets, dismissReviewWindow } from "./leedsTickets/check.js";
 import { getLeedsTicketSettings, MEMBERSHIP_TIERS, setLeedsTicketSettings, type MembershipTier } from "./leedsTickets/settings.js";
 import { checkNewsFeed, generateNewsFeedNow } from "./newsFeed/generate.js";
-import { addTopic, listTopics, removeTopic } from "./newsFeed/topics.js";
+import { addTopic, listTopics, removeTopic, setTopicDomains } from "./newsFeed/topics.js";
 import {
   acceptTopicSuggestion,
   checkTopicSuggestions,
@@ -811,6 +811,13 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     if (method === "DELETE" && topicDeleteMatch) {
       await removeTopic(env, topicDeleteMatch[1]);
       return json(200, { ok: true });
+    }
+
+    const topicDomainsMatch = pathname.match(/^\/api\/news-feed\/topics\/([^/]+)\/domains$/);
+    if (method === "POST" && topicDomainsMatch) {
+      const body = await readBody();
+      const domains = Array.isArray(body.domains) ? body.domains.filter((d: unknown): d is string => typeof d === "string") : [];
+      return json(200, await setTopicDomains(env, topicDomainsMatch[1], domains));
     }
 
     if (method === "GET" && pathname === "/api/news-feed/topic-suggestions") {

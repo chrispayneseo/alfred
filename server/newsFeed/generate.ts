@@ -120,7 +120,7 @@ export async function generateNewsFeedNow(
   const perTopicCurated: { topicName: string; items: CuratedItem[] }[] = [];
 
   for (const topic of topics) {
-    const webOutcome = await searchNewsForTopic(llmEnv.anthropicApiKey, topic.name);
+    const webOutcome = await searchNewsForTopic(llmEnv.anthropicApiKey, topic.name, topic.preferredDomains);
     if (webOutcome.inputTokens > 0 || webOutcome.outputTokens > 0) {
       await logModelCall(dbEnv, {
         provider: "claude",

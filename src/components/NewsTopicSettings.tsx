@@ -6,13 +6,24 @@ import {
   dismissTopicSuggestion,
   fetchNewsTopics,
   removeNewsTopic,
+  setNewsTopicDomains,
   type NewsTopic,
   type PendingTopicSuggestion,
 } from "../integrations/newsFeed/api";
 
+function parseDomainsInput(text: string): string[] {
+  return text
+    .split(",")
+    .map((d) => d.trim())
+    .filter(Boolean);
+}
+
 /** Topic management for the personalized news feed, plus its own
  * accept/dismiss surface for auto-suggested topics (kept self-contained in
- * Settings rather than adding another card to an already-busy Today). */
+ * Settings rather than adding another card to an already-busy Today). Each
+ * topic can optionally be scoped to a set of trusted domains — when set,
+ * that topic's web search only searches those sources instead of the open
+ * web. */
 export function NewsTopicSettings() {
   const [topics, setTopics] = useState<NewsTopic[]>();
   const [suggestions, setSuggestions] = useState<PendingTopicSuggestion[]>();
@@ -20,6 +31,8 @@ export function NewsTopicSettings() {
   const [busyId, setBusyId] = useState<string>();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string>();
+  const [expandedId, setExpandedId] = useState<string>();
+  const [domainsDraft, setDomainsDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchNewsTopics()
@@ -56,6 +69,28 @@ export function NewsTopicSettings() {
     }
   }
 
+  function toggleExpand(topic: NewsTopic) {
+    if (expandedId === topic.id) {
+      setExpandedId(undefined);
+      return;
+    }
+    setExpandedId(topic.id);
+    setDomainsDraft((prev) => ({ ...prev, [topic.id]: topic.preferredDomains.join(", ") }));
+  }
+
+  async function handleSaveDomains(topicId: string) {
+    const domains = parseDomainsInput(domainsDraft[topicId] ?? "");
+    setBusyId(topicId);
+    try {
+      const updated = await setNewsTopicDomains(topicId, domains);
+      setTopics((prev) => prev?.map((t) => (t.id === topicId ? updated : t)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save those sources.");
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
   async function handleAcceptSuggestion(id: string) {
     setBusyId(id);
     try {
@@ -83,30 +118,50 @@ export function NewsTopicSettings() {
     <div>
       <p className="mb-3 text-xs text-ink-soft dark:text-ink-soft-dark">
         Alfred builds your daily Feed around these topics, searching for genuine news and matching newsletters once
-        a day. Add or remove anytime.
+        a day. Add or remove anytime — optionally scope a topic's web search to trusted sources instead of the open
+        web.
       </p>
 
-      <div className="mb-3 flex flex-wrap gap-2">
+      <ul className="mb-3 space-y-1.5">
         {topics?.map((topic) => (
-          <span
-            key={topic.id}
-            className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs text-ink-soft dark:border-line-dark dark:text-ink-soft-dark"
-          >
-            {topic.name}
-            <button
-              onClick={() => handleRemove(topic.id)}
-              disabled={busyId === topic.id}
-              aria-label={`Remove ${topic.name}`}
-              className="text-ink-faint hover:text-claude disabled:opacity-50 dark:text-ink-faint-dark"
-            >
-              ×
-            </button>
-          </span>
+          <li key={topic.id} className="rounded-xl border border-line px-3 py-2 dark:border-line-dark">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                onClick={() => toggleExpand(topic)}
+                className="min-w-0 flex-1 text-left text-sm text-ink dark:text-ink-dark"
+              >
+                {topic.name}
+                <span className="ml-2 text-xs text-ink-faint dark:text-ink-faint-dark">
+                  {topic.preferredDomains.length > 0 ? `${topic.preferredDomains.length} trusted sources` : "open web"}
+                </span>
+              </button>
+              <button
+                onClick={() => handleRemove(topic.id)}
+                disabled={busyId === topic.id}
+                aria-label={`Remove ${topic.name}`}
+                className="shrink-0 text-ink-faint hover:text-claude disabled:opacity-50 dark:text-ink-faint-dark"
+              >
+                ×
+              </button>
+            </div>
+            {expandedId === topic.id && (
+              <div className="mt-2">
+                <textarea
+                  value={domainsDraft[topic.id] ?? ""}
+                  onChange={(e) => setDomainsDraft((prev) => ({ ...prev, [topic.id]: e.target.value }))}
+                  onBlur={() => handleSaveDomains(topic.id)}
+                  placeholder="e.g. bbc.co.uk, thesquareball.net — blank searches the open web"
+                  rows={2}
+                  className="w-full rounded-xl border border-line bg-paper-raised px-3 py-2 text-xs text-ink dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark"
+                />
+              </div>
+            )}
+          </li>
         ))}
         {topics && topics.length === 0 && (
           <p className="text-xs text-ink-faint dark:text-ink-faint-dark">No topics yet — add one below.</p>
         )}
-      </div>
+      </ul>
 
       <div className="flex gap-2">
         <input
