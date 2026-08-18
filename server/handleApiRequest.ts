@@ -787,11 +787,13 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     // this is the first request of the day); the explicit generate route
     // mirrors the weekly digest's manual "generate now" for parity.
     if (method === "GET" && pathname === "/api/news-feed") {
-      return json(200, await checkNewsFeed(env, llmEnv, loadNtfyEnv(env)));
+      const accounts = await loadGoogleAccounts(env);
+      return json(200, await checkNewsFeed(env, llmEnv, loadNtfyEnv(env), accounts));
     }
 
     if (method === "POST" && pathname === "/api/news-feed/generate") {
-      return json(200, await generateNewsFeedNow(env, llmEnv, loadNtfyEnv(env)));
+      const accounts = await loadGoogleAccounts(env);
+      return json(200, await generateNewsFeedNow(env, llmEnv, loadNtfyEnv(env), accounts));
     }
 
     if (method === "GET" && pathname === "/api/news-feed/topics") {

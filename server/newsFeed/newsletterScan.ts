@@ -6,7 +6,8 @@
 // twice, independent of emailScan's own `scanned` flag on gmail_emails.
 import { ensureSchema, getSql, type Env } from "../db.js";
 import { logModelCall } from "../costTracking/callLog.js";
-import { gmailThreadUrl } from "../google/gmail.js";
+import type { GoogleAccountEnv } from "../google/accounts.js";
+import { getMessageBody } from "../google/gmail.js";
 import type { LlmEnv } from "../llm/env.js";
 import { routedComplete } from "../llm/routedComplete.js";
 
@@ -15,10 +16,12 @@ const NEWSLETTER_SENDER_PATTERN =
 
 const SCAN_LIMIT = 80;
 const MAX_CANDIDATES_FOR_LLM = 40;
+const URL_EXTRACT_MODEL = "claude-haiku-4-5";
 
 interface CandidateEmailRow {
   row_key: string;
   account_email: string;
+  id: string;
   thread_id: string;
   sender: string;
   sender_email: string;
@@ -73,10 +76,46 @@ function isRawMatch(value: unknown): value is RawMatch {
 
 // See webSearch.ts's parseJsonLoose — same defensive extraction, in case
 // the model prefaces its JSON answer with narration.
-function parseJsonLoose(text: string): unknown {
+function parseJsonArrayLoose(text: string): unknown {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/, "").replace(/```\s*$/, "");
   const match = cleaned.match(/\[[\s\S]*\]/);
   return JSON.parse(match ? match[0] : cleaned);
+}
+
+function parseJsonObjectLoose(text: string): unknown {
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/, "").replace(/```\s*$/, "");
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  return JSON.parse(match ? match[0] : cleaned);
+}
+
+const URL_EXTRACT_SYSTEM_PROMPT = `You're given the full body of a newsletter-style email and a specific story that was identified within it. Find the single URL in the email body that links directly to that story — a "read more" / "full story" / article link — not the newsletter's own homepage, an unsubscribe link, a social share link, or a generic sign-up link.
+
+Respond with ONLY a JSON object (no markdown, no commentary): {"url": "https://..."} if you find a genuine direct link to this specific story, or {"url": null} if you can't.`;
+
+/** A newsletter email itself is never a usable link destination (opening it
+ * requires being signed into the right Gmail account, and a thread link can
+ * 404 outright) — every match must resolve to a real URL pulled from inside
+ * the email body, or it's dropped rather than shown as a dead/misleading
+ * link. One extra cheap call per genuine match (typically a handful), not
+ * per candidate. */
+async function extractStoryUrl(dbEnv: Env, llmEnv: LlmEnv, body: string, headline: string, summary: string): Promise<string | undefined> {
+  try {
+    const userText = `Story: "${headline}" — ${summary}\n\nEmail body:\n${body.slice(0, 6000)}`;
+    const result = await routedComplete(llmEnv, "newsletter story url extraction", URL_EXTRACT_SYSTEM_PROMPT, userText, 200, URL_EXTRACT_MODEL);
+    await logModelCall(dbEnv, {
+      provider: result.model,
+      feature: "news_feed_newsletter_scan",
+      model: result.modelId,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
+    const parsed = parseJsonObjectLoose(result.text) as { url?: unknown };
+    if (typeof parsed.url === "string" && /^https?:\/\//i.test(parsed.url)) return parsed.url;
+    return undefined;
+  } catch (error) {
+    console.error("[newsFeed] newsletter URL extraction failed:", error);
+    return undefined;
+  }
 }
 
 async function markScanned(env: Env, rowKeys: string[]): Promise<void> {
@@ -92,13 +131,18 @@ async function markScanned(env: Env, rowKeys: string[]): Promise<void> {
  * regardless of outcome, so a batch with no newsletters in it doesn't get
  * re-fetched on the next generation. Never throws — a failure here should
  * never block the rest of the day's feed generation. */
-export async function scanNewslettersForTopics(dbEnv: Env, llmEnv: LlmEnv, topicNames: string[]): Promise<NewsletterMatch[]> {
+export async function scanNewslettersForTopics(
+  dbEnv: Env,
+  llmEnv: LlmEnv,
+  accounts: GoogleAccountEnv[],
+  topicNames: string[]
+): Promise<NewsletterMatch[]> {
   if (topicNames.length === 0) return [];
 
   try {
     const sql = await db(dbEnv);
     const rows = (await sql.query(
-      `SELECT g.row_key, g.account_email, g.thread_id, g.sender, g.sender_email, g.subject, g.snippet
+      `SELECT g.row_key, g.account_email, g.id, g.thread_id, g.sender, g.sender_email, g.subject, g.snippet
        FROM gmail_emails g
        LEFT JOIN news_feed_scanned_emails s ON s.row_key = g.row_key
        WHERE s.row_key IS NULL
@@ -128,26 +172,35 @@ export async function scanNewslettersForTopics(dbEnv: Env, llmEnv: LlmEnv, topic
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
       });
-      const parsed = parseJsonLoose(result.text);
+      const parsed = parseJsonArrayLoose(result.text);
       if (Array.isArray(parsed)) raw = parsed.filter(isRawMatch);
     } catch (error) {
       console.error("[newsFeed] newsletter match call failed:", error);
     }
 
     const topicSet = new Set(topicNames);
-    const matches: NewsletterMatch[] = raw
-      .filter((m) => rowByKey.has(m.rowKey) && topicSet.has(m.topic))
-      .map((m) => {
-        const email = rowByKey.get(m.rowKey)!;
-        return {
-          rowKey: m.rowKey,
-          topicName: m.topic,
-          headline: m.headline,
-          summary: m.summary,
-          sourceUrl: gmailThreadUrl(email.thread_id, email.account_email),
-          sourceLabel: email.sender,
-        };
-      });
+    const accountByEmail = new Map(accounts.map((a) => [a.email, a]));
+    const genuineMatches = raw.filter((m) => rowByKey.has(m.rowKey) && topicSet.has(m.topic));
+
+    const matches: NewsletterMatch[] = [];
+    for (const m of genuineMatches) {
+      const email = rowByKey.get(m.rowKey)!;
+      const account = accountByEmail.get(email.account_email);
+      if (!account) continue;
+
+      let body: string;
+      try {
+        body = await getMessageBody(account, email.id);
+      } catch (error) {
+        console.error(`[newsFeed] failed to fetch newsletter body for ${m.rowKey}:`, error);
+        continue;
+      }
+
+      const url = await extractStoryUrl(dbEnv, llmEnv, body, m.headline, m.summary);
+      if (!url) continue; // no genuine direct link found — skip rather than fall back to a Gmail link
+
+      matches.push({ rowKey: m.rowKey, topicName: m.topic, headline: m.headline, summary: m.summary, sourceUrl: url, sourceLabel: email.sender });
+    }
 
     await markScanned(dbEnv, rows.map((r) => r.row_key));
     return matches;

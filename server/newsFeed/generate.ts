@@ -7,6 +7,7 @@
 // limit rather than a rigid even split.
 import { ensureSchema, getSql, type Env } from "../db.js";
 import { logModelCall } from "../costTracking/callLog.js";
+import type { GoogleAccountEnv } from "../google/accounts.js";
 import type { LlmEnv } from "../llm/env.js";
 import type { NtfyEnv } from "../notify/env.js";
 import { notify } from "../notify/ntfy.js";
@@ -97,13 +98,18 @@ async function getRecentSourceUrls(env: Env, days: number): Promise<Set<string>>
 /** Generates immediately regardless of whether today's feed already exists —
  * overwriting is harmless since it's gated by date_key, same "generate now"
  * shape as the weekly digest's manual trigger. */
-export async function generateNewsFeedNow(dbEnv: Env, llmEnv: LlmEnv, ntfyEnv: NtfyEnv): Promise<NewsFeedResult> {
+export async function generateNewsFeedNow(
+  dbEnv: Env,
+  llmEnv: LlmEnv,
+  ntfyEnv: NtfyEnv,
+  accounts: GoogleAccountEnv[]
+): Promise<NewsFeedResult> {
   const dateKey = todayKey();
   const topics = await listTopics(dbEnv);
   const recentUrls = await getRecentSourceUrls(dbEnv, DEDUP_LOOKBACK_DAYS);
 
   const newsletterMatches: NewsletterMatch[] =
-    topics.length > 0 ? await scanNewslettersForTopics(dbEnv, llmEnv, topics.map((t) => t.name)) : [];
+    topics.length > 0 ? await scanNewslettersForTopics(dbEnv, llmEnv, accounts, topics.map((t) => t.name)) : [];
   const newsletterByTopic = new Map<string, NewsletterMatch[]>();
   for (const match of newsletterMatches) {
     const list = newsletterByTopic.get(match.topicName) ?? [];
@@ -192,9 +198,9 @@ export async function generateNewsFeedNow(dbEnv: Env, llmEnv: LlmEnv, ntfyEnv: N
 
 /** Check-on-open entry point: returns today's cached feed if it already
  * exists, generates it otherwise. */
-export async function checkNewsFeed(dbEnv: Env, llmEnv: LlmEnv, ntfyEnv: NtfyEnv): Promise<NewsFeedResult> {
+export async function checkNewsFeed(dbEnv: Env, llmEnv: LlmEnv, ntfyEnv: NtfyEnv, accounts: GoogleAccountEnv[]): Promise<NewsFeedResult> {
   const dateKey = todayKey();
   const cached = await getCached(dbEnv, dateKey);
   if (cached) return cached;
-  return generateNewsFeedNow(dbEnv, llmEnv, ntfyEnv);
+  return generateNewsFeedNow(dbEnv, llmEnv, ntfyEnv, accounts);
 }
