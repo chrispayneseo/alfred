@@ -31,6 +31,9 @@ function getMultiSelect(page: AnyPage, prop: string): string[] {
 function getUrl(page: AnyPage, prop: string): string | undefined {
   return page.properties?.[prop]?.url ?? undefined;
 }
+function getNumber(page: AnyPage, prop: string): number | undefined {
+  return page.properties?.[prop]?.number ?? undefined;
+}
 
 const richText = (content: string) => [{ type: "text" as const, text: { content } }];
 
@@ -91,6 +94,8 @@ export interface RecipeRecord {
   ingredients?: string[];
   method?: string;
   tags?: string[];
+  /** 1-5, unset until the user rates it. */
+  rating?: number;
 }
 
 export interface RecipeDetails {
@@ -506,8 +511,17 @@ export class NotionRepo {
         ingredients: ingredientsText ? ingredientsText.split("\n") : undefined,
         method: getRichText(page, RECIPES_PROPS.method) || undefined,
         tags: getMultiSelect(page, RECIPES_PROPS.tags),
+        rating: getNumber(page, RECIPES_PROPS.rating),
       };
     });
+  }
+
+  /** `rating` is 1-5, or `null` to clear it. */
+  async setRecipeRating(recipeId: string, rating: number | null): Promise<void> {
+    await this.notion.pages.update({
+      page_id: recipeId,
+      properties: { [RECIPES_PROPS.rating]: { number: rating } },
+    } as never);
   }
 
   /** `details` is set when the recipe was added from a URL (Recipe Bank's

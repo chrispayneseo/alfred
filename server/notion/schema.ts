@@ -46,6 +46,7 @@ export const RECIPES_PROPS = {
   ingredients: "Ingredients",
   method: "Method",
   tags: "Tags",
+  rating: "Rating",
 } as const;
 
 export const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner", "Snack", "Baking"] as const;

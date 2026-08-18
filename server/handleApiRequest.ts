@@ -834,6 +834,17 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(200, { ok: true });
     }
 
+    const recipeRatingMatch = pathname.match(/^\/api\/recipes\/([^/]+)\/rating$/);
+    if (method === "PATCH" && recipeRatingMatch) {
+      const body = await readBody();
+      const rating = body.rating === null ? null : typeof body.rating === "number" ? body.rating : undefined;
+      if (rating === undefined || (rating !== null && (!Number.isInteger(rating) || rating < 1 || rating > 5))) {
+        return json(400, { error: "rating must be an integer 1-5, or null to clear" });
+      }
+      await repo.setRecipeRating(recipeRatingMatch[1], rating);
+      return json(200, { ok: true });
+    }
+
     // On-demand recipe email — same selection + send logic as the automatic
     // Sunday-noon check, but bypasses its day/time/idempotency gate entirely
     // (server/recipes/weeklyEmail.ts's generateAndSendRecipeEmail, called

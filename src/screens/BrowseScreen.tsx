@@ -19,6 +19,7 @@ import {
   extractRecipeFromUrl,
   fetchRecipes,
   generateRecipeSuggestions,
+  setRecipeRating,
   type ApiRecipe,
   type MealType,
   type RecipeEmailResult,
@@ -126,6 +127,19 @@ export function BrowseScreen() {
     setRecipes((p) => p.filter((r) => r.id !== recipe.id));
     try {
       await deleteRecipe(recipe.id);
+    } catch {
+      setRecipes(prev);
+    }
+  }
+
+  async function rateRecipe(recipe: ApiRecipe, star: number) {
+    // Clicking the currently-set top star clears the rating; otherwise sets
+    // it to the clicked star.
+    const next = recipe.rating === star ? null : star;
+    const prev = recipes;
+    setRecipes((p) => p.map((r) => (r.id === recipe.id ? { ...r, rating: next ?? undefined } : r)));
+    try {
+      await setRecipeRating(recipe.id, next);
     } catch {
       setRecipes(prev);
     }
@@ -384,28 +398,44 @@ export function BrowseScreen() {
                 )}
                 <ul className="space-y-2">
                   {forMealType.map((recipe) => (
-                    <li key={recipe.id} className="flex items-center justify-between gap-3">
-                      {recipe.url ? (
-                        <a
-                          href={recipe.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="min-w-0 flex-1 truncate text-sm text-ink underline-offset-2 hover:underline dark:text-ink-dark"
+                    <li key={recipe.id} className="space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        {recipe.url ? (
+                          <a
+                            href={recipe.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="min-w-0 flex-1 truncate text-sm text-ink underline-offset-2 hover:underline dark:text-ink-dark"
+                          >
+                            {recipe.title}
+                          </a>
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate text-sm text-ink dark:text-ink-dark">{recipe.title}</span>
+                        )}
+                        <button
+                          onClick={() => removeRecipe(recipe)}
+                          aria-label="Remove recipe"
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
                         >
-                          {recipe.title}
-                        </a>
-                      ) : (
-                        <span className="min-w-0 flex-1 truncate text-sm text-ink dark:text-ink-dark">{recipe.title}</span>
-                      )}
-                      <button
-                        onClick={() => removeRecipe(recipe)}
-                        aria-label="Remove recipe"
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
-                      >
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                          <path d="M6 6l12 12M18 6L6 18" />
-                        </svg>
-                      </button>
+                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <path d="M6 6l12 12M18 6L6 18" />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="flex gap-0.5">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            onClick={() => rateRecipe(recipe, star)}
+                            aria-label={`Rate ${star} star${star === 1 ? "" : "s"}`}
+                            className={`text-sm leading-none transition-colors ${
+                              (recipe.rating ?? 0) >= star ? "text-ink dark:text-ink-dark" : "text-ink-faint/40 dark:text-ink-faint-dark/40"
+                            }`}
+                          >
+                            ★
+                          </button>
+                        ))}
+                      </div>
                     </li>
                   ))}
                 </ul>

@@ -12,6 +12,7 @@ export interface ApiRecipe {
   ingredients?: string[];
   method?: string;
   tags?: string[];
+  rating?: number;
 }
 
 export interface RecipeEmailResult {
@@ -64,6 +65,11 @@ export function createRecipe(title: string, mealType: MealType, details?: Recipe
 
 export async function deleteRecipe(recipeId: string): Promise<void> {
   await request(`/api/recipes/${recipeId}`, { method: "DELETE" });
+}
+
+/** `rating` is 1-5, or `null` to clear it. */
+export async function setRecipeRating(recipeId: string, rating: number | null): Promise<void> {
+  await request(`/api/recipes/${recipeId}/rating`, { method: "PATCH", body: JSON.stringify({ rating }) });
 }
 
 /** Fetches a recipe webpage and returns the extracted structured recipe
