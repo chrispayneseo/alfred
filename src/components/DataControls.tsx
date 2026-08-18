@@ -30,7 +30,7 @@ function ExportControl() {
   }
 
   return (
-    <div className="mb-4 rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+    <div className="mb-4 max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
       <p className="mb-2 text-sm text-ink-soft dark:text-ink-soft-dark">
         Download what Alfred caches locally — email metadata, nudge history, and a summary of connected
         integrations and their scopes. Not included: your Notion content (already yours, exportable from
@@ -69,7 +69,7 @@ function WipeControl() {
 
   if (done) {
     return (
-      <div className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+      <div className="max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
         <p className="text-sm text-ink-soft dark:text-ink-soft-dark">
           Disconnected. Google access was revoked and local caches cleared — Alfred is back to a fresh
           "not connected" state. Your Notion workspace wasn't touched.
@@ -79,7 +79,7 @@ function WipeControl() {
   }
 
   return (
-    <div className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+    <div className="max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
       <p className="mb-2 text-sm text-ink-soft dark:text-ink-soft-dark">
         Revokes Google access (Calendar + Gmail) and clears everything Alfred caches locally. Your Notion
         workspace and its content are never touched. This can't be undone.

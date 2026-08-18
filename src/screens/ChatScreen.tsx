@@ -237,7 +237,7 @@ export function ChatScreen() {
               </div>
             )}
             <p
-              className={`inline-block max-w-[85%] rounded-2xl px-4 py-2.5 text-left text-sm ${
+              className={`inline-block max-w-[85%] lg:max-w-xl rounded-2xl px-4 py-2.5 text-left text-sm ${
                 message.role === "user"
                   ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
                   : message.isError
@@ -251,7 +251,7 @@ export function ChatScreen() {
               <p className="mt-1 text-[11px] text-ink-faint dark:text-ink-faint-dark">{message.note}</p>
             )}
             {message.eventProposal && (
-              <div className="mt-2 inline-block w-full max-w-[85%] rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
+              <div className="mt-2 inline-block w-full max-w-[85%] lg:max-w-xl rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
                 <p className="text-sm text-ink dark:text-ink-dark">{message.eventProposal.title}</p>
                 <p className="mt-0.5 text-xs text-ink-faint dark:text-ink-faint-dark">
                   {formatEventProposal(message.eventProposal)} · {message.eventProposal.account}
@@ -298,7 +298,7 @@ export function ChatScreen() {
               </div>
             )}
             {message.locationReminderProposal && (
-              <div className="mt-2 inline-block w-full max-w-[85%] rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
+              <div className="mt-2 inline-block w-full max-w-[85%] lg:max-w-xl rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
                 <p className="text-sm text-ink dark:text-ink-dark">{message.locationReminderProposal.text}</p>
                 <p className="mt-0.5 text-xs text-ink-faint dark:text-ink-faint-dark">
                   When: {message.locationReminderProposal.locationTrigger}
@@ -345,7 +345,7 @@ export function ChatScreen() {
               </div>
             )}
             {message.recipeProposal && (
-              <div className="mt-2 inline-block w-full max-w-[85%] rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
+              <div className="mt-2 inline-block w-full max-w-[85%] lg:max-w-xl rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">
                 <p className="text-sm text-ink dark:text-ink-dark">{message.recipeProposal.title}</p>
 
                 {(message.recipeProposalStatus === "pending" || message.recipeProposalStatus === "error") && (

@@ -27,7 +27,7 @@ function LocationRow() {
   }
 
   return (
-    <div className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+    <div className="max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-ink dark:text-ink-dark">Location</p>
         <button
@@ -128,7 +128,7 @@ export function PermissionsTrust() {
       {rows
         .filter((r) => r.show)
         .map((row) => (
-          <div key={row.name} className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+          <div key={row.name} className="max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
             <p className="text-sm font-medium text-ink dark:text-ink-dark">{row.name}</p>
             <p className="mt-1 text-xs leading-relaxed text-ink-soft dark:text-ink-soft-dark">{row.detail}</p>
           </div>

@@ -6,5 +6,5 @@
 // to the content's right edge instead of the raw viewport corner.
 export const SIDEBAR_WIDTH = "lg:w-64";
 export const SIDEBAR_OFFSET = "lg:pl-64";
-export const CONTENT_MAX_WIDTH = "max-w-md lg:max-w-3xl";
+export const CONTENT_MAX_WIDTH = "max-w-md lg:max-w-[90rem]";
 export const CONTENT_PADDING_X = "px-5 lg:px-10";
