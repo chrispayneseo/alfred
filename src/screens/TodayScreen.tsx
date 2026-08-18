@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import type { Layout } from "react-grid-layout";
 import { AccountTag } from "../components/AccountTag";
 import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
 import { Evie } from "../components/Evie";
@@ -9,6 +10,7 @@ import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
 import { Screen } from "../components/Screen";
+import { TodayTileGrid, type TileDef } from "../components/TodayTileGrid";
 import { UndoToast } from "../components/UndoToast";
 import { WeatherSummary } from "../components/WeatherSummary";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
@@ -16,6 +18,7 @@ import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "..
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
 import { fetchEventWeather, type EventWeather } from "../integrations/weather/api";
 import { buildAccountColorMap } from "../lib/accountColor";
+import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useLiveLocation } from "../hooks/useLiveLocation";
 import { useUndoableAction } from "../hooks/useUndoableAction";
 import {
@@ -29,6 +32,23 @@ import {
   type ApiNote,
   type ApiTask,
 } from "../integrations/notion/api";
+
+// Desktop tile board default arrangement (4-column grid, see
+// TodayTileGrid). "This week", Recurring/Project-grouping suggestions, and
+// CoachPlan are deliberately excluded from the tile set — they're designed
+// to disappear entirely when there's nothing to show (see
+// WeeklyDigestTeaser's own comment on this), which doesn't work as a fixed,
+// always-present, user-positioned tile. They render as banners above the
+// board instead, same role they play above the stack on mobile.
+const TILE_MIN = { minW: 1, minH: 2, maxW: 4, maxH: 6 } as const;
+const DEFAULT_TODAY_LAYOUT: Layout = [
+  { i: "schedule", x: 0, y: 0, w: 2, h: 4, ...TILE_MIN },
+  { i: "nudges", x: 2, y: 0, w: 1, h: 2, ...TILE_MIN },
+  { i: "evie", x: 3, y: 0, w: 1, h: 2, ...TILE_MIN },
+  { i: "flagged", x: 2, y: 2, w: 2, h: 2, ...TILE_MIN },
+  { i: "openTasks", x: 0, y: 4, w: 2, h: 3, ...TILE_MIN },
+  { i: "recentNotes", x: 2, y: 4, w: 2, h: 3, ...TILE_MIN },
+];
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
 
@@ -108,6 +128,7 @@ export function TodayScreen() {
   const [eventWeather, setEventWeather] = useState<Map<string, EventWeather>>(new Map());
   const { coords, refetch: refetchLocation } = useLiveLocation();
   const { pending: undoState, trigger: triggerUndo, runUndo } = useUndoableAction();
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
     fetchEventWeather()
@@ -208,6 +229,135 @@ export function TodayScreen() {
   const accountColorMap = buildAccountColorMap(accounts);
   const showAccountTags = accounts.length > 1;
 
+  // Shared between the mobile stack and the desktop tile board below — same
+  // content either way, just wrapped differently (a plain <section> on
+  // mobile, a draggable/resizable Tile on desktop).
+  const scheduleContent = (
+    <>
+      {calendarState === "loading" && (
+        <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading your schedule…</p>
+      )}
+
+      {(calendarState === "not_connected" || calendarState === "reconnect_required") && (
+        <div className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
+          <p className="mb-2 text-sm text-ink-soft dark:text-ink-soft-dark">
+            {calendarState === "not_connected"
+              ? "Connect Google Calendar to see your schedule here."
+              : "Your calendar connection needs to be refreshed."}
+          </p>
+          <a
+            href="/api/google/auth/start"
+            className="inline-block rounded-full bg-ink px-4 py-1.5 text-xs font-medium text-paper dark:bg-ink-dark dark:text-paper-dark"
+          >
+            {calendarState === "not_connected" ? "Connect calendar" : "Reconnect calendar"}
+          </a>
+        </div>
+      )}
+
+      {calendarState === "error" && (
+        <p className="text-sm text-claude">Couldn't load your calendar right now. Try again shortly.</p>
+      )}
+
+      {calendarState === "ok" && (
+        <>
+          <EventList events={todayEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} eventWeather={eventWeather} />
+          <div className="mt-5">
+            <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-faint/80 dark:text-ink-faint-dark/80">
+              Tomorrow
+            </h3>
+            <EventList events={tomorrowEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} eventWeather={eventWeather} />
+          </div>
+          {failedAccounts.length > 0 && (
+            <p className="mt-4 text-xs text-ink-faint dark:text-ink-faint-dark">
+              {failedAccounts.join(", ")} needs reconnecting —{" "}
+              <Link to="/settings" className="underline">
+                see Settings
+              </Link>
+              .
+            </p>
+          )}
+        </>
+      )}
+    </>
+  );
+
+  const openTasksContent = (
+    <>
+      {tasksLoading && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading tasks…</p>}
+      {tasksError && <p className="text-sm text-claude">{tasksError}</p>}
+      {!tasksLoading && !tasksError && (
+        <ul className="space-y-2.5">
+          {openTasks.length === 0 && (
+            <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing open.</p>
+          )}
+          {openTasks.map((task) => (
+            <li key={task.id} className="flex items-start gap-3">
+              <button
+                onClick={() => toggleTask(task)}
+                aria-label="Mark as done"
+                className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-faint transition-colors hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1 pt-1">
+                <p className="text-sm text-ink dark:text-ink-dark">{task.title}</p>
+                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
+                  {task.due ?? "No due date"}
+                  {task.projectName ? ` · ${task.projectName}` : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => removeTask(task)}
+                aria-label="Remove task"
+                className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+
+  const recentNotesContent = (
+    <ul className="space-y-3">
+      {recentNotes.length === 0 && (
+        <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</p>
+      )}
+      {recentNotes.map((note) => (
+        <li key={note.id} className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm text-ink dark:text-ink-dark">{note.title}</p>
+            <p className="text-xs text-ink-faint dark:text-ink-faint-dark">{note.projectName ?? "Unsorted"}</p>
+          </div>
+          <button
+            onClick={() => removeNote(note)}
+            aria-label="Remove note"
+            className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+          >
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+
+  const tiles: TileDef[] = [
+    { id: "schedule", title: "Schedule", content: scheduleContent },
+    { id: "nudges", title: "Nudges", content: <Nudges /> },
+    { id: "evie", title: "Evie", content: <Evie /> },
+    { id: "flagged", title: "Flagged", content: <GmailFlagged /> },
+    { id: "openTasks", title: "Open tasks", content: openTasksContent },
+    { id: "recentNotes", title: "Recent notes", content: recentNotesContent },
+  ];
+
   return (
     <Screen
       title="Today"
@@ -238,159 +388,67 @@ export function TodayScreen() {
 
       <WeatherSummary coords={coords} />
 
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-          Schedule
-        </h2>
+      {isDesktop ? (
+        <>
+          <WeeklyDigestTeaser />
+          <RecurringSuggestions />
+          <ProjectGroupingSuggestions />
+          <CoachPlanTeaser />
+          <TodayTileGrid tiles={tiles} defaultLayout={DEFAULT_TODAY_LAYOUT} storageKey="alfred:today-layout-v1" />
+        </>
+      ) : (
+        <>
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              Schedule
+            </h2>
+            {scheduleContent}
+          </section>
 
-        {calendarState === "loading" && (
-          <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading your schedule…</p>
-        )}
+          <WeeklyDigestTeaser />
 
-        {(calendarState === "not_connected" || calendarState === "reconnect_required") && (
-          <div className="rounded-xl border border-line px-4 py-3 dark:border-line-dark">
-            <p className="mb-2 text-sm text-ink-soft dark:text-ink-soft-dark">
-              {calendarState === "not_connected"
-                ? "Connect Google Calendar to see your schedule here."
-                : "Your calendar connection needs to be refreshed."}
-            </p>
-            <a
-              href="/api/google/auth/start"
-              className="inline-block rounded-full bg-ink px-4 py-1.5 text-xs font-medium text-paper dark:bg-ink-dark dark:text-paper-dark"
-            >
-              {calendarState === "not_connected" ? "Connect calendar" : "Reconnect calendar"}
-            </a>
-          </div>
-        )}
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              Nudges
+            </h2>
+            <Nudges />
+          </section>
 
-        {calendarState === "error" && (
-          <p className="text-sm text-claude">Couldn't load your calendar right now. Try again shortly.</p>
-        )}
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              Evie
+            </h2>
+            <Evie />
+          </section>
 
-        {calendarState === "ok" && (
-          <>
-            <EventList events={todayEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} eventWeather={eventWeather} />
-            <div className="mt-5">
-              <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-faint/80 dark:text-ink-faint-dark/80">
-                Tomorrow
-              </h3>
-              <EventList events={tomorrowEvents} colorMap={accountColorMap} showAccountTags={showAccountTags} eventWeather={eventWeather} />
-            </div>
-            {failedAccounts.length > 0 && (
-              <p className="mt-4 text-xs text-ink-faint dark:text-ink-faint-dark">
-                {failedAccounts.join(", ")} needs reconnecting —{" "}
-                <Link to="/settings" className="underline">
-                  see Settings
-                </Link>
-                .
-              </p>
-            )}
-          </>
-        )}
-      </section>
+          <RecurringSuggestions />
 
-      <WeeklyDigestTeaser />
+          <ProjectGroupingSuggestions />
 
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-          Nudges
-        </h2>
-        <Nudges />
-      </section>
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              Flagged
+            </h2>
+            <GmailFlagged />
+          </section>
 
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-          Evie
-        </h2>
-        <Evie />
-      </section>
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              Open tasks
+            </h2>
+            {openTasksContent}
+          </section>
 
-      <RecurringSuggestions />
+          <CoachPlanTeaser />
 
-      <ProjectGroupingSuggestions />
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-          Flagged
-        </h2>
-        <GmailFlagged />
-      </section>
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-          Open tasks
-        </h2>
-        {tasksLoading && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading tasks…</p>}
-        {tasksError && <p className="text-sm text-claude">{tasksError}</p>}
-        {!tasksLoading && !tasksError && (
-          <ul className="space-y-2.5">
-            {openTasks.length === 0 && (
-              <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing open.</p>
-            )}
-            {openTasks.map((task) => (
-              <li key={task.id} className="flex items-start gap-3">
-                <button
-                  onClick={() => toggleTask(task)}
-                  aria-label="Mark as done"
-                  className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-faint transition-colors hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
-                >
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 13l4 4L19 7" />
-                  </svg>
-                </button>
-                <div className="min-w-0 flex-1 pt-1">
-                  <p className="text-sm text-ink dark:text-ink-dark">{task.title}</p>
-                  <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
-                    {task.due ?? "No due date"}
-                    {task.projectName ? ` · ${task.projectName}` : ""}
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeTask(task)}
-                  aria-label="Remove task"
-                  className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
-                >
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <CoachPlanTeaser />
-
-      <section>
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-          Recent notes
-        </h2>
-        <ul className="space-y-3">
-          {recentNotes.length === 0 && (
-            <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing here yet.</p>
-          )}
-          {recentNotes.map((note) => (
-            <li key={note.id} className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-ink dark:text-ink-dark">{note.title}</p>
-                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
-                  {note.projectName ?? "Unsorted"}
-                </p>
-              </div>
-              <button
-                onClick={() => removeNote(note)}
-                aria-label="Remove note"
-                className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
-              >
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+          <section>
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              Recent notes
+            </h2>
+            {recentNotesContent}
+          </section>
+        </>
+      )}
       {undoState && <UndoToast message={undoState.message} onUndo={runUndo} />}
     </Screen>
   );
