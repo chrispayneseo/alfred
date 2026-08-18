@@ -20,3 +20,11 @@ jobs:
         run: |
           curl -sS -o /dev/null -w "status: %{http_code}\n" -X POST \
             "https://alfred-five-livid.vercel.app/api/cron/gmail-refresh?token=${{ secrets.GMAIL_CRON_SECRET }}"
+
+      # Runs right after the sync above so it's checking freshly-synced mail
+      # — same token, same cadence. Adjust independently by giving this its
+      # own schedule/workflow later if 30 minutes turns out to be wrong for it.
+      - name: Check Evie (school email monitor)
+        run: |
+          curl -sS -o /dev/null -w "status: %{http_code}\n" -X POST \
+            "https://alfred-five-livid.vercel.app/api/cron/evie-check?token=${{ secrets.GMAIL_CRON_SECRET }}"

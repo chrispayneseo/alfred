@@ -24,6 +24,7 @@ const FEATURE_DISPLAY_KEY: Record<FeatureBreakdownEntry["feature"], string> = {
   search_console_query: "search_console_query",
   recipe_extraction: "recipe_extraction",
   recipe_weather_ranking: "recipe_extraction",
+  evie_scan_classify: "evie_scan",
 };
 
 const FEATURE_LABEL: Record<string, string> = {
@@ -37,6 +38,7 @@ const FEATURE_LABEL: Record<string, string> = {
   project_grouping: "Project grouping suggestions",
   search_console_query: "Search Console Q&A",
   recipe_extraction: "Recipe extraction",
+  evie_scan: "Evie (school emails)",
 };
 
 function formatUsd(value: number): string {

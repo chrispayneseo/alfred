@@ -14,7 +14,8 @@ export type ModelFeature =
   | "project_grouping"
   | "search_console_query"
   | "recipe_extraction"
-  | "recipe_weather_ranking";
+  | "recipe_weather_ranking"
+  | "evie_scan_classify";
 
 export interface CallLogEntry {
   provider: ModelProvider;

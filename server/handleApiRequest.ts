@@ -46,6 +46,14 @@ import { transcribeAudio } from "./llm/openai.js";
 import type { ChatTurn } from "./llm/types.js";
 import { runNudgeCheck } from "./nudges/check.js";
 import { snoozeNudge } from "./nudges/nudgeStore.js";
+import { runEvieCheck } from "./evie/check.js";
+import {
+  listOpenActionItems,
+  listPendingEventProposals,
+  markProposalAccepted,
+  markProposalDismissed,
+  resolveActionItem,
+} from "./evie/store.js";
 import {
   checkWeeklyDigest,
   generateWeeklyDigestNow,
@@ -515,6 +523,37 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(200, { ok: true });
     }
 
+    // Evie — school email monitor. Event proposals go through the same
+    // review-then-confirm shape as recurring_suggestions: the frontend calls
+    // the existing /api/calendar/create-event (same trust relationship Chat's
+    // proposal card already has) and, on success, this route just flips the
+    // proposal's status so it drops off the pending list.
+    if (method === "GET" && pathname === "/api/evie/proposals") {
+      return json(200, await listPendingEventProposals(env));
+    }
+
+    const evieProposalAcceptMatch = pathname.match(/^\/api\/evie\/proposals\/([^/]+)\/accept$/);
+    if (method === "POST" && evieProposalAcceptMatch) {
+      await markProposalAccepted(env, evieProposalAcceptMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    const evieProposalDismissMatch = pathname.match(/^\/api\/evie\/proposals\/([^/]+)\/dismiss$/);
+    if (method === "POST" && evieProposalDismissMatch) {
+      await markProposalDismissed(env, evieProposalDismissMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    if (method === "GET" && pathname === "/api/evie/action-items") {
+      return json(200, await listOpenActionItems(env));
+    }
+
+    const evieActionItemDoneMatch = pathname.match(/^\/api\/evie\/action-items\/([^/]+)\/done$/);
+    if (method === "POST" && evieActionItemDoneMatch) {
+      await resolveActionItem(env, evieActionItemDoneMatch[1]);
+      return json(200, { ok: true });
+    }
+
     if (method === "GET" && pathname === "/api/digest/weekly/settings") {
       return json(200, { triggerDay: await getDigestTriggerDay(env) });
     }
@@ -613,6 +652,23 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         })
       );
       return json(200, { ok: true, sync, scan });
+    }
+
+    // Same token-gate as gmail-refresh above, called as a second step in the
+    // same GitHub Actions workflow right after it — runs against whatever
+    // gmail-refresh just synced, on the same schedule, adjustable in one
+    // place (the workflow YAML) rather than a second cron/schedule to manage.
+    if (method === "POST" && pathname === "/api/cron/evie-check") {
+      const token = searchParams.get("token") ?? "";
+      if (!isValidToken(token, loadGmailCronSecret(env))) {
+        return json(403, { error: "Invalid or missing token." });
+      }
+      const accounts = await loadGoogleAccounts(env);
+      const account = accounts.find((a) => a.email === WRITABLE_CALENDAR_ACCOUNT);
+      if (!account) return json(200, { ok: true, skipped: "not_connected" });
+
+      const result = await runEvieCheck(env, llmEnv, loadNtfyEnv(env), account);
+      return json(200, { ok: true, ...result });
     }
 
     if (method === "GET" && pathname === "/api/digest/weekly") {

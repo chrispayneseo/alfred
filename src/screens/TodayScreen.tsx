@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AccountTag } from "../components/AccountTag";
 import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
+import { Evie } from "../components/Evie";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { LocationPrompt } from "../components/LocationPrompt";
 import { Nudges } from "../components/Nudges";
@@ -266,6 +267,13 @@ export function TodayScreen() {
           Nudges
         </h2>
         <Nudges />
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+          Evie
+        </h2>
+        <Evie />
       </section>
 
       <RecurringSuggestions />

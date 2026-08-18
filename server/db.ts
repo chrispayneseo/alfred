@@ -164,6 +164,49 @@ const SCHEMA_STATEMENTS = [
     week_key TEXT PRIMARY KEY,
     sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  // Evie (school email monitor): which gmail_emails rows have already been
+  // checked against the narrow sender+keyword filter, independent of
+  // Alfred's general `scanned` flag on gmail_emails (a different concern —
+  // that one drives the Notion-filing classifier, this one drives Evie).
+  `CREATE TABLE IF NOT EXISTS evie_scanned_messages (
+    row_key TEXT PRIMARY KEY,
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // Background-job-generated, reviewed later — same lifecycle shape as
+  // recurring_suggestions, not Chat's ephemeral in-React-state proposals
+  // (those are tied to one live message; these need to survive a refresh).
+  // Accepting one calls the same /api/calendar/create-event Chat's proposal
+  // card uses, then flips status here.
+  `CREATE TABLE IF NOT EXISTS evie_event_proposals (
+    id TEXT PRIMARY KEY,
+    gmail_row_key TEXT NOT NULL,
+    account_email TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    date TEXT NOT NULL,
+    start_time TEXT,
+    end_time TEXT,
+    location TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_evie_event_proposals_status ON evie_event_proposals(status)`,
+  // Non-event action items (permission slips, payments, replies) detected by
+  // the same check — pushed once via ntfy at insert time (no separate
+  // throttle table needed, see check.ts), shown on Today until resolved.
+  `CREATE TABLE IF NOT EXISTS evie_action_items (
+    id TEXT PRIMARY KEY,
+    gmail_row_key TEXT NOT NULL,
+    account_email TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    due_date TEXT,
+    resolved BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_evie_action_items_resolved ON evie_action_items(resolved)`,
 ];
 
 let schemaReady: Promise<void> | undefined;
