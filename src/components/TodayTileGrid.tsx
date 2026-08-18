@@ -5,7 +5,7 @@ import "react-resizable/css/styles.css";
 
 export interface TileDef {
   id: string;
-  title: string;
+  title: ReactNode;
   content: ReactNode;
 }
 

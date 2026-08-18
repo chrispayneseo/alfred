@@ -6,7 +6,6 @@ import {
   type LeedsTicketsState,
   type TicketWindow,
 } from "../integrations/leedsTickets/api";
-import { LeedsBadge } from "./LeedsBadge";
 
 function formatCountdown(targetIso: string, nowMs: number): string {
   const diffMs = new Date(targetIso).getTime() - nowMs;
@@ -39,12 +38,42 @@ function phaseDisplay(w: TicketWindow, nowMs: number): PhaseDisplay {
   return { state: "closed_ballot", label: "Ballot closed — awaiting result" };
 }
 
-/** "Tickets" section on Today — live countdowns for eligible ticket-sale/
- * ballot windows, plus a compact needs-review list for phases whose
- * eligibility or timing couldn't be confidently extracted. Ticks locally
- * every minute rather than re-fetching, since the underlying data only
- * meaningfully changes on a new scan (already re-checked whenever this
- * mounts, i.e. every Today open). */
+function targetMs(w: TicketWindow): number {
+  return new Date(w.closesAt ?? w.opensAt).getTime();
+}
+
+/** One row per fixture, not per phase — a fixture's several sale/ballot
+ * phases (direct sale, ballot application, ticket exchange, ...) collapse
+ * to whichever is earliest and not yet a fully-resolved closed ballot. A
+ * ballot phase whose deadline has passed is skipped in favor of the next
+ * phase automatically; a currently-open direct-sale phase is never skipped
+ * this way (it has no deadline of its own to pass) — it stays the
+ * displayed phase until manually marked done, same as before. */
+function currentPhasePerFixture(windows: TicketWindow[], nowMs: number): TicketWindow[] {
+  const byFixture = new Map<string, TicketWindow[]>();
+  for (const w of windows) {
+    const key = `${w.opponent}|${w.homeAway}`;
+    const list = byFixture.get(key);
+    if (list) list.push(w);
+    else byFixture.set(key, [w]);
+  }
+
+  const current: TicketWindow[] = [];
+  for (const phases of byFixture.values()) {
+    const sorted = [...phases].sort((a, b) => targetMs(a) - targetMs(b));
+    const next = sorted.find((w) => phaseDisplay(w, nowMs).state !== "closed_ballot") ?? sorted[sorted.length - 1];
+    current.push(next);
+  }
+  return current.sort((a, b) => targetMs(a) - targetMs(b));
+}
+
+/** Tile content for the "Tickets" section (desktop grid tile / mobile
+ * section — the heading with the club-colors badge lives in the parent,
+ * since as a tile this needs to stay present with an empty state rather
+ * than vanishing, matching how Nudges/Evie/Flagged behave as tiles). Ticks
+ * locally every minute for the live countdown rather than re-fetching,
+ * since the underlying data only meaningfully changes on a new scan
+ * (already re-checked whenever this mounts, i.e. every Today open). */
 export function LeedsTickets() {
   const [data, setData] = useState<LeedsTicketsState>();
   const [busyId, setBusyId] = useState<string>();
@@ -81,18 +110,19 @@ export function LeedsTickets() {
     }
   }
 
-  if (!data || (data.windows.length === 0 && data.review.length === 0)) return null;
+  if (!data) return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Checking…</p>;
+
+  const fixtures = currentPhasePerFixture(data.windows, now);
+
+  if (fixtures.length === 0 && data.review.length === 0) {
+    return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing on sale right now.</p>;
+  }
 
   return (
-    <section className="mb-8">
-      <h2 className="mb-3 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
-        <LeedsBadge size={14} />
-        Tickets
-      </h2>
-
-      {data.windows.length > 0 && (
+    <div>
+      {fixtures.length > 0 && (
         <ul className="space-y-2">
-          {data.windows.map((w) => {
+          {fixtures.map((w) => {
             const display = phaseDisplay(w, now);
             const isLive = display.state === "open" || display.state === "closed_ballot";
             return (
@@ -126,7 +156,7 @@ export function LeedsTickets() {
       )}
 
       {data.review.length > 0 && (
-        <div className={data.windows.length > 0 ? "mt-4" : undefined}>
+        <div className={fixtures.length > 0 ? "mt-4" : undefined}>
           <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
             Needs review
           </p>
@@ -149,6 +179,6 @@ export function LeedsTickets() {
           </ul>
         </div>
       )}
-    </section>
+    </div>
   );
 }

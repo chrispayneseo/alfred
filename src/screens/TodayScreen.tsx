@@ -5,6 +5,7 @@ import { AccountTag } from "../components/AccountTag";
 import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
 import { Evie } from "../components/Evie";
 import { GmailFlagged } from "../components/GmailFlagged";
+import { LeedsBadge } from "../components/LeedsBadge";
 import { LeedsTickets } from "../components/LeedsTickets";
 import { LocationPrompt } from "../components/LocationPrompt";
 import { Nudges } from "../components/Nudges";
@@ -50,6 +51,7 @@ const DEFAULT_TODAY_LAYOUT: Layout = [
   { i: "flagged", x: 2, y: 2, w: 2, h: 2, ...TILE_MIN },
   { i: "openTasks", x: 0, y: 4, w: 2, h: 3, ...TILE_MIN },
   { i: "recentNotes", x: 2, y: 4, w: 2, h: 3, ...TILE_MIN },
+  { i: "tickets", x: 0, y: 7, w: 2, h: 3, ...TILE_MIN },
 ];
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
@@ -358,6 +360,16 @@ export function TodayScreen() {
     { id: "flagged", title: "Flagged", content: <GmailFlagged /> },
     { id: "openTasks", title: "Open tasks", content: openTasksContent },
     { id: "recentNotes", title: "Recent notes", content: recentNotesContent },
+    {
+      id: "tickets",
+      title: (
+        <span className="flex items-center gap-1.5">
+          <LeedsBadge size={12} />
+          Tickets
+        </span>
+      ),
+      content: <LeedsTickets />,
+    },
   ];
 
   return (
@@ -397,7 +409,6 @@ export function TodayScreen() {
           <RecurringSuggestions />
           <ProjectGroupingSuggestions />
           <CoachPlanTeaser />
-          <LeedsTickets />
           <TodayTileGrid tiles={tiles} defaultLayout={DEFAULT_TODAY_LAYOUT} storageKey="alfred:today-layout-v1" />
         </>
       ) : (
@@ -447,7 +458,13 @@ export function TodayScreen() {
 
           <CoachPlanTeaser />
 
-          <LeedsTickets />
+          <section className="mb-8">
+            <h2 className="mb-3 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              <LeedsBadge size={12} />
+              Tickets
+            </h2>
+            <LeedsTickets />
+          </section>
 
           <section>
             <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
