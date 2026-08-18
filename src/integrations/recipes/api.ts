@@ -67,6 +67,10 @@ export async function deleteRecipe(recipeId: string): Promise<void> {
   await request(`/api/recipes/${recipeId}`, { method: "DELETE" });
 }
 
+export async function restoreRecipe(recipeId: string): Promise<void> {
+  await request(`/api/recipes/${recipeId}/restore`, { method: "PATCH" });
+}
+
 /** `rating` is 1-5, or `null` to clear it. */
 export async function setRecipeRating(recipeId: string, rating: number | null): Promise<void> {
   await request(`/api/recipes/${recipeId}/rating`, { method: "PATCH", body: JSON.stringify({ rating }) });

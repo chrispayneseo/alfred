@@ -467,6 +467,11 @@ export class NotionRepo {
     await this.notion.pages.update({ page_id: taskId, archived: true } as never);
   }
 
+  /** Reverses archiveTask — backs the UI's "Undo" on a delete. */
+  async restoreTask(taskId: string): Promise<void> {
+    await this.notion.pages.update({ page_id: taskId, archived: false } as never);
+  }
+
   /** Counts Tasks/Notes created in the last 7 days — feeds the weekly
    * digest's "what got captured/filed" line. Uses Notion's own created_time
    * filter rather than fetching everything and filtering locally. */
@@ -492,12 +497,33 @@ export class NotionRepo {
     await this.notion.pages.update({ page_id: noteId, archived: true } as never);
   }
 
+  /** Reverses archiveNote — backs the UI's "Undo" on a delete. */
+  async restoreNote(noteId: string): Promise<void> {
+    await this.notion.pages.update({ page_id: noteId, archived: false } as never);
+  }
+
   /** All recipes, optionally filtered to one meal type — used by the
-   * weekly recipe email's selection logic and the Recipe Bank view. */
+   * weekly recipe email's selection logic and the Recipe Bank view.
+   * Paginates since Notion caps a single query at 100 results and the
+   * Recipe Bank has 200+ — without this, everything past the first page
+   * (recency-sorted by Notion, so effectively the older half of the bank)
+   * silently never showed up anywhere, including the weekly email's own
+   * selection pool. Same cursor loop as getNoteBody. */
   async listRecipes(mealType?: MealType): Promise<RecipeRecord[]> {
     const filter = mealType ? { property: RECIPES_PROPS.mealType, select: { equals: mealType } } : undefined;
-    const res = await this.notion.dataSources.query({ data_source_id: this.env.recipesDbId, filter } as never);
-    return (res.results as AnyPage[]).map((page) => {
+    const pages: AnyPage[] = [];
+    let cursor: string | undefined;
+    do {
+      const res = await this.notion.dataSources.query({
+        data_source_id: this.env.recipesDbId,
+        filter,
+        start_cursor: cursor,
+        page_size: 100,
+      } as never);
+      pages.push(...(res.results as AnyPage[]));
+      cursor = res.has_more ? (res.next_cursor ?? undefined) : undefined;
+    } while (cursor);
+    return pages.map((page) => {
       const ingredientsText = getRichText(page, RECIPES_PROPS.ingredients);
       return {
         id: page.id,
@@ -557,13 +583,18 @@ export class NotionRepo {
     await this.notion.pages.update({ page_id: recipeId, archived: true } as never);
   }
 
+  /** Reverses archiveRecipe — backs the UI's "Undo" on a delete. */
+  async restoreRecipe(recipeId: string): Promise<void> {
+    await this.notion.pages.update({ page_id: recipeId, archived: false } as never);
+  }
+
   /** Deletes a Project: re-tags every Task/Note currently under it to
    * Unsorted (so nothing is left pointing at an archived page), then
-   * archives the Project itself. Never called without the user's explicit
-   * confirmation in the UI — this is a structural change, not a single-item
-   * removal. Refuses to delete Unsorted itself, since it's the fallback
-   * every other project (including this one) reassigns into. */
-  async deleteProject(projectId: string): Promise<{ reassigned: number }> {
+   * archives the Project itself. Not gated on a confirm() dialog in the UI
+   * anymore — like every other delete in the app, it's undoable via
+   * restoreProject below, which needs the exact task/note ids reassigned
+   * here to reverse them precisely. */
+  async deleteProject(projectId: string): Promise<{ taskIds: string[]; noteIds: string[] }> {
     const unsortedId = await this.findProjectIdByName(UNSORTED_PROJECT);
     if (!unsortedId) throw new Error("Unsorted project not found");
     if (projectId === unsortedId) throw new Error("Can't delete the Unsorted project");
@@ -574,6 +605,19 @@ export class NotionRepo {
       ...notes.map((n) => this.setNoteProject(n.id, unsortedId)),
     ]);
     await this.notion.pages.update({ page_id: projectId, archived: true } as never);
-    return { reassigned: tasks.length + notes.length };
+    return { taskIds: tasks.map((t) => t.id), noteIds: notes.map((n) => n.id) };
+  }
+
+  /** Reverses deleteProject: un-archives the project page and reassigns the
+   * given tasks/notes (the exact ones deleteProject moved to Unsorted) back
+   * to it. Only meant to be called with the ids deleteProject just
+   * returned — anything the user manually reassigned in the interim would
+   * be silently pulled back onto this project too. */
+  async restoreProject(projectId: string, taskIds: string[], noteIds: string[]): Promise<void> {
+    await this.notion.pages.update({ page_id: projectId, archived: false } as never);
+    await Promise.all([
+      ...taskIds.map((id) => this.setTaskProject(id, projectId)),
+      ...noteIds.map((id) => this.setNoteProject(id, projectId)),
+    ]);
   }
 }

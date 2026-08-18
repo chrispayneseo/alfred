@@ -9,6 +9,7 @@ import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
 import { Screen } from "../components/Screen";
+import { UndoToast } from "../components/UndoToast";
 import { WeatherSummary } from "../components/WeatherSummary";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
@@ -16,7 +17,18 @@ import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-
 import { fetchEventWeather, type EventWeather } from "../integrations/weather/api";
 import { buildAccountColorMap } from "../lib/accountColor";
 import { useLiveLocation } from "../hooks/useLiveLocation";
-import { deleteNote, deleteTask, fetchNotes, fetchTasks, updateTaskStatus, type ApiNote, type ApiTask } from "../integrations/notion/api";
+import { useUndoableAction } from "../hooks/useUndoableAction";
+import {
+  deleteNote,
+  deleteTask,
+  fetchNotes,
+  fetchTasks,
+  restoreNote,
+  restoreTask,
+  updateTaskStatus,
+  type ApiNote,
+  type ApiTask,
+} from "../integrations/notion/api";
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
 
@@ -95,6 +107,7 @@ export function TodayScreen() {
   const [notes, setNotes] = useState<ApiNote[]>([]);
   const [eventWeather, setEventWeather] = useState<Map<string, EventWeather>>(new Map());
   const { coords, refetch: refetchLocation } = useLiveLocation();
+  const { pending: undoState, trigger: triggerUndo, runUndo } = useUndoableAction();
 
   useEffect(() => {
     fetchEventWeather()
@@ -157,6 +170,14 @@ export function TodayScreen() {
     setTasks((p) => p.filter((t) => t.id !== task.id));
     try {
       await deleteTask(task.id);
+      triggerUndo(`Deleted "${task.title}" — recoverable for 30 days`, async () => {
+        setTasks((p) => [...p, task]);
+        try {
+          await restoreTask(task.id);
+        } catch {
+          setTasks((p) => p.filter((t) => t.id !== task.id));
+        }
+      });
     } catch {
       setTasks(prev);
     }
@@ -167,6 +188,14 @@ export function TodayScreen() {
     setNotes((p) => p.filter((n) => n.id !== note.id));
     try {
       await deleteNote(note.id);
+      triggerUndo(`Deleted "${note.title}" — recoverable for 30 days`, async () => {
+        setNotes((p) => [...p, note]);
+        try {
+          await restoreNote(note.id);
+        } catch {
+          setNotes((p) => p.filter((n) => n.id !== note.id));
+        }
+      });
     } catch {
       setNotes(prev);
     }
@@ -303,13 +332,13 @@ export function TodayScreen() {
                 <button
                   onClick={() => toggleTask(task)}
                   aria-label="Mark as done"
-                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-ink-faint transition-colors hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
+                  className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-faint transition-colors hover:border-ink hover:text-ink dark:border-line-dark dark:text-ink-faint-dark dark:hover:border-ink-dark dark:hover:text-ink-dark"
                 >
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 13l4 4L19 7" />
                   </svg>
                 </button>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 pt-1">
                   <p className="text-sm text-ink dark:text-ink-dark">{task.title}</p>
                   <p className="text-xs text-ink-faint dark:text-ink-faint-dark">
                     {task.due ?? "No due date"}
@@ -319,7 +348,7 @@ export function TodayScreen() {
                 <button
                   onClick={() => removeTask(task)}
                   aria-label="Remove task"
-                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+                  className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
                 >
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                     <path d="M6 6l12 12M18 6L6 18" />
@@ -352,7 +381,7 @@ export function TodayScreen() {
               <button
                 onClick={() => removeNote(note)}
                 aria-label="Remove note"
-                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
+                className="-mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint/60 transition-colors hover:text-claude dark:text-ink-faint-dark/60"
               >
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                   <path d="M6 6l12 12M18 6L6 18" />
@@ -362,6 +391,7 @@ export function TodayScreen() {
           ))}
         </ul>
       </section>
+      {undoState && <UndoToast message={undoState.message} onUndo={runUndo} />}
     </Screen>
   );
 }

@@ -838,6 +838,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       await repo.archiveTask(taskMatch[1]);
       return json(200, { ok: true });
     }
+    const taskRestoreMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/restore$/);
+    if (method === "PATCH" && taskRestoreMatch) {
+      await repo.restoreTask(taskRestoreMatch[1]);
+      return json(200, { ok: true });
+    }
 
     const noteMatch = pathname.match(/^\/api\/notes\/([^/]+)$/);
     if (method === "PATCH" && noteMatch) {
@@ -847,6 +852,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     }
     if (method === "DELETE" && noteMatch) {
       await repo.archiveNote(noteMatch[1]);
+      return json(200, { ok: true });
+    }
+    const noteRestoreMatch = pathname.match(/^\/api\/notes\/([^/]+)\/restore$/);
+    if (method === "PATCH" && noteRestoreMatch) {
+      await repo.restoreNote(noteRestoreMatch[1]);
       return json(200, { ok: true });
     }
 
@@ -889,6 +899,11 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       await repo.archiveRecipe(recipeMatch[1]);
       return json(200, { ok: true });
     }
+    const recipeRestoreMatch = pathname.match(/^\/api\/recipes\/([^/]+)\/restore$/);
+    if (method === "PATCH" && recipeRestoreMatch) {
+      await repo.restoreRecipe(recipeRestoreMatch[1]);
+      return json(200, { ok: true });
+    }
 
     const recipeRatingMatch = pathname.match(/^\/api\/recipes\/([^/]+)\/rating$/);
     if (method === "PATCH" && recipeRatingMatch) {
@@ -926,6 +941,14 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       } catch (error) {
         return json(400, { error: error instanceof Error ? error.message : "Couldn't delete that project." });
       }
+    }
+    const projectRestoreMatch = pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
+    if (method === "PATCH" && projectRestoreMatch) {
+      const body = await readBody();
+      const taskIds = Array.isArray(body.taskIds) ? body.taskIds.filter((id: unknown) => typeof id === "string") : [];
+      const noteIds = Array.isArray(body.noteIds) ? body.noteIds.filter((id: unknown) => typeof id === "string") : [];
+      await repo.restoreProject(projectRestoreMatch[1], taskIds, noteIds);
+      return json(200, { ok: true });
     }
 
     return json(404, { error: "not found" });

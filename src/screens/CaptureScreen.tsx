@@ -78,7 +78,7 @@ function CaptureReview({
               <button
                 onClick={() => onRemove(item.id)}
                 aria-label="Remove item"
-                className="mt-1.5 shrink-0 text-ink-faint/60 hover:text-claude dark:text-ink-faint-dark/60"
+                className="-mt-1 -mr-1 flex h-8 w-8 shrink-0 items-center justify-center text-ink-faint/60 hover:text-claude dark:text-ink-faint-dark/60"
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                   <path d="M6 6l12 12M18 6L6 18" />
@@ -384,7 +384,7 @@ export function CaptureScreen() {
                 [
                   { value: "text", label: "Text" },
                   { value: "voice", label: "Voice" },
-                  { value: "scan-calendar", label: "Scan calendar" },
+                  { value: "scan-calendar", label: "Scan" },
                   { value: "recipe", label: "Recipe" },
                 ] as const
               ).map((opt) => (

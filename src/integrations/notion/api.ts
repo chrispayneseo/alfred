@@ -94,12 +94,26 @@ export async function deleteTask(taskId: string): Promise<void> {
   await request(`/api/tasks/${taskId}`, { method: "DELETE" });
 }
 
+export async function restoreTask(taskId: string): Promise<void> {
+  await request(`/api/tasks/${taskId}/restore`, { method: "PATCH" });
+}
+
 export async function deleteNote(noteId: string): Promise<void> {
   await request(`/api/notes/${noteId}`, { method: "DELETE" });
 }
 
-export async function deleteProject(projectId: string): Promise<{ reassigned: number }> {
+export async function restoreNote(noteId: string): Promise<void> {
+  await request(`/api/notes/${noteId}/restore`, { method: "PATCH" });
+}
+
+/** `taskIds`/`noteIds` are the ones deleteProject moved to Unsorted — pass
+ * its return value straight through to undo exactly what it did. */
+export async function deleteProject(projectId: string): Promise<{ taskIds: string[]; noteIds: string[] }> {
   return request(`/api/projects/${projectId}`, { method: "DELETE" });
+}
+
+export async function restoreProject(projectId: string, taskIds: string[], noteIds: string[]): Promise<void> {
+  await request(`/api/projects/${projectId}/restore`, { method: "PATCH", body: JSON.stringify({ taskIds, noteIds }) });
 }
 
 /** Files a location reminder Chat proposed, only ever called after the
