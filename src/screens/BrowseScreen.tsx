@@ -400,9 +400,9 @@ export function BrowseScreen() {
                   {forMealType.map((recipe) => (
                     <li key={recipe.id} className="space-y-1">
                       <div className="flex items-center justify-between gap-3">
-                        {recipe.url ? (
+                        {recipe.sourceUrl || recipe.url ? (
                           <a
-                            href={recipe.url}
+                            href={recipe.sourceUrl || recipe.url}
                             target="_blank"
                             rel="noreferrer"
                             className="min-w-0 flex-1 truncate text-sm text-ink underline-offset-2 hover:underline dark:text-ink-dark"
