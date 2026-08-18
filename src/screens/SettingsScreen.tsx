@@ -3,6 +3,7 @@ import { AppLockSettings } from "../components/AppLockSettings";
 import { DataControls } from "../components/DataControls";
 import { GoogleAccountsSettings } from "../components/GoogleAccountsSettings";
 import { ModelCostDashboard } from "../components/ModelCostDashboard";
+import { NewsTopicSettings } from "../components/NewsTopicSettings";
 import { PermissionsTrust } from "../components/PermissionsTrust";
 import { ProjectGroupingSettings } from "../components/ProjectGroupingSettings";
 import { RecurringTaskSettings } from "../components/RecurringTaskSettings";
@@ -92,9 +93,13 @@ export function SettingsScreen() {
               <SubHeading>Recurring tasks</SubHeading>
               <RecurringTaskSettings />
             </div>
-            <div>
+            <div className="mb-6">
               <SubHeading>Project groupings</SubHeading>
               <ProjectGroupingSettings />
+            </div>
+            <div>
+              <SubHeading>News feed topics</SubHeading>
+              <NewsTopicSettings />
             </div>
           </section>
 

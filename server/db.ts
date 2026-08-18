@@ -207,6 +207,56 @@ const SCHEMA_STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_evie_action_items_resolved ON evie_action_items(resolved)`,
+  // Personalized news feed (separate from the Today briefing) — the
+  // editable topic list driving both the web search and newsletter-match
+  // steps.
+  `CREATE TABLE IF NOT EXISTS news_topics (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // Auto-suggested new topics — same pending/accepted/dismissed shape as
+  // project_grouping_suggestions, requiring explicit accept before a topic
+  // is actually added.
+  `CREATE TABLE IF NOT EXISTS news_topic_suggestions (
+    id TEXT PRIMARY KEY,
+    suggested_name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_news_topic_suggestions_status ON news_topic_suggestions(status)`,
+  // One row per calendar day the feed was actually generated — the
+  // check-on-trigger idempotency key (mirrors weekly_digest's week_key).
+  `CREATE TABLE IF NOT EXISTS news_feed_generations (
+    date_key TEXT PRIMARY KEY,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // The generated feed content itself, one row per surfaced story. Kept
+  // (not deleted) after the day passes so future generations can dedupe
+  // against source_url.
+  `CREATE TABLE IF NOT EXISTS news_feed_items (
+    id TEXT PRIMARY KEY,
+    date_key TEXT NOT NULL,
+    topic_name TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_label TEXT,
+    origin TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_news_feed_items_date_key ON news_feed_items(date_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_news_feed_items_source_url ON news_feed_items(source_url)`,
+  // Which gmail_emails rows the newsletter-scan step has already checked —
+  // independent of that table's own `scanned` flag, which drives the
+  // unrelated action-item classifier (same pattern as evie_scanned_messages,
+  // a second scan concern over the same synced Gmail data).
+  `CREATE TABLE IF NOT EXISTS news_feed_scanned_emails (
+    row_key TEXT PRIMARY KEY,
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
 ];
 
 let schemaReady: Promise<void> | undefined;

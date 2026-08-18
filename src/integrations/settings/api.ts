@@ -40,7 +40,11 @@ export type ModelFeature =
   | "search_console_query"
   | "recipe_extraction"
   | "recipe_weather_ranking"
-  | "evie_scan_classify";
+  | "evie_scan_classify"
+  | "news_feed_search"
+  | "news_feed_curation"
+  | "news_feed_newsletter_scan"
+  | "news_topic_suggestion";
 
 export interface FeatureBreakdownEntry {
   feature: ModelFeature;

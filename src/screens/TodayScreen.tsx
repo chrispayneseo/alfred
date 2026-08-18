@@ -13,6 +13,7 @@ import { Screen } from "../components/Screen";
 import { TodayTileGrid, type TileDef } from "../components/TodayTileGrid";
 import { UndoToast } from "../components/UndoToast";
 import { WeatherSummary } from "../components/WeatherSummary";
+import { NewsFeedTeaser } from "../components/NewsFeedTeaser";
 import { WeeklyDigestTeaser } from "../components/WeeklyDigestTeaser";
 import { fetchTodayEvents, fetchTomorrowEvents, type CalendarApiEvent } from "../integrations/google-calendar/api";
 import { fetchGoogleAccounts, type GoogleAccount } from "../integrations/google-accounts/api";
@@ -391,6 +392,7 @@ export function TodayScreen() {
       {isDesktop ? (
         <>
           <WeeklyDigestTeaser />
+          <NewsFeedTeaser />
           <RecurringSuggestions />
           <ProjectGroupingSuggestions />
           <CoachPlanTeaser />
@@ -406,6 +408,8 @@ export function TodayScreen() {
           </section>
 
           <WeeklyDigestTeaser />
+
+          <NewsFeedTeaser />
 
           <section className="mb-8">
             <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">

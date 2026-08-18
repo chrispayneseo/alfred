@@ -61,6 +61,13 @@ import {
   setDigestTriggerDay,
   type DigestTriggerDay,
 } from "./digest/weeklyDigest.js";
+import { checkNewsFeed, generateNewsFeedNow } from "./newsFeed/generate.js";
+import { addTopic, listTopics, removeTopic } from "./newsFeed/topics.js";
+import {
+  acceptTopicSuggestion,
+  checkTopicSuggestions,
+  dismissTopicSuggestion,
+} from "./newsFeed/topicSuggestions.js";
 import {
   acceptGrouping,
   checkProjectGroupings,
@@ -726,6 +733,51 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
     const groupingDismissMatch = pathname.match(/^\/api\/project-groupings\/suggestions\/([^/]+)\/dismiss$/);
     if (method === "POST" && groupingDismissMatch) {
       await dismissGrouping(env, groupingDismissMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    // Personalized news feed — separate from the Today briefing. GET is the
+    // check-on-trigger entry point (returns today's feed, generating it if
+    // this is the first request of the day); the explicit generate route
+    // mirrors the weekly digest's manual "generate now" for parity.
+    if (method === "GET" && pathname === "/api/news-feed") {
+      return json(200, await checkNewsFeed(env, llmEnv, loadNtfyEnv(env)));
+    }
+
+    if (method === "POST" && pathname === "/api/news-feed/generate") {
+      return json(200, await generateNewsFeedNow(env, llmEnv, loadNtfyEnv(env)));
+    }
+
+    if (method === "GET" && pathname === "/api/news-feed/topics") {
+      return json(200, await listTopics(env));
+    }
+
+    if (method === "POST" && pathname === "/api/news-feed/topics") {
+      const body = await readBody();
+      const name = typeof body.name === "string" ? body.name : "";
+      if (!name.trim()) return json(400, { error: "name is required" });
+      return json(200, await addTopic(env, name));
+    }
+
+    const topicDeleteMatch = pathname.match(/^\/api\/news-feed\/topics\/([^/]+)$/);
+    if (method === "DELETE" && topicDeleteMatch) {
+      await removeTopic(env, topicDeleteMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    if (method === "GET" && pathname === "/api/news-feed/topic-suggestions") {
+      return json(200, await checkTopicSuggestions(env, llmEnv, repo));
+    }
+
+    const topicSuggestionAcceptMatch = pathname.match(/^\/api\/news-feed\/topic-suggestions\/([^/]+)\/accept$/);
+    if (method === "POST" && topicSuggestionAcceptMatch) {
+      await acceptTopicSuggestion(env, topicSuggestionAcceptMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    const topicSuggestionDismissMatch = pathname.match(/^\/api\/news-feed\/topic-suggestions\/([^/]+)\/dismiss$/);
+    if (method === "POST" && topicSuggestionDismissMatch) {
+      await dismissTopicSuggestion(env, topicSuggestionDismissMatch[1]);
       return json(200, { ok: true });
     }
 

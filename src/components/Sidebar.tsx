@@ -50,6 +50,17 @@ const items = [
     ),
   },
   {
+    to: "/feed",
+    label: "Feed",
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 11a9 9 0 0 1 9 9" />
+        <path d="M4 4a16 16 0 0 1 16 16" />
+        <circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
     to: "/settings",
     label: "Settings",
     icon: (
