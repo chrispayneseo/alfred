@@ -19,13 +19,18 @@ export interface LocationReminderProposal {
 
 export type LocationReminderProposalStatus = "pending" | "created" | "cancelled" | "error";
 
-export type MealType = "Dinner" | "Lunch" | "Breakfast";
+export type MealType = "Breakfast" | "Lunch" | "Dinner" | "Snack" | "Baking";
 
 export interface RecipeProposal {
   title: string;
+  cuisineType: string | null;
   mealType: MealType | null;
+  prepTime: string | null;
+  cookTime: string | null;
+  ingredients: string[];
+  method: string;
+  tags: string[];
   sourceUrl: string;
-  bodyText: string;
 }
 
 export type RecipeProposalStatus = "pending" | "created" | "cancelled" | "error";

@@ -22,12 +22,13 @@ import {
   type ApiRecipe,
   type MealType,
   type RecipeEmailResult,
+  type RecipeExtraction,
 } from "../integrations/recipes/api";
 
 const tabs = ["Tasks", "Notes", "Projects", "Recipes"] as const;
 type Tab = (typeof tabs)[number];
 
-const MEAL_TYPES: MealType[] = ["Dinner", "Lunch", "Breakfast"];
+const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack", "Baking"];
 
 function formatUpdatedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -50,7 +51,7 @@ export function BrowseScreen() {
   const [recipeUrl, setRecipeUrl] = useState("");
   const [extractingRecipe, setExtractingRecipe] = useState(false);
   const [extractError, setExtractError] = useState<string>();
-  const [extractedRecipe, setExtractedRecipe] = useState<{ sourceUrl: string; bodyText: string; preview: string }>();
+  const [extractedRecipe, setExtractedRecipe] = useState<RecipeExtraction>();
   const [generating, setGenerating] = useState(false);
   const [generateResult, setGenerateResult] = useState<RecipeEmailResult>();
   const [generateError, setGenerateError] = useState<string>();
@@ -85,7 +86,7 @@ export function BrowseScreen() {
       const result = await extractRecipeFromUrl(url);
       setNewRecipeTitle(result.title);
       if (result.mealType) setNewRecipeMealType(result.mealType);
-      setExtractedRecipe({ sourceUrl: result.sourceUrl, bodyText: result.recipeText, preview: result.recipeText.slice(0, 200) });
+      setExtractedRecipe(result);
     } catch (err) {
       setExtractError(err instanceof Error ? err.message : "Couldn't read that page.");
     } finally {
@@ -98,7 +99,19 @@ export function BrowseScreen() {
     if (!title) return;
     setSavingRecipe(true);
     try {
-      const { id } = await createRecipe(title, newRecipeMealType, extractedRecipe && { sourceUrl: extractedRecipe.sourceUrl, bodyText: extractedRecipe.bodyText });
+      const { id } = await createRecipe(
+        title,
+        newRecipeMealType,
+        extractedRecipe && {
+          cuisineType: extractedRecipe.cuisineType,
+          prepTime: extractedRecipe.prepTime,
+          cookTime: extractedRecipe.cookTime,
+          sourceUrl: extractedRecipe.sourceUrl,
+          ingredients: extractedRecipe.ingredients,
+          method: extractedRecipe.method,
+          tags: extractedRecipe.tags,
+        }
+      );
       setRecipes((prev) => [...prev, { id, title, mealType: newRecipeMealType, url: "" }]);
       resetRecipeForm();
     } catch (err) {
@@ -420,9 +433,17 @@ export function BrowseScreen() {
               </div>
               {extractError && <p className="text-xs text-claude">{extractError}</p>}
               {extractedRecipe && (
-                <p className="rounded-lg bg-paper px-3 py-2 text-xs text-ink-soft dark:bg-paper-dark dark:text-ink-soft-dark">
-                  {extractedRecipe.preview}…
-                </p>
+                <div className="space-y-1 rounded-lg bg-paper px-3 py-2 text-xs text-ink-soft dark:bg-paper-dark dark:text-ink-soft-dark">
+                  {(extractedRecipe.cuisineType || extractedRecipe.prepTime || extractedRecipe.cookTime) && (
+                    <p>
+                      {[extractedRecipe.cuisineType, extractedRecipe.prepTime && `Prep ${extractedRecipe.prepTime}`, extractedRecipe.cookTime && `Cook ${extractedRecipe.cookTime}`]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
+                  <p>{extractedRecipe.ingredients.length} ingredients</p>
+                  <p>{extractedRecipe.method.slice(0, 200)}…</p>
+                </div>
               )}
 
               <input

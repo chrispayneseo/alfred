@@ -25,29 +25,24 @@ function getRichText(page: AnyPage, prop: string): string {
   return (page.properties?.[prop]?.rich_text ?? []).map((t: AnyPage) => t.plain_text).join("");
 }
 
-const richText = (content: string) => [{ type: "text" as const, text: { content } }];
-
-// Notion caps a single rich_text segment at 2000 characters and a single
-// pages.create/blocks.append call at 100 blocks — chunk long body text into
-// paragraph blocks under both limits. Used for Recipe pages created from a
-// URL (the extracted recipe text goes in the body, not the title).
-const CHARS_PER_BLOCK = 1800;
-const BLOCKS_PER_CALL = 100;
-
-function paragraphTextBlocks(text: string): unknown[] {
-  const blocks: unknown[] = [];
-  for (let i = 0; i < text.length; i += CHARS_PER_BLOCK) {
-    blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: richText(text.slice(i, i + CHARS_PER_BLOCK)) } });
-  }
-  return blocks;
+function getMultiSelect(page: AnyPage, prop: string): string[] {
+  return (page.properties?.[prop]?.multi_select ?? []).map((o: AnyPage) => o.name);
+}
+function getUrl(page: AnyPage, prop: string): string | undefined {
+  return page.properties?.[prop]?.url ?? undefined;
 }
 
-function sourceLinkBlock(url: string): unknown {
-  return {
-    object: "block",
-    type: "paragraph",
-    paragraph: { rich_text: [{ type: "text", text: { content: `Source: ${url}` }, annotations: { italic: true } }] },
-  };
+const richText = (content: string) => [{ type: "text" as const, text: { content } }];
+
+// A single rich_text segment is capped at 2000 characters — chunk longer
+// property text (an ingredients list, a method summary) into multiple
+// segments within the same property rather than truncating.
+function chunkedRichText(content: string): { type: "text"; text: { content: string } }[] {
+  const segments: { type: "text"; text: { content: string } }[] = [];
+  for (let i = 0; i < content.length; i += 2000) {
+    segments.push({ type: "text" as const, text: { content: content.slice(i, i + 2000) } });
+  }
+  return segments.length > 0 ? segments : [{ type: "text" as const, text: { content: "" } }];
 }
 
 export interface InboxRecord {
@@ -86,7 +81,26 @@ export interface RecipeRecord {
   id: string;
   title: string;
   mealType: MealType;
+  /** The Notion page's own URL — for linking back to the page in Notion. */
   url: string;
+  cuisineType?: string;
+  prepTime?: string;
+  cookTime?: string;
+  /** The original recipe webpage, if this was added from a URL. */
+  sourceUrl?: string;
+  ingredients?: string[];
+  method?: string;
+  tags?: string[];
+}
+
+export interface RecipeDetails {
+  cuisineType?: string | null;
+  prepTime?: string | null;
+  cookTime?: string | null;
+  sourceUrl?: string;
+  ingredients?: string[];
+  method?: string;
+  tags?: string[];
 }
 
 export class NotionRepo {
@@ -478,38 +492,47 @@ export class NotionRepo {
   async listRecipes(mealType?: MealType): Promise<RecipeRecord[]> {
     const filter = mealType ? { property: RECIPES_PROPS.mealType, select: { equals: mealType } } : undefined;
     const res = await this.notion.dataSources.query({ data_source_id: this.env.recipesDbId, filter } as never);
-    return (res.results as AnyPage[]).map((page) => ({
-      id: page.id,
-      title: getTitle(page),
-      mealType: (getSelect(page, RECIPES_PROPS.mealType) as MealType | undefined) ?? "Dinner",
-      url: page.url as string,
-    }));
+    return (res.results as AnyPage[]).map((page) => {
+      const ingredientsText = getRichText(page, RECIPES_PROPS.ingredients);
+      return {
+        id: page.id,
+        title: getTitle(page),
+        mealType: (getSelect(page, RECIPES_PROPS.mealType) as MealType | undefined) ?? "Dinner",
+        url: page.url as string,
+        cuisineType: getRichText(page, RECIPES_PROPS.cuisineType) || undefined,
+        prepTime: getRichText(page, RECIPES_PROPS.prepTime) || undefined,
+        cookTime: getRichText(page, RECIPES_PROPS.cookTime) || undefined,
+        sourceUrl: getUrl(page, RECIPES_PROPS.source),
+        ingredients: ingredientsText ? ingredientsText.split("\n") : undefined,
+        method: getRichText(page, RECIPES_PROPS.method) || undefined,
+        tags: getMultiSelect(page, RECIPES_PROPS.tags),
+      };
+    });
   }
 
-  /** `opts` is set when the recipe was added from a URL (Recipe Bank's
-   * "add from URL", Capture's recipe mode, or Chat's recipe proposal) — the
-   * extracted recipe text goes in the page body, with a source-link line
-   * first, rather than just the bare title a manual add gets. */
-  async createRecipe(title: string, mealType: MealType, opts?: { sourceUrl?: string; bodyText?: string }): Promise<{ id: string }> {
-    const blocks: unknown[] = [];
-    if (opts?.sourceUrl) blocks.push(sourceLinkBlock(opts.sourceUrl));
-    if (opts?.bodyText) blocks.push(...paragraphTextBlocks(opts.bodyText));
+  /** `details` is set when the recipe was added from a URL (Recipe Bank's
+   * "add from URL", Capture's recipe mode, Chat's recipe proposal, or the
+   * bulk URL-import script) — populates the structured fields alongside the
+   * bare title+mealType a manual add gets. */
+  async createRecipe(title: string, mealType: MealType, details?: RecipeDetails): Promise<{ id: string }> {
+    const properties: Record<string, unknown> = {
+      [TITLE_PROP]: { title: richText(title) },
+      [RECIPES_PROPS.mealType]: { select: { name: mealType } },
+    };
+    if (details?.cuisineType) properties[RECIPES_PROPS.cuisineType] = { rich_text: chunkedRichText(details.cuisineType) };
+    if (details?.prepTime) properties[RECIPES_PROPS.prepTime] = { rich_text: chunkedRichText(details.prepTime) };
+    if (details?.cookTime) properties[RECIPES_PROPS.cookTime] = { rich_text: chunkedRichText(details.cookTime) };
+    if (details?.sourceUrl) properties[RECIPES_PROPS.source] = { url: details.sourceUrl };
+    if (details?.ingredients && details.ingredients.length > 0) {
+      properties[RECIPES_PROPS.ingredients] = { rich_text: chunkedRichText(details.ingredients.join("\n")) };
+    }
+    if (details?.method) properties[RECIPES_PROPS.method] = { rich_text: chunkedRichText(details.method) };
+    if (details?.tags && details.tags.length > 0) properties[RECIPES_PROPS.tags] = { multi_select: details.tags.map((name) => ({ name })) };
 
     const page = await this.notion.pages.create({
       parent: { type: "data_source_id", data_source_id: this.env.recipesDbId },
-      properties: {
-        [TITLE_PROP]: { title: richText(title) },
-        [RECIPES_PROPS.mealType]: { select: { name: mealType } },
-      },
-      children: blocks.slice(0, BLOCKS_PER_CALL),
+      properties,
     } as never);
-
-    if (blocks.length > BLOCKS_PER_CALL) {
-      const rest = blocks.slice(BLOCKS_PER_CALL);
-      for (let i = 0; i < rest.length; i += BLOCKS_PER_CALL) {
-        await this.notion.blocks.children.append({ block_id: page.id, children: rest.slice(i, i + BLOCKS_PER_CALL) } as never);
-      }
-    }
 
     return { id: page.id };
   }

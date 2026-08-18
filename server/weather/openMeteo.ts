@@ -166,6 +166,65 @@ export async function fetchWeatherBriefing(env: WeatherEnv): Promise<WeatherBrie
   }
 }
 
+export interface WeatherOutlook {
+  avgHighC: number;
+  avgLowC: number;
+  dominantDescription: string;
+  /** e.g. "This week's outlook: highs averaging 24°C, lows averaging 14°C, mostly partly cloudy." */
+  summaryLine: string;
+}
+
+interface DailyOutlookResponse {
+  daily: { weather_code: number[]; temperature_2m_max: number[]; temperature_2m_min: number[] };
+}
+
+function average(values: number[]): number {
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+function mostCommon(values: number[]): number {
+  const counts = new Map<number, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+/** A week-ahead summary (7 daily highs/lows + the most common conditions) —
+ * distinct from fetchWeatherBriefing's "right now + 2 days" shape. Used
+ * where a multi-day-out signal matters more than today's specifics (e.g.
+ * picking weather-appropriate recipes for the week, rather than reporting
+ * today's forecast). Never throws — same "undefined means omit" contract as
+ * the rest of this module. */
+export async function fetchWeatherOutlook(env: WeatherEnv): Promise<WeatherOutlook | undefined> {
+  if (env.lat === undefined || env.lon === undefined) return undefined;
+
+  try {
+    const url = new URL(OPEN_METEO_BASE_URL);
+    url.searchParams.set("latitude", String(env.lat));
+    url.searchParams.set("longitude", String(env.lon));
+    url.searchParams.set("daily", "weather_code,temperature_2m_max,temperature_2m_min");
+    url.searchParams.set("timezone", "auto");
+    url.searchParams.set("forecast_days", "7");
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Open-Meteo request failed (${res.status})`);
+    const data = (await res.json()) as DailyOutlookResponse;
+
+    const avgHighC = average(data.daily.temperature_2m_max);
+    const avgLowC = average(data.daily.temperature_2m_min);
+    const dominantDescription = describeCode(mostCommon(data.daily.weather_code));
+
+    return {
+      avgHighC,
+      avgLowC,
+      dominantDescription,
+      summaryLine: `This week's outlook: highs averaging ${Math.round(avgHighC)}°C, lows averaging ${Math.round(avgLowC)}°C, mostly ${dominantDescription}.`,
+    };
+  } catch (error) {
+    console.error("[weather] failed to fetch weekly outlook:", error);
+    return undefined;
+  }
+}
+
 export interface WeatherAtMoment {
   description: string;
   tempC: number;

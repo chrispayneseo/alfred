@@ -23,6 +23,7 @@ const FEATURE_DISPLAY_KEY: Record<FeatureBreakdownEntry["feature"], string> = {
   project_grouping: "project_grouping",
   search_console_query: "search_console_query",
   recipe_extraction: "recipe_extraction",
+  recipe_weather_ranking: "recipe_extraction",
 };
 
 const FEATURE_LABEL: Record<string, string> = {

@@ -1,8 +1,21 @@
 import { ensureSchema, getSql, type Env } from "../db.js";
+import type { LlmEnv } from "../llm/env.js";
 import type { NotionRepo, RecipeRecord } from "../notion/queries.js";
 import { MEAL_TYPES, type MealType } from "../notion/schema.js";
+import { fetchWeatherOutlook } from "../weather/openMeteo.js";
+import type { WeatherEnv } from "../weather/env.js";
+import { rankRecipesByWeather } from "./weatherRank.js";
 
-const MEAL_TYPE_COUNTS: Record<MealType, number> = { Dinner: 5, Lunch: 3, Breakfast: 2 };
+// How much wider than the target count to take the recency-sorted shortlist
+// before weather-ranking it — gives the ranking step real choices to work
+// with (rather than just the bare minimum, which would leave it nothing to
+// prefer between) while still keeping recency as the dominant signal, since
+// the shortlist itself is still recency-ordered before any re-ranking.
+const SHORTLIST_MULTIPLIER = 4;
+
+// Only Dinner/Lunch/Breakfast are ever included in the weekly email — Snack
+// and Baking are Recipe Bank categories with no slot in that selection.
+const MEAL_TYPE_COUNTS: Record<MealType, number> = { Dinner: 5, Lunch: 3, Breakfast: 2, Snack: 0, Baking: 0 };
 
 async function db(env: Env) {
   await ensureSchema(env);
@@ -25,17 +38,32 @@ async function lastSentByRecipeId(env: Env, recipeIds: string[]): Promise<Map<st
  * epoch 0). Repeats only happen once every distinct recipe for that meal
  * type has already been picked at least once — no separate "are there
  * enough recipes?" branch needed, the sort alone degrades gracefully when
- * a meal type's pool is smaller than the number needed. */
-export async function selectWeeklyRecipes(env: Env, repo: NotionRepo): Promise<Record<MealType, RecipeRecord[]>> {
+ * a meal type's pool is smaller than the number needed.
+ *
+ * Weather then biases WHICH of the least-recently-sent recipes actually get
+ * picked (e.g. deprioritizing a hearty stew during a heatwave) — it re-ranks
+ * a shortlist wider than the target count rather than overriding recency
+ * outright, and falls back to pure recency if the weather fetch or ranking
+ * call fails for any reason (weatherEnv unconfigured, Open-Meteo down,
+ * model error) — see weatherRank.ts. */
+export async function selectWeeklyRecipes(env: Env, repo: NotionRepo, weatherEnv: WeatherEnv, llmEnv: LlmEnv): Promise<Record<MealType, RecipeRecord[]>> {
+  const outlook = await fetchWeatherOutlook(weatherEnv);
   const result = {} as Record<MealType, RecipeRecord[]>;
   for (const mealType of MEAL_TYPES) {
+    const count = MEAL_TYPE_COUNTS[mealType];
+    if (count === 0) {
+      result[mealType] = [];
+      continue;
+    }
     const candidates = await repo.listRecipes(mealType);
     const lastSent = await lastSentByRecipeId(
       env,
       candidates.map((c) => c.id)
     );
     const sorted = [...candidates].sort((a, b) => (lastSent.get(a.id) ?? 0) - (lastSent.get(b.id) ?? 0));
-    result[mealType] = sorted.slice(0, MEAL_TYPE_COUNTS[mealType]);
+    const shortlist = sorted.slice(0, Math.min(sorted.length, count * SHORTLIST_MULTIPLIER));
+    const ranked = outlook ? await rankRecipesByWeather(env, llmEnv, outlook, mealType, shortlist) : shortlist;
+    result[mealType] = ranked.slice(0, count);
   }
   return result;
 }

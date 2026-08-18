@@ -9,7 +9,7 @@ import { makeId } from "../lib/id";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type { ChatMessage, EventProposal, LocationReminderProposal, MealType, RecipeProposal } from "../types";
 
-const MEAL_TYPES: MealType[] = ["Dinner", "Lunch", "Breakfast"];
+const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack", "Baking"];
 
 function formatEventProposal(p: EventProposal): string {
   const d = new Date(`${p.date}T00:00:00`);
@@ -191,7 +191,15 @@ export function ChatScreen() {
   async function handleConfirmRecipe(messageId: string, proposal: RecipeProposal, mealType: MealType) {
     setSubmittingRecipeId(messageId);
     try {
-      await createRecipe(proposal.title, mealType, { sourceUrl: proposal.sourceUrl, bodyText: proposal.bodyText });
+      await createRecipe(proposal.title, mealType, {
+        cuisineType: proposal.cuisineType,
+        prepTime: proposal.prepTime,
+        cookTime: proposal.cookTime,
+        sourceUrl: proposal.sourceUrl,
+        ingredients: proposal.ingredients,
+        method: proposal.method,
+        tags: proposal.tags,
+      });
       setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, recipeProposalStatus: "created" } : m)));
     } catch (error) {
       setMessages((prev) =>

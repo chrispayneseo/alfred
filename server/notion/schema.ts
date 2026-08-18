@@ -39,9 +39,16 @@ export const PROJECTS_PROPS = {
 
 export const RECIPES_PROPS = {
   mealType: "Meal Type",
+  cuisineType: "Cuisine/Type",
+  prepTime: "Prep Time",
+  cookTime: "Cook Time",
+  source: "Source",
+  ingredients: "Ingredients",
+  method: "Method",
+  tags: "Tags",
 } as const;
 
-export const MEAL_TYPES = ["Dinner", "Lunch", "Breakfast"] as const;
+export const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner", "Snack", "Baking"] as const;
 export type MealType = (typeof MEAL_TYPES)[number];
 
 export const JOURNAL_PROPS = {

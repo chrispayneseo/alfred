@@ -15,9 +15,11 @@ import { MEAL_TYPES, RECIPES_PROPS, TITLE_PROP } from "./schema.js";
 const title = (content: string) => [{ type: "text" as const, text: { content } }];
 
 const MEAL_TYPE_COLORS: Record<(typeof MEAL_TYPES)[number], string> = {
-  Dinner: "blue",
-  Lunch: "green",
   Breakfast: "orange",
+  Lunch: "green",
+  Dinner: "blue",
+  Snack: "yellow",
+  Baking: "pink",
 };
 
 async function createDataSourceDb(notion: Client, parentPageId: string, name: string, properties: Record<string, unknown>): Promise<string> {

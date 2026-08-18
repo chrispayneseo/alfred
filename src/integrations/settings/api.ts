@@ -38,7 +38,8 @@ export type ModelFeature =
   | "recurring_detection"
   | "project_grouping"
   | "search_console_query"
-  | "recipe_extraction";
+  | "recipe_extraction"
+  | "recipe_weather_ranking";
 
 export interface FeatureBreakdownEntry {
   feature: ModelFeature;

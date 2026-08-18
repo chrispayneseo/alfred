@@ -608,7 +608,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         })
       );
       backgroundTask(
-        checkRecipeEmail(env, recipeEmailEnv, repo).catch((error) => {
+        checkRecipeEmail(env, recipeEmailEnv, repo, weatherEnv, llmEnv).catch((error) => {
           console.error("[recipes] weekly email check failed:", error);
         })
       );
@@ -803,23 +803,29 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const body = await readBody();
       const recipeTitle = typeof body.title === "string" ? body.title.trim() : "";
       if (!recipeTitle || !isMealType(body.mealType)) return json(400, { error: "title and a valid mealType are required" });
-      const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl : undefined;
-      const bodyText = typeof body.bodyText === "string" ? body.bodyText : undefined;
-      const created = await repo.createRecipe(recipeTitle, body.mealType, { sourceUrl, bodyText });
+      const created = await repo.createRecipe(recipeTitle, body.mealType, {
+        cuisineType: typeof body.cuisineType === "string" ? body.cuisineType : undefined,
+        prepTime: typeof body.prepTime === "string" ? body.prepTime : undefined,
+        cookTime: typeof body.cookTime === "string" ? body.cookTime : undefined,
+        sourceUrl: typeof body.sourceUrl === "string" ? body.sourceUrl : undefined,
+        ingredients: Array.isArray(body.ingredients) ? body.ingredients.filter((i: unknown) => typeof i === "string") : undefined,
+        method: typeof body.method === "string" ? body.method : undefined,
+        tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === "string") : undefined,
+      });
       return json(200, { id: created.id });
     }
 
-    // Fetches a recipe webpage and extracts title/meal-type/recipe text —
-    // used by the Recipe Bank's "add from URL" flow and Capture's recipe
-    // mode. Never writes to Notion itself; the caller reviews the result
-    // and POSTs to /api/recipes above to actually save it.
+    // Fetches a recipe webpage and extracts structured recipe data — used
+    // by the Recipe Bank's "add from URL" flow, Capture's recipe mode, and
+    // the bulk URL-import script. Never writes to Notion itself; the caller
+    // reviews the result and POSTs to /api/recipes above to actually save it.
     if (method === "POST" && pathname === "/api/recipes/extract") {
       const body = await readBody();
       const url = typeof body.url === "string" ? body.url.trim() : "";
       if (!url) return json(400, { error: "url is required" });
       const extraction = await extractRecipeFromUrl(env, llmEnv, url);
-      if (!extraction) return json(502, { error: "Couldn't read a recipe from that page." });
-      return json(200, extraction);
+      if (!extraction.ok) return json(502, { error: extraction.reason });
+      return json(200, extraction.data);
     }
 
     const recipeMatch = pathname.match(/^\/api\/recipes\/([^/]+)$/);
@@ -837,7 +843,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         return json(503, { error: "Recipe email isn't configured yet — set RESEND_API_KEY and RECIPE_EMAIL_TO in .env." });
       }
       try {
-        const selection = await generateAndSendRecipeEmail(env, recipeEmailEnv, repo);
+        const selection = await generateAndSendRecipeEmail(env, recipeEmailEnv, repo, weatherEnv, llmEnv);
         return json(200, { ok: true, sentTo: recipeEmailEnv.destinationEmail, selection });
       } catch (error) {
         console.error("[recipes] generate/send failed:", error);

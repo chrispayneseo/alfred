@@ -10,7 +10,7 @@ import {
   type ApiProject,
   type CaptureItem,
 } from "../integrations/notion/api";
-import { createRecipe, extractRecipeFromUrl, type MealType } from "../integrations/recipes/api";
+import { createRecipe, extractRecipeFromUrl, type MealType, type RecipeExtraction } from "../integrations/recipes/api";
 import { compressImage } from "../lib/compressImage";
 import { expectBackgrounding } from "../lib/lock";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
@@ -18,7 +18,9 @@ import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
 type CaptureMode = "text" | "voice" | "scan-calendar" | "recipe";
 
-const MEAL_TYPES: MealType[] = ["Dinner", "Lunch", "Breakfast"];
+const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack", "Baking"];
+
+type RecipeReview = Omit<RecipeExtraction, "mealType"> & { mealType: MealType };
 
 // If backgrounding for the camera causes the OS to reload the page (see
 // lib/lock.ts's comment on expectBackgrounding), all component state —
@@ -180,7 +182,7 @@ export function CaptureScreen() {
   const [recipeUrl, setRecipeUrl] = useState("");
   const [extractingRecipe, setExtractingRecipe] = useState(false);
   const [recipeExtractError, setRecipeExtractError] = useState<string>();
-  const [recipeReview, setRecipeReview] = useState<{ title: string; mealType: MealType; bodyText: string; sourceUrl: string }>();
+  const [recipeReview, setRecipeReview] = useState<RecipeReview>();
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [recipeSaved, setRecipeSaved] = useState(false);
 
@@ -299,7 +301,7 @@ export function CaptureScreen() {
     setRecipeExtractError(undefined);
     try {
       const result = await extractRecipeFromUrl(url);
-      setRecipeReview({ title: result.title, mealType: result.mealType ?? "Dinner", bodyText: result.recipeText, sourceUrl: result.sourceUrl });
+      setRecipeReview({ ...result, mealType: result.mealType ?? "Dinner" });
     } catch (err) {
       setRecipeExtractError(err instanceof Error ? err.message : "Couldn't read that page.");
     } finally {
@@ -311,7 +313,15 @@ export function CaptureScreen() {
     if (!recipeReview) return;
     setSavingRecipe(true);
     try {
-      await createRecipe(recipeReview.title, recipeReview.mealType, { sourceUrl: recipeReview.sourceUrl, bodyText: recipeReview.bodyText });
+      await createRecipe(recipeReview.title, recipeReview.mealType, {
+        cuisineType: recipeReview.cuisineType,
+        prepTime: recipeReview.prepTime,
+        cookTime: recipeReview.cookTime,
+        sourceUrl: recipeReview.sourceUrl,
+        ingredients: recipeReview.ingredients,
+        method: recipeReview.method,
+        tags: recipeReview.tags,
+      });
       setRecipeUrl("");
       setRecipeReview(undefined);
       setRecipeSaved(true);
@@ -470,7 +480,7 @@ export function CaptureScreen() {
                       ))}
                     </div>
                     <p className="rounded-lg bg-paper-raised px-3 py-2 text-xs text-ink-soft dark:bg-paper-raised-dark dark:text-ink-soft-dark">
-                      {recipeReview.bodyText.slice(0, 220)}…
+                      {recipeReview.ingredients.length} ingredients — {recipeReview.method.slice(0, 180)}…
                     </p>
                     <div className="flex gap-2">
                       <button

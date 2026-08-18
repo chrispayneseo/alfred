@@ -47,9 +47,14 @@ export interface LocationReminderProposal {
 // JSON block, which is both a fidelity risk and wasted output tokens.
 export interface RecipeProposal {
   title: string;
+  cuisineType: string | null;
   mealType: MealType | null;
+  prepTime: string | null;
+  cookTime: string | null;
+  ingredients: string[];
+  method: string;
+  tags: string[];
   sourceUrl: string;
-  bodyText: string;
 }
 
 export interface ChatResult {
@@ -253,9 +258,14 @@ export async function runChat(
   const recipeProposal: RecipeProposal | undefined = recipeUrlResult?.extraction
     ? {
         title: recipeUrlResult.extraction.title,
+        cuisineType: recipeUrlResult.extraction.cuisineType,
         mealType: recipeUrlResult.extraction.mealType,
+        prepTime: recipeUrlResult.extraction.prepTime,
+        cookTime: recipeUrlResult.extraction.cookTime,
+        ingredients: recipeUrlResult.extraction.ingredients,
+        method: recipeUrlResult.extraction.method,
+        tags: recipeUrlResult.extraction.tags,
         sourceUrl: recipeUrlResult.extraction.sourceUrl,
-        bodyText: recipeUrlResult.extraction.recipeText,
       }
     : undefined;
 

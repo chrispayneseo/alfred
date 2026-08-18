@@ -29,14 +29,14 @@ export async function buildRecipeUrlContext(dbEnv: Env, llmEnv: LlmEnv, text: st
     return { contextText: "The user mentioned a recipe but didn't include a link — ask them for the URL before proposing anything." };
   }
 
-  const extraction = await extractRecipeFromUrl(dbEnv, llmEnv, match[0]);
-  if (!extraction) {
+  const result = await extractRecipeFromUrl(dbEnv, llmEnv, match[0]);
+  if (!result.ok) {
     return {
-      contextText:
-        "Alfred tried to read a recipe from the URL the user shared but couldn't (the page may block automated requests, or isn't a recipe page). Tell them honestly it couldn't be read — don't guess at the recipe content.",
+      contextText: `Alfred tried to read a recipe from the URL the user shared but couldn't (${result.reason}). Tell them honestly it couldn't be read — don't guess at the recipe content.`,
     };
   }
 
+  const extraction = result.data;
   return {
     contextText: `A recipe was successfully extracted from the URL the user shared: "${extraction.title}"${extraction.mealType ? ` (looks like ${extraction.mealType})` : ""}. Alfred will show them a card to confirm adding it to the Recipe Bank — just write one short sentence confirming what was found (e.g. "Found it — ${extraction.title}. Want me to add this to your Recipe Bank?"). Don't repeat the full recipe text back to them, and don't output any special block yourself — the confirmation card is handled separately from your reply.`,
     extraction,
