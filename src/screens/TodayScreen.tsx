@@ -5,6 +5,7 @@ import { AccountTag } from "../components/AccountTag";
 import { CoachPlanTeaser } from "../components/CoachPlanTeaser";
 import { Evie } from "../components/Evie";
 import { GmailFlagged } from "../components/GmailFlagged";
+import { LeedsTickets } from "../components/LeedsTickets";
 import { LocationPrompt } from "../components/LocationPrompt";
 import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
@@ -396,6 +397,7 @@ export function TodayScreen() {
           <RecurringSuggestions />
           <ProjectGroupingSuggestions />
           <CoachPlanTeaser />
+          <LeedsTickets />
           <TodayTileGrid tiles={tiles} defaultLayout={DEFAULT_TODAY_LAYOUT} storageKey="alfred:today-layout-v1" />
         </>
       ) : (
@@ -444,6 +446,8 @@ export function TodayScreen() {
           </section>
 
           <CoachPlanTeaser />
+
+          <LeedsTickets />
 
           <section>
             <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">

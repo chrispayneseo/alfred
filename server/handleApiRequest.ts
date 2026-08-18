@@ -61,6 +61,8 @@ import {
   setDigestTriggerDay,
   type DigestTriggerDay,
 } from "./digest/weeklyDigest.js";
+import { actionTicketWindow, checkLeedsTickets, dismissReviewWindow } from "./leedsTickets/check.js";
+import { getLeedsTicketSettings, MEMBERSHIP_TIERS, setLeedsTicketSettings, type MembershipTier } from "./leedsTickets/settings.js";
 import { checkNewsFeed, generateNewsFeedNow } from "./newsFeed/generate.js";
 import { addTopic, listTopics, removeTopic } from "./newsFeed/topics.js";
 import {
@@ -517,6 +519,42 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(200, { ok: true });
     }
 
+    // Leeds United ticket-window countdown — GET doubles as the
+    // check-on-open trigger (throttled auto-scan + nudge evaluation), same
+    // shape as the other check-on-open features below.
+    if (method === "GET" && pathname === "/api/leeds-tickets") {
+      const accounts = await loadGoogleAccounts(env);
+      return json(200, await checkLeedsTickets(env, llmEnv, loadNtfyEnv(env), accounts));
+    }
+
+    const leedsActionMatch = pathname.match(/^\/api\/leeds-tickets\/([^/]+)\/action$/);
+    if (method === "POST" && leedsActionMatch) {
+      await actionTicketWindow(env, leedsActionMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    const leedsDismissReviewMatch = pathname.match(/^\/api\/leeds-tickets\/([^/]+)\/dismiss-review$/);
+    if (method === "POST" && leedsDismissReviewMatch) {
+      await dismissReviewWindow(env, leedsDismissReviewMatch[1]);
+      return json(200, { ok: true });
+    }
+
+    if (method === "GET" && pathname === "/api/leeds-tickets/settings") {
+      return json(200, await getLeedsTicketSettings(env));
+    }
+
+    if (method === "POST" && pathname === "/api/leeds-tickets/settings") {
+      const body = await readBody();
+      const tier: MembershipTier = (MEMBERSHIP_TIERS as readonly string[]).includes(body.tier as string)
+        ? (body.tier as MembershipTier)
+        : (await getLeedsTicketSettings(env)).tier;
+      const earlyNudgeHours = typeof body.earlyNudgeHours === "number" && body.earlyNudgeHours > 0 ? body.earlyNudgeHours : 24;
+      const closeNudgeHours = typeof body.closeNudgeHours === "number" && body.closeNudgeHours > 0 ? body.closeNudgeHours : 2;
+      const settings = { tier, earlyNudgeHours, closeNudgeHours };
+      await setLeedsTicketSettings(env, settings);
+      return json(200, settings);
+    }
+
     if (method === "POST" && pathname === "/api/nudges/check") {
       if (!repo) return json(503, { error: "Notion isn't configured yet." });
       return json(200, await runNudgeCheck(env, llmEnv, loadNtfyEnv(env), repo));
@@ -656,6 +694,14 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       backgroundTask(
         checkRecipeEmail(env, recipeEmailEnv, repo, weatherEnv, llmEnv).catch((error) => {
           console.error("[recipes] weekly email check failed:", error);
+        })
+      );
+      // Resilience for the ticket-nudge sequence when the app isn't opened
+      // around a threshold (Today's own GET already drives this the rest
+      // of the time).
+      backgroundTask(
+        checkLeedsTickets(env, llmEnv, loadNtfyEnv(env), accounts).catch((error) => {
+          console.error("[leedsTickets] cron check failed:", error);
         })
       );
       return json(200, { ok: true, sync, scan });

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AppLockSettings } from "../components/AppLockSettings";
 import { DataControls } from "../components/DataControls";
 import { GoogleAccountsSettings } from "../components/GoogleAccountsSettings";
+import { LeedsTicketSettings } from "../components/LeedsTicketSettings";
 import { ModelCostDashboard } from "../components/ModelCostDashboard";
 import { NewsTopicSettings } from "../components/NewsTopicSettings";
 import { PermissionsTrust } from "../components/PermissionsTrust";
@@ -97,9 +98,13 @@ export function SettingsScreen() {
               <SubHeading>Project groupings</SubHeading>
               <ProjectGroupingSettings />
             </div>
-            <div>
+            <div className="mb-6">
               <SubHeading>News feed topics</SubHeading>
               <NewsTopicSettings />
+            </div>
+            <div>
+              <SubHeading>Leeds ticket windows</SubHeading>
+              <LeedsTicketSettings />
             </div>
           </section>
 

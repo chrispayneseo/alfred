@@ -29,6 +29,7 @@ const FEATURE_DISPLAY_KEY: Record<FeatureBreakdownEntry["feature"], string> = {
   news_feed_curation: "news_feed",
   news_feed_newsletter_scan: "news_feed",
   news_topic_suggestion: "news_feed",
+  leeds_ticket_extraction: "leeds_tickets",
 };
 
 const FEATURE_LABEL: Record<string, string> = {
@@ -44,6 +45,7 @@ const FEATURE_LABEL: Record<string, string> = {
   recipe_extraction: "Recipe extraction",
   evie_scan: "Evie (school emails)",
   news_feed: "News feed",
+  leeds_tickets: "Leeds tickets",
 };
 
 function formatUsd(value: number): string {

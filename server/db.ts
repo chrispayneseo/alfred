@@ -257,6 +257,38 @@ const SCHEMA_STATEMENTS = [
     row_key TEXT PRIMARY KEY,
     scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  // Leeds United ticket-window countdown — one row per extracted sale/ballot
+  // phase (a single ticket-information email often contains several phases,
+  // each its own row). window_closes_at is only set for ballot-style phases
+  // (an application deadline, not a guaranteed purchase); direct-sale and
+  // post-ballot priority-window phases only ever set window_opens_at.
+  `CREATE TABLE IF NOT EXISTS leeds_ticket_windows (
+    id TEXT PRIMARY KEY,
+    gmail_row_key TEXT NOT NULL,
+    opponent TEXT NOT NULL,
+    home_away TEXT NOT NULL,
+    phase_label TEXT NOT NULL,
+    phase_kind TEXT NOT NULL,
+    window_opens_at TIMESTAMPTZ NOT NULL,
+    window_closes_at TIMESTAMPTZ,
+    eligibility_status TEXT NOT NULL DEFAULT 'eligible',
+    eligibility_note TEXT,
+    source_url TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    nudge_early_sent BOOLEAN NOT NULL DEFAULT false,
+    nudge_close_sent BOOLEAN NOT NULL DEFAULT false,
+    nudge_open_sent BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_leeds_ticket_windows_status ON leeds_ticket_windows(status)`,
+  // Which gmail_emails rows the Leeds ticket-window scan has already
+  // checked — a third, independent scan concern over the same synced Gmail
+  // data (alongside emailScan.ts's action-item `scanned` flag and the news
+  // feed's news_feed_scanned_emails).
+  `CREATE TABLE IF NOT EXISTS leeds_scanned_emails (
+    row_key TEXT PRIMARY KEY,
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
 ];
 
 let schemaReady: Promise<void> | undefined;

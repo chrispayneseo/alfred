@@ -3,6 +3,7 @@ import { clearAllWeeklyDigests } from "../digest/weeklyDigest.js";
 import { removeAllAccounts, type GoogleAccountEnv } from "../google/accounts.js";
 import { clearAllEmails } from "../google/gmailStore.js";
 import { revokeToken } from "../google/oauth.js";
+import { clearAllLeedsTickets } from "../leedsTickets/check.js";
 import { clearAllNewsFeed } from "../newsFeed/topics.js";
 import { clearAllPushedNudges, clearAllSnoozedNudges } from "../nudges/nudgeStore.js";
 import { clearAllProjectGroupings } from "../projectGroupings/projectGroupingDetection.js";
@@ -24,4 +25,5 @@ export async function wipeEverything(env: Env, googleAccounts: GoogleAccountEnv[
   await clearAllRecurringData(env);
   await clearAllProjectGroupings(env);
   await clearAllNewsFeed(env);
+  await clearAllLeedsTickets(env);
 }
