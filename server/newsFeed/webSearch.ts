@@ -61,7 +61,7 @@ export async function searchNewsForTopic(apiKey: string, topic: string): Promise
     });
 
     const textBlocks = response.content.filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text");
-    const lastText = textBlocks.at(-1)?.text ?? "[]";
+    const lastText = textBlocks[textBlocks.length - 1]?.text ?? "[]";
 
     let results: RawSearchResult[] = [];
     try {
