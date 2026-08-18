@@ -6,6 +6,7 @@ import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
 import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
+import { CONTENT_MAX_WIDTH, CONTENT_PADDING_X } from "../lib/layout";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type { ChatMessage, EventProposal, LocationReminderProposal, MealType, RecipeProposal } from "../types";
 
@@ -219,7 +220,7 @@ export function ChatScreen() {
   }
 
   return (
-    <div className="mx-auto flex h-dvh max-w-md flex-col px-5 pb-24 pt-[max(2rem,env(safe-area-inset-top))]">
+    <div className={`mx-auto flex h-dvh ${CONTENT_MAX_WIDTH} flex-col ${CONTENT_PADDING_X} pb-24 pt-[max(2rem,env(safe-area-inset-top))]`}>
       <h1 className="mb-4 text-xl font-medium tracking-tight text-ink dark:text-ink-dark">Chat</h1>
 
       <div className="flex-1 space-y-5 overflow-y-auto pb-4">

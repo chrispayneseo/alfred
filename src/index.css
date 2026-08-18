@@ -52,3 +52,30 @@ body {
   font-family: var(--font-sans);
   line-height: 1.6;
 }
+
+/* Every clickable control in the app is a raw <button> with its own
+   Tailwind classes — there's no shared Button component, so cursor and
+   hover feedback are handled once here rather than patched onto ~30
+   call sites individually (and forgotten on the next new one). Native
+   <button> defaults to `cursor: default`, not `pointer`, which reads as
+   "not clickable" to a mouse user; `<a>`/NavLink already get `pointer`
+   from the browser, so this only needs to cover buttons. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* A subtle, theme-agnostic hover tint. `color-mix(..., currentColor ...)`
+   picks up whatever the button's existing text color is (paper-cream text
+   on a solid ink button, ink text on a ghost/outline button, etc.), so the
+   tint direction is automatically correct in both themes and for every
+   button style without per-component tuning. It's layered on as a
+   box-shadow rather than a background-color so it composites on top of an
+   existing bg-* class instead of replacing it, and stays clipped to the
+   button's own border-radius. */
+button:not(:disabled):hover {
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, currentColor 8%, transparent);
+}
