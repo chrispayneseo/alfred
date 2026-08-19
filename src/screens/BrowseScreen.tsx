@@ -23,12 +23,10 @@ import {
   deleteRecipe,
   extractRecipeFromUrl,
   fetchRecipes,
-  generateRecipeSuggestions,
   restoreRecipe,
   setRecipeRating,
   type ApiRecipe,
   type MealType,
-  type RecipeEmailResult,
   type RecipeExtraction,
 } from "../integrations/recipes/api";
 
@@ -88,9 +86,6 @@ export function BrowseScreen() {
   const [extractingRecipe, setExtractingRecipe] = useState(false);
   const [extractError, setExtractError] = useState<string>();
   const [extractedRecipe, setExtractedRecipe] = useState<RecipeExtraction>();
-  const [generating, setGenerating] = useState(false);
-  const [generateResult, setGenerateResult] = useState<RecipeEmailResult>();
-  const [generateError, setGenerateError] = useState<string>();
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipeMealTypeFilter, setRecipeMealTypeFilter] = useState<string>(FILTER_ALL);
   const [recipeCuisineFilter, setRecipeCuisineFilter] = useState<string>(FILTER_ALL);
@@ -205,19 +200,6 @@ export function BrowseScreen() {
       await setRecipeRating(recipe.id, next);
     } catch {
       setRecipes(prev);
-    }
-  }
-
-  async function handleGenerate() {
-    setGenerating(true);
-    setGenerateError(undefined);
-    setGenerateResult(undefined);
-    try {
-      setGenerateResult(await generateRecipeSuggestions());
-    } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : "Couldn't send the recipe email right now.");
-    } finally {
-      setGenerating(false);
     }
   }
 
@@ -490,17 +472,12 @@ export function BrowseScreen() {
       {!loading && !error && tab === "Recipes" && (
         <div className="space-y-6">
           <div className="rounded-xl border border-line p-3 dark:border-line-dark">
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="w-full rounded-full bg-ink py-2 text-xs font-medium text-paper transition-colors disabled:opacity-50 dark:bg-ink-dark dark:text-paper-dark"
+            <Link
+              to="/meal-plan"
+              className="block w-full rounded-full bg-ink py-2 text-center text-xs font-medium text-paper transition-colors dark:bg-ink-dark dark:text-paper-dark"
             >
-              {generating ? "Sending…" : "Generate recipe suggestions"}
-            </button>
-            {generateResult && (
-              <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">Sent to {generateResult.sentTo}.</p>
-            )}
-            {generateError && <p className="mt-2 text-xs text-claude">{generateError}</p>}
+              Plan this week's meals
+            </Link>
           </div>
 
           <div className="space-y-2">

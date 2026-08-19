@@ -96,6 +96,11 @@ export interface RecipeRecord {
   tags?: string[];
   /** 1-5, unset until the user rates it. */
   rating?: number;
+  /** One of DISH_CATEGORIES (server/recipes/dishCategories.ts) — unset
+   * until classified (server/notion/addRecipeCategory.ts) or manually set
+   * in Notion. Distinct from cuisineType (free text) — this is a closed
+   * vocabulary used for meal-plan category-diversity filtering. */
+  category?: string;
 }
 
 export interface RecipeDetails {
@@ -538,6 +543,7 @@ export class NotionRepo {
         method: getRichText(page, RECIPES_PROPS.method) || undefined,
         tags: getMultiSelect(page, RECIPES_PROPS.tags),
         rating: getNumber(page, RECIPES_PROPS.rating),
+        category: getSelect(page, RECIPES_PROPS.category),
       };
     });
   }

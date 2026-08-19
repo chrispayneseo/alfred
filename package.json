@@ -15,6 +15,7 @@
     "notion:setup": "tsx server/notion/setupWorkspace.ts",
     "notion:add-email-fields": "tsx server/notion/addEmailFields.ts",
     "notion:add-recipes": "tsx server/notion/addRecipesDatabase.ts",
+    "notion:add-recipe-category": "tsx server/notion/addRecipeCategory.ts",
     "scan-to-notion": "tsx scripts/scanFoldersToNotion/index.ts"
   },
   "dependencies": {

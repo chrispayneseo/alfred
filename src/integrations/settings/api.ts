@@ -39,7 +39,7 @@ export type ModelFeature =
   | "project_grouping"
   | "search_console_query"
   | "recipe_extraction"
-  | "recipe_weather_ranking"
+  | "meal_plan_scaling"
   | "evie_scan_classify"
   | "news_feed_search"
   | "news_feed_curation"

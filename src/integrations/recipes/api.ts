@@ -13,12 +13,7 @@ export interface ApiRecipe {
   method?: string;
   tags?: string[];
   rating?: number;
-}
-
-export interface RecipeEmailResult {
-  ok: true;
-  sentTo: string;
-  selection: Record<MealType, ApiRecipe[]>;
+  category?: string;
 }
 
 export interface RecipeExtraction {
@@ -41,6 +36,38 @@ export interface RecipeDetails {
   ingredients?: string[];
   method?: string;
   tags?: string[];
+}
+
+export interface MealPlanCandidate {
+  id: string;
+  title: string;
+  url: string;
+  category?: string;
+  cuisineType?: string;
+  prepTime?: string;
+  cookTime?: string;
+}
+
+export interface MealPlanDay {
+  dayIndex: number;
+  date: string;
+  dayLabel: string;
+  status: "pending" | "accepted" | "skipped";
+  recipeTitle?: string;
+  candidate?: MealPlanCandidate;
+}
+
+export interface MealPlanState {
+  sessionId: string;
+  status: "active" | "sent";
+  days: MealPlanDay[];
+  allResolved: boolean;
+}
+
+export interface MealPlanSendResult {
+  ok: true;
+  sentTo: string;
+  mealCount: number;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -83,8 +110,28 @@ export function extractRecipeFromUrl(url: string): Promise<RecipeExtraction> {
   return request("/api/recipes/extract", { method: "POST", body: JSON.stringify({ url }) });
 }
 
-/** Runs the same selection + email logic as the automatic Sunday-noon send,
- * immediately, to the same configured destination — see server/recipes/. */
-export function generateRecipeSuggestions(): Promise<RecipeEmailResult> {
-  return request("/api/recipes/generate", { method: "POST" });
+/** The in-progress meal-plan session, if any — null if none is active. */
+export function fetchCurrentMealPlan(): Promise<MealPlanState | null> {
+  return request("/api/recipes/plan");
+}
+
+/** Starts a fresh rolling-week plan, superseding any other in-progress one. */
+export function startMealPlan(): Promise<MealPlanState> {
+  return request("/api/recipes/plan/start", { method: "POST" });
+}
+
+export function acceptMealPlanDay(sessionId: string): Promise<MealPlanState> {
+  return request(`/api/recipes/plan/${sessionId}/accept`, { method: "POST" });
+}
+
+export function rejectMealPlanDay(sessionId: string): Promise<MealPlanState> {
+  return request(`/api/recipes/plan/${sessionId}/reject`, { method: "POST" });
+}
+
+export function skipMealPlanDay(sessionId: string): Promise<MealPlanState> {
+  return request(`/api/recipes/plan/${sessionId}/skip`, { method: "POST" });
+}
+
+export function sendMealPlan(sessionId: string): Promise<MealPlanSendResult> {
+  return request(`/api/recipes/plan/${sessionId}/send`, { method: "POST" });
 }

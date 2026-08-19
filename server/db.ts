@@ -295,6 +295,36 @@ const SCHEMA_STATEMENTS = [
     row_key TEXT PRIMARY KEY,
     scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  // Interactive weekly meal-plan builder — replaces the old fixed
+  // Sunday-noon suggestion email. One session per planning run, triggered
+  // on demand ("Plan this week's meals"); starting a new one supersedes any
+  // other still-active session (see planner.ts). Rolling week, not a fixed
+  // Mon-Sun calendar week — day 0 is whichever day the session started.
+  `CREATE TABLE IF NOT EXISTS meal_plan_sessions (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_meal_plan_sessions_status ON meal_plan_sessions(status)`,
+  // One row per day of the rolling week. candidate_recipe_id is the
+  // currently-shown, not-yet-decided suggestion for a pending day (cleared
+  // once accepted/skipped); rejected_recipe_ids (JSON array) tracks what's
+  // already been turned down for THIS day so the cycle never re-shows it.
+  // category is cached from the recipe at accept time so the "no repeat
+  // category" check never needs to re-fetch Notion mid-session.
+  `CREATE TABLE IF NOT EXISTS meal_plan_days (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    day_index INT NOT NULL,
+    date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    recipe_id TEXT,
+    category TEXT,
+    candidate_recipe_id TEXT,
+    rejected_recipe_ids TEXT NOT NULL DEFAULT '[]',
+    UNIQUE (session_id, day_index)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_meal_plan_days_session ON meal_plan_days(session_id)`,
 ];
 
 let schemaReady: Promise<void> | undefined;

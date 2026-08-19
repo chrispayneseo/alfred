@@ -14,6 +14,7 @@ import { DigestScreen } from "./screens/DigestScreen";
 import { FeedScreen } from "./screens/FeedScreen";
 import { FreelanceClientScreen } from "./screens/FreelanceClientScreen";
 import { FreelanceScreen } from "./screens/FreelanceScreen";
+import { MealPlanScreen } from "./screens/MealPlanScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { TodayScreen } from "./screens/TodayScreen";
 
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/freelance/:client" element={<FreelanceClientScreen />} />
           <Route path="/digest" element={<DigestScreen />} />
           <Route path="/feed" element={<FeedScreen />} />
+          <Route path="/meal-plan" element={<MealPlanScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -225,6 +225,49 @@ export async function fetchWeatherOutlook(env: WeatherEnv): Promise<WeatherOutlo
   }
 }
 
+export interface DailyForecast {
+  /** YYYY-MM-DD */
+  date: string;
+  highC: number;
+  lowC: number;
+  precipProbability: number;
+  description: string;
+}
+
+/** One entry per day for the next `days` days — distinct from
+ * fetchWeatherOutlook's single week-aggregate summary; used where each
+ * individual day's own forecast matters (the meal planner weights each
+ * day's suggestion by that day's own weather, not the week's average).
+ * Never throws — same "undefined means omit" contract as the rest of this
+ * module. */
+export async function fetchDailyForecasts(env: WeatherEnv, days = 7): Promise<DailyForecast[] | undefined> {
+  if (env.lat === undefined || env.lon === undefined) return undefined;
+
+  try {
+    const url = new URL(OPEN_METEO_BASE_URL);
+    url.searchParams.set("latitude", String(env.lat));
+    url.searchParams.set("longitude", String(env.lon));
+    url.searchParams.set("daily", "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max");
+    url.searchParams.set("timezone", "auto");
+    url.searchParams.set("forecast_days", String(days));
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Open-Meteo request failed (${res.status})`);
+    const data = (await res.json()) as { daily: OpenMeteoResponse["daily"] };
+
+    return data.daily.time.map((date, i) => ({
+      date,
+      highC: data.daily.temperature_2m_max[i],
+      lowC: data.daily.temperature_2m_min[i],
+      precipProbability: data.daily.precipitation_probability_max[i],
+      description: describeCode(data.daily.weather_code[i]),
+    }));
+  } catch (error) {
+    console.error("[weather] failed to fetch daily forecasts:", error);
+    return undefined;
+  }
+}
+
 export interface WeatherAtMoment {
   description: string;
   tempC: number;

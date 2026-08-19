@@ -90,8 +90,8 @@ import { NotionRepo } from "./notion/queries.js";
 import { FREELANCE_CLIENTS, MEAL_TYPES, UNSORTED_PROJECT, type MealType } from "./notion/schema.js";
 import { loadNtfyEnv } from "./notify/env.js";
 import { loadRecipeEmailEnv } from "./recipes/env.js";
+import { acceptCurrentDay, getCurrentMealPlan, rejectCurrentDay, sendMealPlan, skipCurrentDay, startMealPlan } from "./recipes/planner.js";
 import { extractRecipeFromUrl } from "./recipes/urlExtract.js";
-import { checkRecipeEmail, generateAndSendRecipeEmail } from "./recipes/weeklyEmail.js";
 import { buildExport } from "./settings/export.js";
 import { wipeEverything } from "./settings/wipe.js";
 import { loadWeatherEnv, type WeatherEnv } from "./weather/env.js";
@@ -691,11 +691,6 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
           console.error("[costTracking] alert check failed:", error);
         })
       );
-      backgroundTask(
-        checkRecipeEmail(env, recipeEmailEnv, repo, weatherEnv, llmEnv).catch((error) => {
-          console.error("[recipes] weekly email check failed:", error);
-        })
-      );
       // Resilience for the ticket-nudge sequence when the app isn't opened
       // around a threshold (Today's own GET already drives this the rest
       // of the time).
@@ -1023,20 +1018,43 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       return json(200, { ok: true });
     }
 
-    // On-demand recipe email — same selection + send logic as the automatic
-    // Sunday-noon check, but bypasses its day/time/idempotency gate entirely
-    // (server/recipes/weeklyEmail.ts's generateAndSendRecipeEmail, called
-    // directly rather than through checkRecipeEmail).
-    if (method === "POST" && pathname === "/api/recipes/generate") {
+    // Interactive weekly meal-plan builder — on-demand, no fixed schedule.
+    // GET doubles as "resume the in-progress plan if there is one."
+    if (method === "GET" && pathname === "/api/recipes/plan") {
+      const current = await getCurrentMealPlan(env, repo, weatherEnv);
+      return json(200, current ?? null);
+    }
+
+    if (method === "POST" && pathname === "/api/recipes/plan/start") {
+      return json(200, await startMealPlan(env, repo, weatherEnv));
+    }
+
+    const planAcceptMatch = pathname.match(/^\/api\/recipes\/plan\/([^/]+)\/accept$/);
+    if (method === "POST" && planAcceptMatch) {
+      return json(200, await acceptCurrentDay(env, repo, weatherEnv, planAcceptMatch[1]));
+    }
+
+    const planRejectMatch = pathname.match(/^\/api\/recipes\/plan\/([^/]+)\/reject$/);
+    if (method === "POST" && planRejectMatch) {
+      return json(200, await rejectCurrentDay(env, repo, weatherEnv, planRejectMatch[1]));
+    }
+
+    const planSkipMatch = pathname.match(/^\/api\/recipes\/plan\/([^/]+)\/skip$/);
+    if (method === "POST" && planSkipMatch) {
+      return json(200, await skipCurrentDay(env, repo, weatherEnv, planSkipMatch[1]));
+    }
+
+    const planSendMatch = pathname.match(/^\/api\/recipes\/plan\/([^/]+)\/send$/);
+    if (method === "POST" && planSendMatch) {
       if (!recipeEmailEnv.resendApiKey || !recipeEmailEnv.destinationEmail) {
         return json(503, { error: "Recipe email isn't configured yet — set RESEND_API_KEY and RECIPE_EMAIL_TO in .env." });
       }
       try {
-        const selection = await generateAndSendRecipeEmail(env, recipeEmailEnv, repo, weatherEnv, llmEnv);
-        return json(200, { ok: true, sentTo: recipeEmailEnv.destinationEmail, selection });
+        const result = await sendMealPlan(env, repo, recipeEmailEnv, llmEnv, planSendMatch[1]);
+        return json(200, { ok: true, ...result });
       } catch (error) {
-        console.error("[recipes] generate/send failed:", error);
-        return json(502, { error: error instanceof Error ? error.message : "Couldn't send the recipe email right now." });
+        console.error("[recipes] meal plan send failed:", error);
+        return json(502, { error: error instanceof Error ? error.message : "Couldn't send the meal plan right now." });
       }
     }
 
