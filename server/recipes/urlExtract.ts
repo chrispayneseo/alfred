@@ -7,6 +7,7 @@ import type { Env } from "../db.js";
 import { logModelCall } from "../costTracking/callLog.js";
 import type { LlmEnv } from "../llm/env.js";
 import { routedComplete } from "../llm/routedComplete.js";
+import { stripHtmlToText } from "../shared/htmlToText.js";
 import { MEAL_TYPES } from "../notion/schema.js";
 
 const MAX_TEXT_CHARS = 20_000;
@@ -44,26 +45,6 @@ export interface RecipeExtraction {
 }
 
 export type ExtractionResult = { ok: true; data: RecipeExtraction } | { ok: false; reason: string };
-
-/** Crude but dependency-free HTML-to-text: strips script/style/comments and
- * every remaining tag, then collapses whitespace. Loses structure (no more
- * distinct ingredient/step lists), but recipe pages almost always keep
- * clear textual markers ("Ingredients", "Method", "Step 1"...) even as flat
- * text, and the extraction model below is doing the real structuring work —
- * this just needs to get the readable content out of the markup. */
-function stripHtmlToText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&[a-z0-9#]+;/gi, " ")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
 const SYSTEM_PROMPT = `You extract a recipe from a webpage's text content, which was stripped from HTML so it may be messy or contain unrelated site content mixed in (ads, related-recipe links, comments, navigation, cookie notices, other articles) — ignore anything that isn't clearly part of the recipe itself.
 
