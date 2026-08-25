@@ -30,6 +30,7 @@ const FEATURE_DISPLAY_KEY: Record<FeatureBreakdownEntry["feature"], string> = {
   news_feed_newsletter_scan: "news_feed",
   news_topic_suggestion: "news_feed",
   leeds_ticket_extraction: "leeds_tickets",
+  leeds_tv_search: "leeds_tickets",
 };
 
 const FEATURE_LABEL: Record<string, string> = {

@@ -63,6 +63,7 @@ import {
 } from "./digest/weeklyDigest.js";
 import { actionTicketWindow, checkLeedsTickets, dismissReviewWindow } from "./leedsTickets/check.js";
 import { getLeedsTicketSettings, MEMBERSHIP_TIERS, setLeedsTicketSettings, type MembershipTier } from "./leedsTickets/settings.js";
+import { checkLeedsTvFixtures } from "./leedsTv/check.js";
 import { checkNewsFeed, generateNewsFeedNow } from "./newsFeed/generate.js";
 import { addTopic, listTopics, removeTopic, setTopicDomains } from "./newsFeed/topics.js";
 import {
@@ -553,6 +554,12 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       const settings = { tier, earlyNudgeHours, closeNudgeHours };
       await setLeedsTicketSettings(env, settings);
       return json(200, settings);
+    }
+
+    // Leeds United "on TV" fixture list — GET doubles as the check-on-open
+    // trigger (throttled web-search refresh), same shape as leeds-tickets above.
+    if (method === "GET" && pathname === "/api/leeds-tv") {
+      return json(200, await checkLeedsTvFixtures(env, llmEnv));
     }
 
     if (method === "POST" && pathname === "/api/nudges/check") {

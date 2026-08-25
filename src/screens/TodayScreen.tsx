@@ -7,6 +7,7 @@ import { Evie } from "../components/Evie";
 import { GmailFlagged } from "../components/GmailFlagged";
 import { LeedsBadge } from "../components/LeedsBadge";
 import { LeedsTickets } from "../components/LeedsTickets";
+import { LeedsTv } from "../components/LeedsTv";
 import { LocationPrompt } from "../components/LocationPrompt";
 import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
@@ -52,6 +53,7 @@ const DEFAULT_TODAY_LAYOUT: Layout = [
   { i: "openTasks", x: 0, y: 4, w: 2, h: 3, ...TILE_MIN },
   { i: "recentNotes", x: 2, y: 4, w: 2, h: 3, ...TILE_MIN },
   { i: "tickets", x: 0, y: 7, w: 2, h: 3, ...TILE_MIN },
+  { i: "leedsTv", x: 2, y: 7, w: 2, h: 3, ...TILE_MIN },
 ];
 
 type CalendarState = "loading" | "ok" | "not_connected" | "reconnect_required" | "error";
@@ -370,6 +372,16 @@ export function TodayScreen() {
       ),
       content: <LeedsTickets />,
     },
+    {
+      id: "leedsTv",
+      title: (
+        <span className="flex items-center gap-1.5">
+          <LeedsBadge size={12} />
+          On TV
+        </span>
+      ),
+      content: <LeedsTv />,
+    },
   ];
 
   return (
@@ -464,6 +476,14 @@ export function TodayScreen() {
               Tickets
             </h2>
             <LeedsTickets />
+          </section>
+
+          <section className="mb-8">
+            <h2 className="mb-3 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint dark:text-ink-faint-dark">
+              <LeedsBadge size={12} />
+              On TV
+            </h2>
+            <LeedsTv />
           </section>
 
           <section>

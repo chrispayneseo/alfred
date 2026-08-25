@@ -45,7 +45,8 @@ export type ModelFeature =
   | "news_feed_curation"
   | "news_feed_newsletter_scan"
   | "news_topic_suggestion"
-  | "leeds_ticket_extraction";
+  | "leeds_ticket_extraction"
+  | "leeds_tv_search";
 
 export interface FeatureBreakdownEntry {
   feature: ModelFeature;
