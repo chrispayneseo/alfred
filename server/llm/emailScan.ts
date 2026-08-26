@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "../google/accounts.js";
-import { GoogleNotConnectedError, GoogleReconnectRequiredError, toGoogleErrorCode } from "../google/errors.js";
+import { GoogleNotConnectedError, GoogleReconnectRequiredError } from "../google/errors.js";
 import { createDraftReply, getMessageBody, getReplyHeaders, gmailThreadUrl } from "../google/gmail.js";
 import { getUnscannedEmails, markScanned, type EmailRecord } from "../google/gmailStore.js";
 import type { NotionRepo } from "../notion/queries.js";
