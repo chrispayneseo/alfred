@@ -1,4 +1,4 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
 import type { Plugin } from "vite";
 import { loadEnv } from "vite";
 import { handleApiRequest } from "./handleApiRequest.js";
