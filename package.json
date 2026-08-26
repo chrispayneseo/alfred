@@ -19,13 +19,13 @@
     "scan-to-notion": "tsx scripts/scanFoldersToNotion/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.117.1",
+    "@anthropic-ai/sdk": "^0.120.0",
     "@neondatabase/serverless": "^1.1.0",
-    "@notionhq/client": "^5.25.2",
+    "@notionhq/client": "^5.26.0",
     "@supabase/supabase-js": "^2.112.3",
-    "@vercel/functions": "^3.9.3",
+    "@vercel/functions": "^3.9.5",
     "googleapis": "^174.0.1",
-    "openai": "^7.4.0",
+    "openai": "^7.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-grid-layout": "^2.2.4",
