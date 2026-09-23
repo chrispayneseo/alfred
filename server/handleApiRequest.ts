@@ -188,8 +188,8 @@ async function createEventsForApprovedItem(
     await createEvent(account, base);
     return { ok: true };
   } catch (error) {
-    console.error("[calendarPhoto] failed to create event:", error);
-    return { ok: false, error: error instanceof Error ? error.message : "Couldn't create that event." };
+    console.error("[calendarPhoto] failed to create event:", safeErrorSummary(error));
+    return { ok: false, error: "Couldn't create that event." };
   }
 }
 
@@ -366,7 +366,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         await connectAccount(env, googleEnv, refreshToken);
         return redirect(`/today?calendar=connected`);
       } catch (exchangeError) {
-        console.error(exchangeError);
+        console.error("[google] OAuth callback failed:", safeErrorSummary(exchangeError));
         return redirect(`/today?calendar=error`);
       }
     }

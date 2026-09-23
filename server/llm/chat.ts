@@ -1,6 +1,7 @@
 import type { CoachPlanEnv } from "../coachplan/env.js";
 import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
+import { safeErrorSummary } from "../safeErrorSummary.js";
 import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
 import { WRITABLE_CALENDAR_ACCOUNT } from "../google/calendarWriteGuard.js";
 import type { NotionRepo } from "../notion/queries.js";
@@ -82,7 +83,7 @@ export async function runPlainCloudChat(env: LlmEnv, dbEnv: Env, prompt: string)
     return { text: result.text.trim(), model: intended, intendedModel: intended,
       fellBack: false, confidence: "direct" };
   } catch (error) {
-    console.error(`[chat] plain ${intended} failed:`, error);
+    console.error(`[chat] plain ${intended} failed:`, safeErrorSummary(error));
     try {
       const result = await callModel(fallback, env, messages);
       await logModelCall(dbEnv, { provider: fallback, feature: "chat",
