@@ -40,6 +40,7 @@ import {
 import { emailSearchTermsFor, isFreelanceClient } from "./freelance/clientContacts.js";
 import { getScanStatus, startScan } from "./llm/emailScan.js";
 import { runChat, runPlainCloudChat } from "./llm/chat.js";
+import { safeErrorSummary } from "./safeErrorSummary.js";
 import { isCaptureItem, splitAndClassifyCapture } from "./llm/splitCapture.js";
 import { loadLlmEnv } from "./llm/env.js";
 import { transcribeAudio } from "./llm/openai.js";
@@ -1098,7 +1099,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
 
     return json(404, { error: "not found" });
   } catch (error) {
-    console.error(error);
-    return json(500, { error: error instanceof Error ? error.message : "internal error" });
+    console.error("[api] unhandled request error:", safeErrorSummary(error));
+    return json(500, { error: "internal error" });
   }
 }

@@ -23,6 +23,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { waitUntil } from "@vercel/functions";
 import { handleApiRequest } from "../server/handleApiRequest.js";
+import { safeErrorSummary } from "../server/safeErrorSummary.js";
 
 interface VercelLikeRequest extends IncomingMessage {
   body?: unknown;
@@ -45,7 +46,7 @@ export default async function handler(req: VercelLikeRequest, res: ServerRespons
     // while the actual work continues for up to the function's maxDuration
     // (see vercel.json) — see server/handleApiRequest.ts's backgroundTask doc.
     backgroundTask: (task) => {
-      waitUntil(task.catch((error) => console.error("[api] background task failed:", error)));
+      waitUntil(task.catch((error) => console.error("[api] background task failed:", safeErrorSummary(error))));
     },
   });
 
