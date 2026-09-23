@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
-import { askLocalGateway, sendLocalOnly, sendPlainCloudMessage } from "../integrations/llm/api";
+import { askLocalGateway, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
 import { makeId } from "../lib/id";
@@ -83,7 +83,8 @@ export function ChatScreen() {
       const gateway = await askLocalGateway(text);
       if (gateway.decision === "connection_needed") {
         setMessages((prev) => [...prev, {
-          id: makeId(), role: "assistant", text: gateway.reply, model: "local",
+          id: makeId(), role: "assistant", text: gateway.reply,
+          cloudPrompt: text, cloudScope: "connected", cloudStatus: "pending",
           createdAt: new Date().toISOString(),
         }]);
         return;
@@ -91,7 +92,7 @@ export function ChatScreen() {
       if (gateway.decision === "approval_required") {
         setMessages((prev) => [...prev, {
           id: makeId(), role: "assistant", text: gateway.reason,
-          cloudPrompt: gateway.cloud_prompt, cloudStatus: "pending",
+          cloudPrompt: gateway.cloud_prompt, cloudScope: "prompt_only", cloudStatus: "pending",
           createdAt: new Date().toISOString(),
         }]);
         return;
@@ -142,14 +143,29 @@ export function ChatScreen() {
     }
   }
 
-  async function handleApproveCloud(messageId: string, prompt: string) {
+  function cloudMessage(result: ChatApiResult): ChatMessage {
+    return {
+      id: makeId(), role: "assistant", text: result.text, model: result.model,
+      eventProposal: result.eventProposal,
+      eventProposalStatus: result.eventProposal ? "pending" : undefined,
+      locationReminderProposal: result.locationReminderProposal,
+      locationReminderProposalStatus: result.locationReminderProposal ? "pending" : undefined,
+      recipeProposal: result.recipeProposal,
+      recipeProposalStatus: result.recipeProposal ? "pending" : undefined,
+      recipeProposalMealType: result.recipeProposal?.mealType ?? "Dinner",
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async function handleApproveCloud(messageId: string, prompt: string, scope: "prompt_only" | "connected") {
     setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sending" } : m));
     try {
-      const result = await sendPlainCloudMessage(prompt);
+      const result = scope === "connected"
+        ? await sendChatMessage([{ role: "user", content: prompt }])
+        : await sendPlainCloudMessage(prompt);
       setMessages((prev) => [
         ...prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sent" as const } : m),
-        { id: makeId(), role: "assistant", text: result.text, model: result.model,
-          createdAt: new Date().toISOString() },
+        cloudMessage(result),
       ]);
     } catch (error) {
       setMessages((prev) => prev.map((m) => m.id === messageId
@@ -158,7 +174,11 @@ export function ChatScreen() {
     }
   }
 
-  async function handleKeepLocal(messageId: string, prompt: string) {
+  async function handleKeepLocal(messageId: string, prompt: string, scope: "prompt_only" | "connected") {
+    if (scope === "connected") {
+      setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "cancelled" } : m));
+      return;
+    }
     setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sending" } : m));
     try {
       const reply = await sendLocalOnly(prompt);
@@ -297,17 +317,21 @@ export function ChatScreen() {
             )}
             {message.cloudPrompt && (
               <div className="mt-2 max-w-xl rounded-2xl border border-line p-3 text-left dark:border-line-dark">
-                <p className="text-xs text-ink-soft dark:text-ink-soft-dark">Only this text will be sent to a cloud model. Alfred's saved memory and connected accounts are excluded:</p>
+                <p className="text-xs text-ink-soft dark:text-ink-soft-dark">
+                  {message.cloudScope === "connected"
+                    ? "If you approve, Alfred may send relevant connected account data with this request to Claude or ChatGPT. Dell memory stays private."
+                    : "Only this text will be sent to a cloud model. Alfred's saved memory and connected accounts are excluded:"}
+                </p>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-ink dark:text-ink-dark">{message.cloudPrompt}</p>
                 {message.cloudStatus === "pending" || message.cloudStatus === "error" ? (
                   <div className="mt-3 flex gap-3">
-                    <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!)}
-                      className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">Send to cloud</button>
-                    <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!)}
-                      className="text-xs text-ink-soft dark:text-ink-soft-dark">Answer locally</button>
+                    <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only")}
+                      className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">{message.cloudScope === "connected" ? "Use connected account" : "Send to cloud"}</button>
+                    <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only")}
+                      className="text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudScope === "connected" ? "Keep private" : "Answer locally"}</button>
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudStatus === "sending" ? "Working…" : message.cloudStatus === "sent" ? "Sent with your approval." : "Answered locally."}</p>
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudStatus === "sending" ? "Working…" : message.cloudStatus === "sent" ? "Sent with your approval." : message.cloudScope === "connected" ? "Kept private." : "Answered locally."}</p>
                 )}
               </div>
             )}

@@ -43,6 +43,7 @@ export interface ChatMessage {
   confidence?: Confidence;
   note?: string;
   cloudPrompt?: string;
+  cloudScope?: "prompt_only" | "connected";
   cloudStatus?: "pending" | "sending" | "sent" | "cancelled" | "error";
   isError?: boolean;
   createdAt: string;
