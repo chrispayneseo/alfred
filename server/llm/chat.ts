@@ -68,6 +68,34 @@ export interface ChatResult {
   recipeProposal?: RecipeProposal;
 }
 
+/** Cloud specialist call with only the user-approved prompt. No connected
+ * account lookup, stored memory, or conversation history enters this path. */
+export async function runPlainCloudChat(env: LlmEnv, dbEnv: Env, prompt: string): Promise<ChatResult> {
+  const intended = routeToModel(prompt);
+  const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
+  const messages: ChatTurn[] = [{ role: "user", content: prompt }];
+  try {
+    const result = await callModel(intended, env, messages);
+    await logModelCall(dbEnv, { provider: intended, feature: "chat",
+      model: intended === "claude" ? "claude-opus-5" : env.openaiModel,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+    return { text: result.text.trim(), model: intended, intendedModel: intended,
+      fellBack: false, confidence: "direct" };
+  } catch (error) {
+    console.error(`[chat] plain ${intended} failed:`, error);
+    try {
+      const result = await callModel(fallback, env, messages);
+      await logModelCall(dbEnv, { provider: fallback, feature: "chat",
+        model: fallback === "claude" ? "claude-opus-5" : env.openaiModel,
+        inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      return { text: result.text.trim(), model: fallback, intendedModel: intended,
+        fellBack: true, confidence: "direct" };
+    } catch {
+      throw new Error("both_unavailable");
+    }
+  }
+}
+
 // Asked of every answer, not just ones with injected context — a plain
 // conversational reply or general knowledge counts as DIRECT too. The tag is
 // parsed out of the raw text below and never shown to the user; it's a

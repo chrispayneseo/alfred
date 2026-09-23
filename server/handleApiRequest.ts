@@ -39,7 +39,7 @@ import {
 } from "./google/gmailStore.js";
 import { emailSearchTermsFor, isFreelanceClient } from "./freelance/clientContacts.js";
 import { getScanStatus, startScan } from "./llm/emailScan.js";
-import { runChat } from "./llm/chat.js";
+import { runChat, runPlainCloudChat } from "./llm/chat.js";
 import { isCaptureItem, splitAndClassifyCapture } from "./llm/splitCapture.js";
 import { loadLlmEnv } from "./llm/env.js";
 import { transcribeAudio } from "./llm/openai.js";
@@ -250,6 +250,19 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
         if (error instanceof Error && error.message === "both_unavailable") {
           return json(502, { error: "both_unavailable" });
         }
+        throw error;
+      }
+    }
+
+    if (method === "POST" && pathname === "/api/chat/plain") {
+      const body = await readBody();
+      const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+      if (!prompt || prompt.length > 4000) return json(400, { error: "A prompt under 4000 characters is required" });
+      if (body.approved !== true) return json(428, { error: "Cloud handoff requires approval" });
+      try {
+        return json(200, await runPlainCloudChat(llmEnv, env, prompt));
+      } catch (error) {
+        if (error instanceof Error && error.message === "both_unavailable") return json(502, { error: "both_unavailable" });
         throw error;
       }
     }

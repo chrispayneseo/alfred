@@ -1,10 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
-import { sendChatMessage, type ChatApiTurn } from "../integrations/llm/api";
+import { askLocalGateway, sendLocalOnly, sendPlainCloudMessage } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
-import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
 import { CONTENT_MAX_WIDTH, CONTENT_PADDING_X } from "../lib/layout";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
@@ -40,7 +39,7 @@ function buildInitialMessages(): ChatMessage[] {
   ];
 }
 
-const MODEL_LABEL = { claude: "Claude", chatgpt: "ChatGPT" } as const;
+const MODEL_LABEL = { local: "Alfred Local", claude: "Claude", chatgpt: "ChatGPT" } as const;
 
 export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>(buildInitialMessages);
@@ -50,7 +49,6 @@ export function ChatScreen() {
   const [submittingLocationReminderId, setSubmittingLocationReminderId] = useState<string>();
   const [submittingRecipeId, setSubmittingRecipeId] = useState<string>();
   const online = useOnlineStatus();
-  const { coords } = useLiveLocation();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -63,11 +61,6 @@ export function ChatScreen() {
       text,
       createdAt: new Date().toISOString(),
     };
-    const history: ChatApiTurn[] = [...messages, userMessage].map((m) => ({
-      role: m.role,
-      content: m.text,
-    }));
-
     setMessages((prev) => [...prev, userMessage]);
     setDraft("");
 
@@ -77,7 +70,7 @@ export function ChatScreen() {
         {
           id: makeId(),
           role: "assistant",
-          text: "You're offline, so I can't reach Claude or ChatGPT right now — I'll be here once you're back online.",
+          text: "You're offline, so I can't reach the Dell right now — I'll be here once you're back online.",
           isError: true,
           createdAt: new Date().toISOString(),
         },
@@ -87,7 +80,24 @@ export function ChatScreen() {
 
     setIsThinking(true);
     try {
-      const result = await sendChatMessage(history, coords);
+      const gateway = await askLocalGateway(text);
+      if (gateway.decision === "approval_required") {
+        setMessages((prev) => [...prev, {
+          id: makeId(), role: "assistant", text: gateway.reason,
+          cloudPrompt: gateway.cloud_prompt, cloudStatus: "pending",
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
+      if (gateway.decision === "local") {
+        setMessages((prev) => [...prev, {
+          id: makeId(), role: "assistant", text: gateway.reply, model: "local",
+          note: gateway.memories_used ? `Used ${gateway.memories_used} local memory item(s)` : undefined,
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
+      const result = await sendPlainCloudMessage(gateway.cloud_prompt);
       setMessages((prev) => [
         ...prev,
         {
@@ -110,21 +120,49 @@ export function ChatScreen() {
         },
       ]);
     } catch (error) {
-      const bothDown = error instanceof Error && error.message === "both_unavailable";
       setMessages((prev) => [
         ...prev,
         {
           id: makeId(),
           role: "assistant",
-          text: bothDown
-            ? "Claude and ChatGPT are both unavailable right now. Try again in a moment."
-            : "Something went wrong reaching the assistant. Try again in a moment.",
+          text: error instanceof Error ? error.message : "Something went wrong reaching Alfred.",
           isError: true,
           createdAt: new Date().toISOString(),
         },
       ]);
     } finally {
       setIsThinking(false);
+    }
+  }
+
+  async function handleApproveCloud(messageId: string, prompt: string) {
+    setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sending" } : m));
+    try {
+      const result = await sendPlainCloudMessage(prompt);
+      setMessages((prev) => [
+        ...prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sent" as const } : m),
+        { id: makeId(), role: "assistant", text: result.text, model: result.model,
+          createdAt: new Date().toISOString() },
+      ]);
+    } catch (error) {
+      setMessages((prev) => prev.map((m) => m.id === messageId
+        ? { ...m, cloudStatus: "error", note: error instanceof Error ? error.message : "Cloud request failed" }
+        : m));
+    }
+  }
+
+  async function handleKeepLocal(messageId: string, prompt: string) {
+    setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sending" } : m));
+    try {
+      const reply = await sendLocalOnly(prompt);
+      setMessages((prev) => [
+        ...prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "cancelled" as const } : m),
+        { id: makeId(), role: "assistant", text: reply, model: "local", createdAt: new Date().toISOString() },
+      ]);
+    } catch (error) {
+      setMessages((prev) => prev.map((m) => m.id === messageId
+        ? { ...m, cloudStatus: "error", note: error instanceof Error ? error.message : "Local request failed" }
+        : m));
     }
   }
 
@@ -249,6 +287,22 @@ export function ChatScreen() {
             </p>
             {message.note && (
               <p className="mt-1 text-[11px] text-ink-faint dark:text-ink-faint-dark">{message.note}</p>
+            )}
+            {message.cloudPrompt && (
+              <div className="mt-2 max-w-xl rounded-2xl border border-line p-3 text-left dark:border-line-dark">
+                <p className="text-xs text-ink-soft dark:text-ink-soft-dark">Only this text will be sent to a cloud model. Alfred's saved memory and connected accounts are excluded:</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-ink dark:text-ink-dark">{message.cloudPrompt}</p>
+                {message.cloudStatus === "pending" || message.cloudStatus === "error" ? (
+                  <div className="mt-3 flex gap-3">
+                    <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!)}
+                      className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">Send to cloud</button>
+                    <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!)}
+                      className="text-xs text-ink-soft dark:text-ink-soft-dark">Answer locally</button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudStatus === "sending" ? "Working…" : message.cloudStatus === "sent" ? "Sent with your approval." : "Answered locally."}</p>
+                )}
+              </div>
             )}
             {message.eventProposal && (
               <div className="mt-2 inline-block w-full max-w-[85%] lg:max-w-xl rounded-2xl border border-line px-4 py-3 text-left dark:border-line-dark">

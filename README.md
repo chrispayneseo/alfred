@@ -68,6 +68,12 @@ Run `npm test` to run the standalone router unit tests (`server/llm/router.test.
 
 ## Chat routing
 
+### Dell-first chat gateway (staged integration)
+
+The Chat screen now contacts `https://alfred.tailde2d45.ts.net/v1/gateway` first. That private address requires the user's device to be connected to the same Tailscale network. The Dell's 1.7B model triages the request; its 4B model answers locally where appropriate. General specialist requests go to `/api/chat/plain`, which receives only the current user prompt and does not fetch connected account data or Dell memory. Requests containing personal language or account references show an approval card with the exact prompt before that cloud call; the user can choose a local answer instead. If the Dell is unavailable, Chat reports the error and does not silently route around it.
+
+The Dell API must bind to host loopback and be published through Tailscale Serve. Configure `ALFRED_TAILSCALE_USER` and `ALFRED_WEB_ORIGIN=https://alfred-five-livid.vercel.app` on the Dell so its browser route accepts only the chosen tailnet identity and web origin. The private API key stays off the browser.
+
 `server/llm/router.ts` is a pure, dependency-free function — keyword match on the message text decides Claude vs ChatGPT. If the chosen model's API call fails for any reason, `server/llm/chat.ts` retries the same request on the other model and reports which model actually answered (`ChatMessage.model`) plus a `note` when a fallback happened. If both fail, the Chat screen shows a distinct "assistant unavailable" message rather than a silent failure; if the browser is offline, it shows that instead without attempting the call.
 
 ## Google Calendar
