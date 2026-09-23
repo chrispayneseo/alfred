@@ -38,7 +38,7 @@ function signedMessage(sender = "447000000001", phoneId = "business-number-id") 
     object: "whatsapp_business_account",
     entry: [{ changes: [{ field: "messages", value: {
       metadata: { phone_number_id: phoneId },
-      messages: [{ id: "wamid.test_message_12345678", from: sender, timestamp: "123", type: "text", text: { body: "Remember the appointment" } }],
+      messages: [{ id: "wamid.test_message_12345678=", from: sender, timestamp: "123", type: "text", text: { body: "Remember the appointment" } }],
     } }] }],
   });
   const signature = createHmac("sha256", "test-secret").update(body).digest("hex");
@@ -78,7 +78,7 @@ test("collector is private and acknowledgement removes the item", async () => {
   assert.equal((await inbox.json()).messages.length, 1);
   const ack = await worker.fetch(new Request("https://ingress.example/inbox/ack", {
     method: "POST", headers: { authorization, "content-type": "application/json" },
-    body: JSON.stringify({ id: "wamid.test_message_12345678" }),
+    body: JSON.stringify({ id: "wamid.test_message_12345678=" }),
   }), env);
   assert.equal(ack.status, 200);
   assert.equal(saved.size, 0);

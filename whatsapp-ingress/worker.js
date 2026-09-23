@@ -90,7 +90,9 @@ export default {
       } catch {
         return json({ error: "invalid_json" }, 400);
       }
-      if (typeof id !== "string" || !/^wamid\.[A-Za-z0-9_-]{8,256}$/.test(id)) return json({ error: "invalid_id" }, 400);
+      // Meta message IDs can contain base64 padding. The prepared statement
+      // keeps the value safe; this check only bounds the accepted input.
+      if (typeof id !== "string" || !/^wamid\.[A-Za-z0-9_+/=.-]{8,256}$/.test(id)) return json({ error: "invalid_id" }, 400);
       await env.INBOX_DB.prepare("DELETE FROM whatsapp_inbox WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }

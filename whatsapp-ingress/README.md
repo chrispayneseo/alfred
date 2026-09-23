@@ -1,12 +1,12 @@
 # Alfred WhatsApp ingress (pilot)
 
-This is a separate public Cloudflare Worker, **not** a route on the protected Alfred app and not an exposed port on the Dell. It receives Meta's direct-delivery webhook, verifies Meta's HMAC over the original request bytes, and stores text only when both the destination phone-number ID and sender match configured allowlists. It never sends WhatsApp messages. The Dell can fetch pending messages using a scoped collector token and acknowledge them after safely recording them in Alfred.
+This is a separate public Cloudflare Worker, **not** a route on the protected Alfred app and not an exposed port on the Dell. It receives Meta's Cloud API webhook, verifies Meta's HMAC over the original request bytes, and stores text only when both the destination phone-number ID and sender match configured allowlists. It never sends WhatsApp messages. The Dell can fetch pending messages using a scoped collector token and acknowledge them after safely recording them in Alfred.
 
-This is deliberately a first layer, **not a complete WhatsApp integration**. Nothing should be connected in Cosend until the Worker is deployed, signed-message tests pass against the live URL, and the Dell collector is ready. Do not enable history import or Cosend AI/automation. Use Cosend's *direct delivery* mode, not default/forwarding mode, if the stated no-content-storage property is required.
+This is deliberately a first layer, **not a complete WhatsApp integration**. Do not register a phone number until the Worker has its secrets, signed-message tests pass against the live URL, and the Dell collector is ready. Use a dedicated number, not Peacock's existing WhatsApp Business app number. Do not enable Meta message-history import.
 
 Required Worker secrets (never commit values):
 
-- `META_APP_SECRET`: the signing secret shown on the Cosend connection settings page for direct delivery.
+- `META_APP_SECRET`: the app secret for the dedicated Meta developer app whose WhatsApp webhook is subscribed.
 - `META_VERIFY_TOKEN`: a random token generated for Meta's webhook challenge.
 - `COLLECTOR_TOKEN`: a different random token, at least 32 characters, used only by the Dell.
 - `ALLOWED_SENDER`: the owner's personal WhatsApp number in international format.
