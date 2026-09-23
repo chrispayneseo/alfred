@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { safeErrorSummary } from "../safeErrorSummary.js";
 import { createOAuth2Client } from "./client.js";
 import type { GoogleEnv } from "./env.js";
 
@@ -116,6 +117,6 @@ export async function revokeToken(env: GoogleEnv): Promise<void> {
   try {
     await client.revokeToken(env.refreshToken);
   } catch (error) {
-    console.error("[oauth] token revocation failed (continuing — token will still be cleared locally):", error);
+    console.error("[oauth] token revocation failed (continuing — token will still be cleared locally):", safeErrorSummary(error));
   }
 }

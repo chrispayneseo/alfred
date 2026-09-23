@@ -31,7 +31,7 @@ export async function askLocalGateway(message: string): Promise<GatewayResult> {
     body: JSON.stringify({ message }),
   });
   if (!res.ok) throw new Error(`Local gateway unavailable (${res.status})`);
-  return res.json();
+  return await res.json() as GatewayResult;
 }
 
 export async function sendLocalOnly(message: string): Promise<string> {
@@ -51,7 +51,7 @@ export async function sendPlainCloudMessage(prompt: string): Promise<ChatApiResu
     body: JSON.stringify({ prompt, approved: true }),
   });
   if (!res.ok) throw new Error(`Cloud specialist unavailable (${res.status})`);
-  return res.json();
+  return await res.json() as ChatApiResult;
 }
 
 export async function sendChatMessage(messages: ChatApiTurn[], location?: { lat: number; lon: number }): Promise<ChatApiResult> {
@@ -62,10 +62,10 @@ export async function sendChatMessage(messages: ChatApiTurn[], location?: { lat:
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+    const body = await res.json().catch(() => ({})) as { error?: string };
     if (body.error === "both_unavailable") throw new Error("both_unavailable");
     throw new Error(typeof body.error === "string" ? body.error : `Request failed (${res.status})`);
   }
 
-  return res.json();
+  return await res.json() as ChatApiResult;
 }

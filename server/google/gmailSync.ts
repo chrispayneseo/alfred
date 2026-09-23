@@ -3,6 +3,7 @@ import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from 
 import { GoogleReconnectRequiredError, toGoogleErrorCode } from "./errors.js";
 import { countTotal, setMeta, upsertEmailMetadata } from "./gmailStore.js";
 import { ensureSchema, getSql, type Env } from "../db.js";
+import { safeErrorSummary } from "../safeErrorSummary.js";
 
 export interface SyncStatus {
   running: boolean;
@@ -88,7 +89,7 @@ export async function startSync(
 
   backgroundTask(
     runSync(env, accounts, days).catch(async (error) => {
-      console.error("[gmailSync] sync failed:", error);
+      console.error("[gmailSync] sync failed:", safeErrorSummary(error));
       await sql.query("UPDATE sync_job SET running = false, error = $1, updated_at = now() WHERE id = 'singleton'", [
         toGoogleErrorCode(error),
       ]);
@@ -110,7 +111,7 @@ async function runSync(env: Env, accounts: GoogleAccountEnv[], days: number): Pr
       await syncAccount(env, account, afterDate);
       await markAccountOk(env, account.email);
     } catch (error) {
-      console.error(`[gmailSync] account ${account.email} failed:`, error);
+      console.error(`[gmailSync] account ${account.email} failed:`, safeErrorSummary(error));
       if (error instanceof GoogleReconnectRequiredError) await markAccountNeedsReconnect(env, account.email);
       failedAccounts.push(account.email);
     }

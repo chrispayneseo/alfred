@@ -5,6 +5,7 @@ import { askLocalGateway, sendChatMessage, sendLocalOnly, sendPlainCloudMessage,
 import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
 import { makeId } from "../lib/id";
+import { planGatewayDecision } from "../lib/gatewayDecision";
 import { CONTENT_MAX_WIDTH, CONTENT_PADDING_X } from "../lib/layout";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type { ChatMessage, EventProposal, LocationReminderProposal, MealType, RecipeProposal } from "../types";
@@ -81,52 +82,20 @@ export function ChatScreen() {
     setIsThinking(true);
     try {
       const gateway = await askLocalGateway(text);
-      if (gateway.decision === "connection_needed") {
+      const plan = planGatewayDecision(gateway, text);
+      if (plan.kind === "approval") {
         setMessages((prev) => [...prev, {
-          id: makeId(), role: "assistant", text: gateway.reply,
-          cloudPrompt: text, cloudScope: "connected", cloudStatus: "pending",
+          id: makeId(), role: "assistant", text: plan.reason,
+          cloudPrompt: plan.prompt, cloudScope: plan.scope, cloudStatus: "pending",
           createdAt: new Date().toISOString(),
         }]);
         return;
       }
-      if (gateway.decision === "approval_required") {
-        setMessages((prev) => [...prev, {
-          id: makeId(), role: "assistant", text: gateway.reason,
-          cloudPrompt: gateway.cloud_prompt, cloudScope: "prompt_only", cloudStatus: "pending",
-          createdAt: new Date().toISOString(),
-        }]);
-        return;
-      }
-      if (gateway.decision === "local") {
-        setMessages((prev) => [...prev, {
-          id: makeId(), role: "assistant", text: gateway.reply, model: "local",
-          note: gateway.memories_used ? `Used ${gateway.memories_used} local memory item(s)` : undefined,
-          createdAt: new Date().toISOString(),
-        }]);
-        return;
-      }
-      const result = await sendPlainCloudMessage(gateway.cloud_prompt);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          role: "assistant",
-          text: result.text,
-          model: result.model,
-          confidence: result.confidence,
-          note: result.fellBack
-            ? `${MODEL_LABEL[result.intendedModel]} unavailable — answered with ${MODEL_LABEL[result.model]}`
-            : undefined,
-          eventProposal: result.eventProposal,
-          eventProposalStatus: result.eventProposal ? "pending" : undefined,
-          locationReminderProposal: result.locationReminderProposal,
-          locationReminderProposalStatus: result.locationReminderProposal ? "pending" : undefined,
-          recipeProposal: result.recipeProposal,
-          recipeProposalStatus: result.recipeProposal ? "pending" : undefined,
-          recipeProposalMealType: result.recipeProposal?.mealType ?? "Dinner",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      setMessages((prev) => [...prev, {
+        id: makeId(), role: "assistant", text: plan.reply, model: "local",
+        note: plan.memoriesUsed ? `Used ${plan.memoriesUsed} local memory item(s)` : undefined,
+        createdAt: new Date().toISOString(),
+      }]);
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -146,6 +115,10 @@ export function ChatScreen() {
   function cloudMessage(result: ChatApiResult): ChatMessage {
     return {
       id: makeId(), role: "assistant", text: result.text, model: result.model,
+      confidence: result.confidence,
+      note: result.fellBack
+        ? `${MODEL_LABEL[result.intendedModel]} unavailable — answered with ${MODEL_LABEL[result.model]}`
+        : undefined,
       eventProposal: result.eventProposal,
       eventProposalStatus: result.eventProposal ? "pending" : undefined,
       locationReminderProposal: result.locationReminderProposal,
@@ -174,11 +147,7 @@ export function ChatScreen() {
     }
   }
 
-  async function handleKeepLocal(messageId: string, prompt: string, scope: "prompt_only" | "connected") {
-    if (scope === "connected") {
-      setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "cancelled" } : m));
-      return;
-    }
+  async function handleKeepLocal(messageId: string, prompt: string) {
     setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sending" } : m));
     try {
       const reply = await sendLocalOnly(prompt);
@@ -327,11 +296,11 @@ export function ChatScreen() {
                   <div className="mt-3 flex gap-3">
                     <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only")}
                       className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">{message.cloudScope === "connected" ? "Use connected account" : "Send to cloud"}</button>
-                    <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only")}
-                      className="text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudScope === "connected" ? "Keep private" : "Answer locally"}</button>
+                    <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!)}
+                      className="text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudScope === "connected" ? "Answer without account" : "Answer locally"}</button>
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudStatus === "sending" ? "Working…" : message.cloudStatus === "sent" ? "Sent with your approval." : message.cloudScope === "connected" ? "Kept private." : "Answered locally."}</p>
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudStatus === "sending" ? "Working…" : message.cloudStatus === "sent" ? "Sent with your approval." : "Answered locally."}</p>
                 )}
               </div>
             )}

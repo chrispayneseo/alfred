@@ -161,7 +161,7 @@ function extractEventProposal(text: string): { text: string; eventProposal?: Eve
       },
     };
   } catch (error) {
-    console.error("[chat] couldn't parse event proposal JSON:", error, match[1]);
+    console.error("[chat] couldn't parse event proposal JSON:", safeErrorSummary(error));
     return { text: cleanText };
   }
 }
@@ -198,7 +198,7 @@ function extractLocationReminderProposal(text: string): { text: string; location
       locationReminderProposal: { text: parsed.text, locationTrigger: parsed.locationTrigger, project: parsed.project },
     };
   } catch (error) {
-    console.error("[chat] couldn't parse location reminder proposal JSON:", error, match[1]);
+    console.error("[chat] couldn't parse location reminder proposal JSON:", safeErrorSummary(error));
     return { text: cleanText };
   }
 }
@@ -315,7 +315,7 @@ export async function runChat(
     const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
     return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal, locationReminderProposal, recipeProposal };
   } catch (primaryError) {
-    console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
+    console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, safeErrorSummary(primaryError));
     try {
       const { text: raw, inputTokens, outputTokens } = await callModel(fallback, env, messages, extraContext);
       await logModelCall(dbEnv, {
@@ -330,7 +330,7 @@ export async function runChat(
       const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
       return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal, locationReminderProposal, recipeProposal };
     } catch (fallbackError) {
-      console.error(`[chat] ${fallback} fallback also failed:`, fallbackError);
+      console.error(`[chat] ${fallback} fallback also failed:`, safeErrorSummary(fallbackError));
       throw new Error("both_unavailable");
     }
   }
