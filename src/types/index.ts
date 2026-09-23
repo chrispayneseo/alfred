@@ -1,4 +1,4 @@
-export type ModelSource = "claude" | "chatgpt";
+export type ModelSource = "local" | "claude" | "chatgpt";
 export type Confidence = "direct" | "inferred";
 
 export interface EventProposal {
@@ -42,6 +42,10 @@ export interface ChatMessage {
   model?: ModelSource;
   confidence?: Confidence;
   note?: string;
+  cloudPrompt?: string;
+  cloudScope?: "prompt_only" | "connected";
+  cloudLocation?: { lat: number; lon: number };
+  cloudStatus?: "pending" | "sending" | "sent" | "cancelled" | "error";
   isError?: boolean;
   createdAt: string;
   eventProposal?: EventProposal;

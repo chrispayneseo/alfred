@@ -34,7 +34,7 @@ function ExportControl() {
       <p className="mb-2 text-sm text-ink-soft dark:text-ink-soft-dark">
         Download what Alfred caches locally — email metadata, nudge history, and a summary of connected
         integrations and their scopes. Not included: your Notion content (already yours, exportable from
-        Notion directly) or any credentials.
+        Notion directly), Dell memory (managed separately above), or any credentials.
       </p>
       <button
         onClick={handleExport}
@@ -72,7 +72,7 @@ function WipeControl() {
       <div className="max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
         <p className="text-sm text-ink-soft dark:text-ink-soft-dark">
           Disconnected. Google access was revoked and local caches cleared — Alfred is back to a fresh
-          "not connected" state. Your Notion workspace wasn't touched.
+          "not connected" state. Your Notion workspace and Dell memory weren't touched.
         </p>
       </div>
     );
@@ -82,7 +82,7 @@ function WipeControl() {
     <div className="max-w-2xl rounded-xl border border-line px-4 py-3 dark:border-line-dark">
       <p className="mb-2 text-sm text-ink-soft dark:text-ink-soft-dark">
         Revokes Google access (Calendar + Gmail) and clears everything Alfred caches locally. Your Notion
-        workspace and its content are never touched. This can't be undone.
+        workspace and Dell memory are not touched. This can't be undone.
       </p>
       <p className="mb-2 text-xs text-ink-faint dark:text-ink-faint-dark">
         Type <span className="font-medium text-ink dark:text-ink-dark">delete</span> to confirm.

@@ -3,6 +3,7 @@ import type { LlmEnv } from "./env.js";
 import { chatGptComplete, chatGptVisionComplete } from "./openai.js";
 import { routeToModel, type ModelChoice } from "./router.js";
 import type { CompletionResult } from "./types.js";
+import { safeErrorSummary } from "../safeErrorSummary.js";
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/webp";
 
@@ -68,7 +69,7 @@ export async function routedComplete(
   try {
     return await callModel(intended, env, systemPrompt, userText, maxTokens, claudeModel);
   } catch (primaryError) {
-    console.error(`[routedComplete] ${intended} failed, falling back to ${fallback}:`, primaryError);
+    console.error(`[routedComplete] ${intended} failed, falling back to ${fallback}:`, safeErrorSummary(primaryError));
     return await callModel(fallback, env, systemPrompt, userText, maxTokens, claudeModel);
   }
 }
@@ -91,7 +92,7 @@ export async function routedVisionComplete(
   try {
     return await callVisionModel(intended, env, systemPrompt, userText, imageBase64, imageMediaType, maxTokens, claudeModel);
   } catch (primaryError) {
-    console.error(`[routedVisionComplete] ${intended} failed, falling back to ${fallback}:`, primaryError);
+    console.error(`[routedVisionComplete] ${intended} failed, falling back to ${fallback}:`, safeErrorSummary(primaryError));
     return await callVisionModel(fallback, env, systemPrompt, userText, imageBase64, imageMediaType, maxTokens, claudeModel);
   }
 }

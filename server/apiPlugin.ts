@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { Plugin } from "vite";
 import { loadEnv } from "vite";
 import { handleApiRequest } from "./handleApiRequest.js";
+import { safeErrorSummary } from "./safeErrorSummary.js";
 
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -47,7 +48,7 @@ export function apiPlugin(): Plugin {
           // Fine as fire-and-forget here: this dev process stays alive for
           // as long as `npm run dev` runs, unlike a serverless invocation.
           backgroundTask: (task) => {
-            void task.catch((error) => console.error("[apiPlugin] background task failed:", error));
+            void task.catch((error) => console.error("[apiPlugin] background task failed:", safeErrorSummary(error)));
           },
         });
 

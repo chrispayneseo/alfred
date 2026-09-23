@@ -1,6 +1,7 @@
 import type { CoachPlanEnv } from "../coachplan/env.js";
 import type { Env } from "../db.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
+import { safeErrorSummary } from "../safeErrorSummary.js";
 import { DEFAULT_TIME_ZONE } from "../google/calendar.js";
 import { WRITABLE_CALENDAR_ACCOUNT } from "../google/calendarWriteGuard.js";
 import type { NotionRepo } from "../notion/queries.js";
@@ -68,6 +69,34 @@ export interface ChatResult {
   recipeProposal?: RecipeProposal;
 }
 
+/** Cloud specialist call with only the user-approved prompt. No connected
+ * account lookup, stored memory, or conversation history enters this path. */
+export async function runPlainCloudChat(env: LlmEnv, dbEnv: Env, prompt: string): Promise<ChatResult> {
+  const intended = routeToModel(prompt);
+  const fallback: ModelChoice = intended === "claude" ? "chatgpt" : "claude";
+  const messages: ChatTurn[] = [{ role: "user", content: prompt }];
+  try {
+    const result = await callModel(intended, env, messages);
+    await logModelCall(dbEnv, { provider: intended, feature: "chat",
+      model: intended === "claude" ? "claude-opus-5" : env.openaiModel,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+    return { text: result.text.trim(), model: intended, intendedModel: intended,
+      fellBack: false, confidence: "direct" };
+  } catch (error) {
+    console.error(`[chat] plain ${intended} failed:`, safeErrorSummary(error));
+    try {
+      const result = await callModel(fallback, env, messages);
+      await logModelCall(dbEnv, { provider: fallback, feature: "chat",
+        model: fallback === "claude" ? "claude-opus-5" : env.openaiModel,
+        inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      return { text: result.text.trim(), model: fallback, intendedModel: intended,
+        fellBack: true, confidence: "direct" };
+    } catch {
+      throw new Error("both_unavailable");
+    }
+  }
+}
+
 // Asked of every answer, not just ones with injected context — a plain
 // conversational reply or general knowledge counts as DIRECT too. The tag is
 // parsed out of the raw text below and never shown to the user; it's a
@@ -132,7 +161,7 @@ function extractEventProposal(text: string): { text: string; eventProposal?: Eve
       },
     };
   } catch (error) {
-    console.error("[chat] couldn't parse event proposal JSON:", error, match[1]);
+    console.error("[chat] couldn't parse event proposal JSON:", safeErrorSummary(error));
     return { text: cleanText };
   }
 }
@@ -169,7 +198,7 @@ function extractLocationReminderProposal(text: string): { text: string; location
       locationReminderProposal: { text: parsed.text, locationTrigger: parsed.locationTrigger, project: parsed.project },
     };
   } catch (error) {
-    console.error("[chat] couldn't parse location reminder proposal JSON:", error, match[1]);
+    console.error("[chat] couldn't parse location reminder proposal JSON:", safeErrorSummary(error));
     return { text: cleanText };
   }
 }
@@ -286,7 +315,7 @@ export async function runChat(
     const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
     return { text, model: intended, intendedModel: intended, fellBack: false, confidence, eventProposal, locationReminderProposal, recipeProposal };
   } catch (primaryError) {
-    console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, primaryError);
+    console.error(`[chat] ${intended} failed, falling back to ${fallback}:`, safeErrorSummary(primaryError));
     try {
       const { text: raw, inputTokens, outputTokens } = await callModel(fallback, env, messages, extraContext);
       await logModelCall(dbEnv, {
@@ -301,7 +330,7 @@ export async function runChat(
       const { text, locationReminderProposal } = extractLocationReminderProposal(afterEvent);
       return { text, model: fallback, intendedModel: intended, fellBack: true, confidence, eventProposal, locationReminderProposal, recipeProposal };
     } catch (fallbackError) {
-      console.error(`[chat] ${fallback} fallback also failed:`, fallbackError);
+      console.error(`[chat] ${fallback} fallback also failed:`, safeErrorSummary(fallbackError));
       throw new Error("both_unavailable");
     }
   }
