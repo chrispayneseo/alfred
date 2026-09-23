@@ -81,6 +81,13 @@ export function ChatScreen() {
     setIsThinking(true);
     try {
       const gateway = await askLocalGateway(text);
+      if (gateway.decision === "connection_needed") {
+        setMessages((prev) => [...prev, {
+          id: makeId(), role: "assistant", text: gateway.reply, model: "local",
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
       if (gateway.decision === "approval_required") {
         setMessages((prev) => [...prev, {
           id: makeId(), role: "assistant", text: gateway.reason,

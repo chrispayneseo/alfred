@@ -21,6 +21,7 @@ const LOCAL_CHAT = "https://alfred.tailde2d45.ts.net/v1/chat";
 
 export type GatewayResult =
   | { decision: "local"; reply: string; model: string; memories_used: number }
+  | { decision: "connection_needed"; reply: string }
   | { decision: "cloud_ready" | "approval_required"; reason: string; cloud_prompt: string; memory_sent: false };
 
 export async function askLocalGateway(message: string): Promise<GatewayResult> {
