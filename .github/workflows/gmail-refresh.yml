@@ -15,16 +15,29 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    env:
+      GMAIL_CRON_SECRET: ${{ secrets.GMAIL_CRON_SECRET }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - name: Trigger Gmail sync + scan
         run: |
-          curl -sS -o /dev/null -w "status: %{http_code}\n" -X POST \
-            "https://alfred-five-livid.vercel.app/api/cron/gmail-refresh?token=${{ secrets.GMAIL_CRON_SECRET }}"
+          set -euo pipefail
+          test -n "$GMAIL_CRON_SECRET"
+          test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
+          status=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            "https://alfred-five-livid.vercel.app/api/cron/gmail-refresh?token=$GMAIL_CRON_SECRET")
+          echo "Gmail refresh status: $status"
+          test "$status" = 200
 
       # Runs right after the sync above so it's checking freshly-synced mail
       # — same token, same cadence. Adjust independently by giving this its
       # own schedule/workflow later if 30 minutes turns out to be wrong for it.
       - name: Check Evie (school email monitor)
         run: |
-          curl -sS -o /dev/null -w "status: %{http_code}\n" -X POST \
-            "https://alfred-five-livid.vercel.app/api/cron/evie-check?token=${{ secrets.GMAIL_CRON_SECRET }}"
+          set -euo pipefail
+          status=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            "https://alfred-five-livid.vercel.app/api/cron/evie-check?token=$GMAIL_CRON_SECRET")
+          echo "Evie check status: $status"
+          test "$status" = 200
