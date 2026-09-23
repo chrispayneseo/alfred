@@ -74,6 +74,8 @@ The Chat screen now contacts `https://alfred.tailde2d45.ts.net/v1/gateway` first
 
 The Dell API must bind to host loopback and be published through Tailscale Serve. Configure `ALFRED_TAILSCALE_USER` and `ALFRED_WEB_ORIGIN=https://alfred-five-livid.vercel.app` on the Dell so its browser route accepts only the chosen tailnet identity and web origin. The private API key stays off the browser.
 
+Settings → Data Management includes Dell memory search, add, and per-entry deletion. These memories are separate from the Vercel data export and disconnect action; cloud handoffs never include them.
+
 `server/llm/router.ts` is a pure, dependency-free function — keyword match on the message text decides Claude vs ChatGPT. If the chosen model's API call fails for any reason, `server/llm/chat.ts` retries the same request on the other model and reports which model actually answered (`ChatMessage.model`) plus a `note` when a fallback happened. If both fail, the Chat screen shows a distinct "assistant unavailable" message rather than a silent failure; if the browser is offline, it shows that instead without attempting the call.
 
 ## Google Calendar

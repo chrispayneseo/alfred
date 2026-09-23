@@ -3,6 +3,7 @@ import { AppLockSettings } from "../components/AppLockSettings";
 import { DataControls } from "../components/DataControls";
 import { GoogleAccountsSettings } from "../components/GoogleAccountsSettings";
 import { LeedsTicketSettings } from "../components/LeedsTicketSettings";
+import { LocalMemorySettings } from "../components/LocalMemorySettings";
 import { ModelCostDashboard } from "../components/ModelCostDashboard";
 import { NewsTopicSettings } from "../components/NewsTopicSettings";
 import { PermissionsTrust } from "../components/PermissionsTrust";
@@ -122,6 +123,10 @@ export function SettingsScreen() {
 
           <section id="data-management" className="scroll-mt-6">
             <SectionHeading>Data Management</SectionHeading>
+            <div className="mb-6">
+              <SubHeading>Alfred Local memory</SubHeading>
+              <LocalMemorySettings />
+            </div>
             <SubHeading>Your data</SubHeading>
             <DataControls />
           </section>
