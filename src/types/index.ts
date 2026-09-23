@@ -44,6 +44,7 @@ export interface ChatMessage {
   note?: string;
   cloudPrompt?: string;
   cloudScope?: "prompt_only" | "connected";
+  cloudLocation?: { lat: number; lon: number };
   cloudStatus?: "pending" | "sending" | "sent" | "cancelled" | "error";
   isError?: boolean;
   createdAt: string;

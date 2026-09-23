@@ -4,6 +4,7 @@ import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { askLocalGateway, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
+import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
 import { planGatewayDecision } from "../lib/gatewayDecision";
 import { CONTENT_MAX_WIDTH, CONTENT_PADDING_X } from "../lib/layout";
@@ -50,6 +51,7 @@ export function ChatScreen() {
   const [submittingLocationReminderId, setSubmittingLocationReminderId] = useState<string>();
   const [submittingRecipeId, setSubmittingRecipeId] = useState<string>();
   const online = useOnlineStatus();
+  const { coords } = useLiveLocation();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -87,6 +89,7 @@ export function ChatScreen() {
         setMessages((prev) => [...prev, {
           id: makeId(), role: "assistant", text: plan.reason,
           cloudPrompt: plan.prompt, cloudScope: plan.scope, cloudStatus: "pending",
+          cloudLocation: plan.scope === "connected" ? coords : undefined,
           createdAt: new Date().toISOString(),
         }]);
         return;
@@ -130,11 +133,11 @@ export function ChatScreen() {
     };
   }
 
-  async function handleApproveCloud(messageId: string, prompt: string, scope: "prompt_only" | "connected") {
+  async function handleApproveCloud(messageId: string, prompt: string, scope: "prompt_only" | "connected", location?: { lat: number; lon: number }) {
     setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sending" } : m));
     try {
       const result = scope === "connected"
-        ? await sendChatMessage([{ role: "user", content: prompt }])
+        ? await sendChatMessage([{ role: "user", content: prompt }], location)
         : await sendPlainCloudMessage(prompt);
       setMessages((prev) => [
         ...prev.map((m) => m.id === messageId ? { ...m, cloudStatus: "sent" as const } : m),
@@ -288,13 +291,13 @@ export function ChatScreen() {
               <div className="mt-2 max-w-xl rounded-2xl border border-line p-3 text-left dark:border-line-dark">
                 <p className="text-xs text-ink-soft dark:text-ink-soft-dark">
                   {message.cloudScope === "connected"
-                    ? "If you approve, Alfred may send relevant connected account data with this request to Claude or ChatGPT. Dell memory stays private."
+                    ? `If you approve, Alfred may send relevant connected account data${message.cloudLocation ? " and your opted-in current location" : ""} with this request to Claude or ChatGPT. Dell memory stays private.`
                     : "Only this text will be sent to a cloud model. Alfred's saved memory and connected accounts are excluded:"}
                 </p>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-ink dark:text-ink-dark">{message.cloudPrompt}</p>
                 {message.cloudStatus === "pending" || message.cloudStatus === "error" ? (
                   <div className="mt-3 flex gap-3">
-                    <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only")}
+                    <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only", message.cloudLocation)}
                       className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">{message.cloudScope === "connected" ? "Use connected account" : "Send to cloud"}</button>
                     <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!)}
                       className="text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudScope === "connected" ? "Answer without account" : "Answer locally"}</button>
