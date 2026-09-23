@@ -1,0 +1,18 @@
+services:
+  whatsapp-collector:
+    image: python:3.12-slim
+    restart: unless-stopped
+    user: "1000:1000"
+    working_dir: /app
+    command: ["python", "-B", "collector.py"]
+    env_file: collector.env
+    environment:
+      ALFRED_WHATSAPP_DB: /data/whatsapp-inbox.sqlite3
+    volumes:
+      - ./collector.py:/app/collector.py:ro
+      - ./collector-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
