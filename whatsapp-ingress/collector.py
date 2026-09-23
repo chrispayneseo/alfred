@@ -29,6 +29,7 @@ def request_json(url: str, token: str, *, body: Optional[dict] = None) -> dict:
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
+            "User-Agent": "AlfredWhatsAppCollector/1.0",
             **({"Content-Type": "application/json"} if payload is not None else {}),
         },
         method="POST" if payload is not None else "GET",
@@ -112,7 +113,8 @@ def main() -> None:
             return
 
         url = os.environ.get("ALFRED_INGRESS_URL", "https://alfred-whatsapp-ingress.cpayneer.workers.dev")
-        token = os.environ.get("ALFRED_COLLECTOR_TOKEN", "")
+        token_file = os.environ.get("ALFRED_COLLECTOR_TOKEN_FILE", "")
+        token = Path(token_file).read_text(encoding="utf-8").strip() if token_file else os.environ.get("ALFRED_COLLECTOR_TOKEN", "")
         if len(token) < 32:
             raise SystemExit("ALFRED_COLLECTOR_TOKEN must be configured with at least 32 characters")
         interval = max(10, int(os.environ.get("ALFRED_POLL_SECONDS", "30")))

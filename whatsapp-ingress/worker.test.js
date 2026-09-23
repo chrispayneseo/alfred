@@ -56,6 +56,14 @@ test("Meta challenge requires the verify token", async () => {
   assert.equal(invalid.status, 403);
 });
 
+test("public privacy page is available without credentials", async () => {
+  const { env } = setup();
+  const response = await worker.fetch(new Request("https://ingress.example/privacy"), env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  assert.match(await response.text(), /private, single-user tool/);
+});
+
 test("stores only signed messages from the allowed personal number", async () => {
   const { env, saved } = setup();
   assert.equal((await worker.fetch(signedMessage(), env)).status, 200);

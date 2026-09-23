@@ -1,6 +1,17 @@
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 
+const privacyPage = `<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer"><title>Alfred Inbox privacy information</title><style>body{max-width:42rem;margin:2rem auto;padding:0 1.25rem;color:#262522;background:#faf9f6;font:1rem/1.6 system-ui,sans-serif}h1{font-size:1.9rem;line-height:1.2}h2{margin-top:2rem;font-size:1.2rem}</style></head><body><main>
+<h1>Alfred Inbox privacy information</h1><p>Last updated 24 September 2026</p>
+<p>Alfred Inbox is a private, single-user tool. It is not offered to the public and does not provide customer messaging or a public AI assistant. Its operator uses a dedicated WhatsApp number to collect text that they choose to send or forward for personal review.</p>
+<h2>What it receives</h2><p>The inbox accepts text messages only from the operator's own WhatsApp account. Forwarded text may contain information originally written by someone else. Messages from other senders, attachments and media are not saved by Alfred Inbox.</p>
+<h2>How messages are handled</h2><p>WhatsApp/Meta delivers incoming messages to a secure Cloudflare webhook. A temporary copy is held in a Cloudflare database until the operator's Dell computer has stored it locally. The temporary copy is then deleted. Only the operator can access the local inbox over their private network.</p>
+<p>Alfred Inbox does not automatically reply to WhatsApp messages, create tasks or reminders, or send forwarded text to a cloud AI model. Any future action or cloud escalation requires a separate, explicit choice by the operator.</p>
+<h2>Retention and control</h2><p>Locally collected messages remain on the operator's Dell until the operator reviews or deletes them. If the collector is offline, a temporary message may remain in Cloudflare storage until collection resumes or the operator deletes it. The operator can stop collection by disabling the collector and webhook.</p>
+<h2>Questions</h2><p>Only the operator can send to this inbox. If you have a question about information you sent to the operator that they later forwarded, please contact the operator through the same channel you normally use to communicate with them.</p>
+</main></body></html>`;
+
 function normalizedNumber(value) {
   return typeof value === "string" ? value.replace(/\D/g, "") : "";
 }
@@ -65,6 +76,9 @@ async function receiveWebhook(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/privacy" && request.method === "GET") {
+      return new Response(privacyPage, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300", "x-robots-tag": "noindex, nofollow" } });
+    }
     if (url.pathname === "/webhook" && request.method === "GET") {
       const mode = url.searchParams.get("hub.mode");
       const token = url.searchParams.get("hub.verify_token");

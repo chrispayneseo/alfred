@@ -6,8 +6,9 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/alfred-node/whatsapp-ingress
-EnvironmentFile=/opt/alfred-node/whatsapp-ingress/collector.env
 Environment=ALFRED_WHATSAPP_DB=/opt/alfred-node/whatsapp-ingress/collector-data/whatsapp-inbox.sqlite3
+Environment=ALFRED_INGRESS_URL=https://alfred-whatsapp-ingress.cpayneer.workers.dev
+Environment=ALFRED_COLLECTOR_TOKEN_FILE=/opt/alfred-node/whatsapp-ingress/collector-token
 ExecStart=/usr/bin/python3 -B /opt/alfred-node/whatsapp-ingress/collector.py
 Restart=always
 RestartSec=15
