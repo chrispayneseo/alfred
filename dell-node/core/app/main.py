@@ -21,6 +21,7 @@ from .orchestrator import orchestrate
 from .providers import provider_registry
 from .execution import execute_plan, execute_tool, initialise_execution_store, list_executions
 from .legacy_actions import execute_legacy_action
+from .recovery import recover_interrupted_work, recovery_summary, retry_execution
 from .lifecycle import (
     get_request as get_request_state,
     initialise_request_store,
@@ -42,6 +43,7 @@ async def lifespan(_: FastAPI):
     initialise()
     initialise_execution_store()
     initialise_request_store()
+    recover_interrupted_work()
     inbox_api.initialise()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
     reminder_task = asyncio.create_task(inbox_api.reminder_loop())
@@ -56,7 +58,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.7.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -161,6 +163,7 @@ async def health():
             "request_lifecycle": "durable",
             "memory_service": "unified",
             "legacy_mutations": "executor_routed",
+            "recovery_policy": "fail_closed",
             "safe_mode": False,
         },
     }
@@ -301,6 +304,7 @@ async def core_status():
         "providers": provider_registry(),
         "memory": {"service": "unified"},
         "compatibility": {"legacy_mutations": "executor_routed"},
+        "recovery": recovery_summary(20),
     }
 
 
@@ -337,6 +341,21 @@ async def execute_registered_tool(request: ToolExecutionRequest):
 @app.get("/v1/core/executions", dependencies=[Depends(authorised)])
 async def get_executions(request_id: Optional[str] = None, limit: int = 50):
     return {"items": list_executions(request_id=request_id, limit=limit)}
+
+
+@app.get("/v1/core/recovery", dependencies=[Depends(authorised)])
+async def get_recovery(limit: int = 50):
+    return recovery_summary(limit)
+
+
+@app.post("/v1/core/executions/{execution_id}/retry", dependencies=[Depends(authorised)])
+async def retry_core_execution(execution_id: str):
+    result = await retry_execution(execution_id)
+    if result.get("state") == "not_found":
+        raise HTTPException(404, "Execution not found")
+    if result.get("recovery") == "reconcile_required":
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 @app.post("/v1/core/plans", dependencies=[Depends(authorised)])
