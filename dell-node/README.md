@@ -12,8 +12,9 @@ enter `inbox_filed` in Core SQLite and appear on Alfred's Today screen. The
 Capture screen can also create local items directly, without WhatsApp.
 Completed tasks and reminders stay in SQLite and can be reopened.
 
-Phone alerts are optional and disabled by default. Set `ALFRED_NTFY_TOPIC` to
-an unguessable 32+ character topic and subscribe to it in the ntfy phone app.
+Phone alerts are optional and disabled by default. Copy
+`.env.notifications.example` to `.env.notifications`, set `ALFRED_NTFY_TOPIC`
+to an unguessable 32+ character topic, and subscribe to it in the ntfy phone app.
 ntfy.sh has a free tier, but topics are public, so Alfred deliberately sends
 only a generic “reminder due” message, never the reminder title or details.
 `ALFRED_REMINDER_HOUR` defaults to 9 (Europe/London). The Dell checks each

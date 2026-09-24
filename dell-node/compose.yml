@@ -13,7 +13,9 @@ services:
     restart: unless-stopped
     depends_on:
       - ollama
-    env_file: .env
+    env_file:
+      - .env
+      - .env.notifications
     volumes:
       - alfred_data:/data
       - /opt/alfred-node/whatsapp-ingress/collector-data:/inbox-data
