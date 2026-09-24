@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarScanReview } from "../components/CalendarScanReview";
+import { WhatsAppInbox } from "../components/WhatsAppInbox";
 import { Screen } from "../components/Screen";
 import { extractCalendarPhoto, type ExtractResult } from "../integrations/calendarPhoto/api";
 import {
@@ -16,7 +17,7 @@ import { expectBackgrounding } from "../lib/lock";
 import { clearPendingShare, readPendingShare } from "../lib/shareStore";
 import { useVoiceRecorder } from "../lib/useVoiceRecorder";
 
-type CaptureMode = "text" | "voice" | "scan-calendar" | "recipe";
+type CaptureMode = "text" | "voice" | "scan-calendar" | "recipe" | "whatsapp";
 
 const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack", "Baking"];
 
@@ -386,6 +387,7 @@ export function CaptureScreen() {
                   { value: "voice", label: "Voice" },
                   { value: "scan-calendar", label: "Scan" },
                   { value: "recipe", label: "Recipe" },
+                  { value: "whatsapp", label: "Inbox" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -402,7 +404,9 @@ export function CaptureScreen() {
               ))}
             </div>
 
-            {mode === "scan-calendar" ? (
+            {mode === "whatsapp" ? (
+              <WhatsAppInbox />
+            ) : mode === "scan-calendar" ? (
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-line px-4 py-8 text-center dark:border-line-dark">
                 <p className="text-sm text-ink-soft dark:text-ink-soft-dark">
                   Take a photo of a handwritten wall calendar — Alfred will read it and let you review each entry

@@ -13,3 +13,5 @@ dev-dist
 .env*
 .agents/
 skills-lock.json
+whatsapp-ingress/collector.env
+whatsapp-ingress/collector-data/
