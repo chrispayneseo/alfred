@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import asyncio
-import re
 from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .config import settings
 from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember, record_audit, create_plan, list_plans, create_approval, resolve_approval, record_event
-from .clients import home_assistant, ollama_chat, ollama_recall, ollama_route
+from .clients import home_assistant, ollama_chat, ollama_recall
 from . import inbox_api
 from .recall_store import recall_intent, requested_list, search as search_local
-from .core import decide, normalise_request, tool_registry, event_decision
+from .core import decide, tool_registry, event_decision
+from .orchestrator import orchestrate
+from .providers import provider_registry
 
 
 def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str = Header(default="")):
@@ -39,7 +40,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.2.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -100,21 +101,6 @@ class CoreEvent(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
-PRIVATE_TERMS = (
-    "my email", "my emails", "gmail", "inbox", "calendar", "my schedule",
-    "my notes", "my tasks", "notion", "my account", "my contacts", "my files",
-    "my memory", "remember about me", "my personal", "my health", "my finances",
-)
-CONNECTED_TERMS = (
-    "my email", "my emails", "gmail", "inbox", "calendar", "my schedule",
-    "notion", "my contacts", "my files",
-)
-CLOUD_TERMS = (
-    "research", "latest", "current news", "browse", "search the web",
-    "debug", "write code", "implement", "analyse this document", "analyze this document",
-)
-
-
 class DeviceAction(BaseModel):
     service: str = Field(pattern=r"^[a-z_]+\.[a-z_]+$")
     entity_id: str = Field(pattern=r"^[a-z_]+\.[a-zA-Z0-9_]+$")
@@ -123,7 +109,16 @@ class DeviceAction(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "models": {"chat": settings.chat_model, "router": settings.router_model}, "core": {"tool_count": len(tool_registry()), "safe_mode": False}}
+    return {
+        "status": "ok",
+        "models": {"chat": settings.chat_model, "router": settings.router_model},
+        "core": {
+            "tool_count": len(tool_registry()),
+            "provider_count": len(provider_registry()),
+            "orchestrator": "authoritative",
+            "safe_mode": False,
+        },
+    }
 
 
 @app.post("/v1/memories", dependencies=[Depends(authorised)])
@@ -143,7 +138,7 @@ async def get_memories(q: str, limit: int = 8):
 
 @app.delete("/v1/memories/{memory_id}", dependencies=[Depends(authorised)])
 async def delete_memory(memory_id: int):
-    policy = decide("memory.delete", confirmed=True)  # DELETE is an explicit owner UI action.
+    policy = decide("memory.delete", confirmed=True)
     if not forget(memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
     record_audit("memory.deleted", {"memory_id": memory_id, "policy": policy.__dict__})
@@ -200,48 +195,18 @@ async def chat(request: Chat):
 
 @app.post("/v1/gateway", dependencies=[Depends(authorised)])
 async def gateway(request: GatewayRequest):
-    """Local triage. Never transmits content to a cloud provider."""
-    message = request.message.strip()
-    core_request = normalise_request("web", message)
-    record_audit("request.received", {"channel": "web", "operation": "gateway"}, core_request["request_id"], core_request["conversation_id"])
-    lowered = message.lower()
-    private = (any(term in lowered for term in PRIVATE_TERMS)
-               or bool(re.search(r"\b(my|mine|me|i|we|our)\b", lowered))
-               or bool(re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", message)))
-    cloud_requested = any(term in lowered for term in CLOUD_TERMS)
-    if any(term in lowered for term in CONNECTED_TERMS):
-        return {"decision": "connection_needed",
-                "reply": "I can't check that connected account from the Dell yet. Its data has not been linked to the local gateway."}
-    # A saved-item question stays local unless the user explicitly asks for web/cloud work.
-    explicit_cloud = any(term in lowered for term in ("research", "browse", "search the web", "use chatgpt", "use claude", "send to cloud"))
-    if recall_intent(message) and not explicit_cloud:
-        sources = search_local(message)
-        reply = await answer_from_recall(message, sources)
-        return {"decision": "local", "reply": reply,
-                "model": settings.chat_model if sources and not requested_list(message) else "deterministic",
-                "memories_used": len(sources), "sources": sources}
-    try:
-        model_route = "local" if len(message.split()) <= 12 and not cloud_requested else await ollama_route(message)
-    except Exception:
-        model_route = "cloud" if cloud_requested else "local"
-    if private and (cloud_requested or model_route == "cloud"):
-        return {
-            "decision": "approval_required",
-            "reason": "This request may use personal or connected account data.",
-            "cloud_prompt": message,
-            "memory_sent": False,
-        }
-    if cloud_requested or model_route == "cloud":
-        return {
-            "decision": "cloud_ready",
-            "reason": "This request benefits from a cloud specialist.",
-            "cloud_prompt": message,
-            "memory_sent": False,
-        }
-    memories = recall(message)
-    reply = await ollama_chat(message, memories)
-    return {"decision": "local", "reply": reply, "model": settings.chat_model,
-            "memories_used": len(memories)}
+    """Compatibility gateway backed by the authoritative Core orchestrator."""
+    result = await orchestrate(
+        channel="web",
+        message=request.message,
+        recall_answerer=answer_from_recall,
+    )
+    if result.get("decision") == "local":
+        if result.get("provider") == "ollama.chat":
+            result["model"] = settings.chat_model
+        elif result.get("provider") == "deterministic":
+            result["model"] = "deterministic"
+    return result
 
 
 @app.post("/v1/home-assistant/service", dependencies=[Depends(authorised)])
@@ -259,16 +224,23 @@ async def device_action(action: DeviceAction):
 
 @app.post("/v1/requests", dependencies=[Depends(authorised)])
 async def receive_request(request: CoreRequest):
-    """Canonical ingress for future UI, WhatsApp, voice and webhook channels."""
-    normalized = normalise_request(request.channel, request.message, request.conversation_id)
-    policy = decide("route")
-    record_audit("request.received", {"channel": request.channel, "policy": policy.__dict__}, normalized["request_id"], normalized["conversation_id"])
-    return {"request": normalized, "policy": policy.__dict__, "status": "accepted"}
+    """Canonical ingress for web, WhatsApp, voice, email, API and webhook channels."""
+    return await orchestrate(
+        channel=request.channel,
+        message=request.message,
+        conversation_id=request.conversation_id,
+        recall_answerer=answer_from_recall,
+    )
 
 
 @app.get("/v1/core/tools", dependencies=[Depends(authorised)])
 async def get_tools():
     return {"tools": tool_registry()}
+
+
+@app.get("/v1/core/providers", dependencies=[Depends(authorised)])
+async def get_providers():
+    return {"providers": provider_registry()}
 
 
 @app.post("/v1/core/plans", dependencies=[Depends(authorised)])
