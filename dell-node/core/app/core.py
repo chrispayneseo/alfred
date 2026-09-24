@@ -23,17 +23,19 @@ TOOLS = {
     "memory.correct": {"risk": "safe_write", "permission": "confirm", "verification": "stored_row"},
     "memory.delete": {"risk": "safe_write", "permission": "confirm", "verification": "row_absent"},
     "memory.candidate.list": {"risk": "read", "permission": "auto", "verification": "read_result"},
+    "memory.candidate.summary": {"risk": "read", "permission": "auto", "verification": "summary_result"},
     "memory.candidate.propose": {"risk": "safe_write", "permission": "auto", "verification": "candidate_row"},
     "memory.candidate.dismiss": {"risk": "safe_write", "permission": "auto", "verification": "candidate_state"},
+    "memory.candidate.cleanup": {"risk": "safe_write", "permission": "auto", "verification": "maintenance_result"},
     "memory.candidate.promote": {"risk": "safe_write", "permission": "confirm", "verification": "promoted_memory"},
     "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
-    if action in {"memory.read", "memory.candidate.list", "recall.search", "chat.local", "route"}:
+    if action in {"memory.read", "memory.candidate.list", "memory.candidate.summary", "recall.search", "chat.local", "route"}:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
-    if action in {"memory.candidate.propose", "memory.candidate.dismiss"}:
+    if action in {"memory.candidate.propose", "memory.candidate.dismiss", "memory.candidate.cleanup"}:
         return PolicyDecision(
             "safe_write",
             "auto",
