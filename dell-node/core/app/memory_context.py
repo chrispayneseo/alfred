@@ -76,8 +76,6 @@ def ensure_memory_metadata(memory_id: int, kind: str, content: str, source: str)
                 (memory_id, kind, importance, confidence, content_fingerprint),
             )
         elif row["fingerprint"] is None:
-            # Rows backfilled by the schema migration have neutral defaults. On
-            # first use, enrich them deterministically from existing data.
             db.execute(
                 """UPDATE memory_metadata
                    SET memory_type = ?, importance = ?, confidence = ?, fingerprint = ?,
@@ -204,9 +202,7 @@ def _rank_score(*, relevance: float, importance: float, confidence: float,
 
 def _memory_candidate(row, position: int) -> dict:
     item = dict(row)
-    metadata = ensure_memory_metadata(
-        item["id"], item["kind"], item["content"], item["source"]
-    )
+    metadata = ensure_memory_metadata(item["id"], item["kind"], item["content"], item["source"])
     relevance = max(0.35, 1.0 - position * 0.07)
     recency = _recency_score(item.get("created_at"), 180.0)
     score, components = _rank_score(
@@ -295,8 +291,6 @@ def _general_candidates(query: str, candidate_limit: int) -> list[dict]:
 
 
 def _list_candidates(query: str, limit: int) -> list[dict]:
-    # Preserve established due-date/list semantics, then attach deterministic
-    # Phase-2 scoring metadata.
     legacy = legacy_search(query, min(limit, 20))
     candidates: list[dict] = []
     for index, item in enumerate(legacy):
@@ -327,9 +321,7 @@ def _list_candidates(query: str, limit: int) -> list[dict]:
 def _deduplicate(candidates: list[dict]) -> list[dict]:
     best: dict[str, dict] = {}
     for item in candidates:
-        key = item.get("fingerprint") or fingerprint(
-            f"{item.get('title', '')}\n{item.get('content', '')}"
-        )
+        key = item.get("fingerprint") or fingerprint(f"{item.get('title', '')}\n{item.get('content', '')}")
         current = best.get(key)
         if current is None or float(item.get("score", 0)) > float(current.get("score", 0)):
             best[key] = item
@@ -343,7 +335,6 @@ def _apply_budget(candidates: list[dict], limit: int, max_chars: int) -> tuple[l
         if len(selected) >= limit or used >= max_chars:
             break
         item = dict(candidate)
-        # No single source should consume the entire model context.
         content = str(item.get("content") or "")[:1600]
         title = str(item.get("title") or "")[:200]
         overhead = len(title) + 96
@@ -353,7 +344,7 @@ def _apply_budget(candidates: list[dict], limit: int, max_chars: int) -> tuple[l
         if len(content) > available:
             if available < 80:
                 continue
-            content = content[:available].rstrip() + "…"
+            content = content[: max(0, available - 1)].rstrip() + "…"
         item["content"] = content
         item.pop("fingerprint", None)
         selected.append(item)
