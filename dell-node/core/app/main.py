@@ -15,6 +15,13 @@ from .core import decide, tool_registry, event_decision
 from .orchestrator import orchestrate
 from .providers import provider_registry
 from .execution import execute_plan, execute_tool, initialise_execution_store, list_executions
+from .lifecycle import (
+    get_request as get_request_state,
+    initialise_request_store,
+    lifecycle_summary,
+    list_requests,
+    request_timeline,
+)
 
 
 def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str = Header(default="")):
@@ -28,6 +35,7 @@ def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str
 async def lifespan(_: FastAPI):
     initialise()
     initialise_execution_store()
+    initialise_request_store()
     inbox_api.initialise()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
     reminder_task = asyncio.create_task(inbox_api.reminder_loop())
@@ -42,7 +50,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.4.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -126,6 +134,7 @@ async def health():
             "orchestrator": "authoritative",
             "executor": "policy_gated",
             "verification": "enabled",
+            "request_lifecycle": "durable",
             "safe_mode": False,
         },
     }
@@ -241,6 +250,29 @@ async def receive_request(request: CoreRequest):
         conversation_id=request.conversation_id,
         recall_answerer=answer_from_recall,
     )
+
+
+@app.get("/v1/core/status", dependencies=[Depends(authorised)])
+async def core_status():
+    return {
+        "status": "ok",
+        "lifecycle": lifecycle_summary(),
+        "tools": {"registered": len(tool_registry())},
+        "providers": provider_registry(),
+    }
+
+
+@app.get("/v1/core/requests", dependencies=[Depends(authorised)])
+async def get_core_requests(state: Optional[str] = None, limit: int = 50):
+    return {"items": list_requests(limit=limit, state=state)}
+
+
+@app.get("/v1/core/requests/{request_id}", dependencies=[Depends(authorised)])
+async def get_core_request(request_id: str):
+    item = get_request_state(request_id)
+    if item is None:
+        raise HTTPException(404, "Request not found")
+    return {"request": item, "timeline": request_timeline(request_id)}
 
 
 @app.get("/v1/core/tools", dependencies=[Depends(authorised)])
