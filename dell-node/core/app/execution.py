@@ -1,30 +1,16 @@
-"""Policy-gated tool execution and verification for Alfred Core.
-
-This module is deliberately deterministic. A model may propose a plan, but only
-registered adapters below can execute it. Risky actions require a durable,
-matching approval before the adapter is invoked.
-"""
+"""Policy-gated tool execution and verification for Alfred Core."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from .clients import home_assistant
 from .core import TOOLS, decide
-from .db import (
-    connection,
-    correct_memory,
-    create_approval,
-    forget,
-    get_memory,
-    recall,
-    record_audit,
-    remember,
-)
+from .db import connection, create_approval, record_audit
+from . import memory_service
 
 
 @dataclass(frozen=True)
@@ -87,14 +73,9 @@ def _load_json(value: str | None) -> dict | None:
 
 def _row_to_result(row) -> ExecutionResult:
     return ExecutionResult(
-        id=row["id"],
-        request_id=row["request_id"],
-        plan_id=row["plan_id"],
-        step_index=row["step_index"],
-        action=row["action"],
-        state=row["state"],
-        result=_load_json(row["result"]),
-        verification=_load_json(row["verification"]),
+        id=row["id"], request_id=row["request_id"], plan_id=row["plan_id"],
+        step_index=row["step_index"], action=row["action"], state=row["state"],
+        result=_load_json(row["result"]), verification=_load_json(row["verification"]),
         error=row["error"],
     )
 
@@ -139,14 +120,8 @@ def _pending_or_new_approval(request_id: str, plan_id: str | None, action: str, 
     return create_approval(request_id, plan_id, action, summary, policy.level)
 
 
-def _record_start(
-    execution_id: str,
-    request_id: str,
-    plan_id: str | None,
-    step_index: int | None,
-    action: str,
-    arguments: dict,
-) -> None:
+def _record_start(execution_id: str, request_id: str, plan_id: str | None,
+                  step_index: int | None, action: str, arguments: dict) -> None:
     initialise_execution_store()
     with connection() as db:
         db.execute(
@@ -176,14 +151,13 @@ def _require(arguments: dict, name: str, expected_type: type | tuple[type, ...] 
     return value
 
 
-async def _invoke(action: str, arguments: dict) -> dict:
+async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
     if action == "memory.read":
         query = _require(arguments, "query")
         limit = arguments.get("limit", 8)
         if not isinstance(limit, int):
             raise ValueError("Missing or invalid argument: limit")
-        items = recall(query, max(1, min(limit, 50)))
-        return {"items": items}
+        return {"items": memory_service.retrieve_context(query, limit)}
 
     if action == "memory.write":
         kind = _require(arguments, "kind")
@@ -191,19 +165,20 @@ async def _invoke(action: str, arguments: dict) -> dict:
         source = arguments.get("source", "core-executor")
         if not isinstance(source, str):
             raise ValueError("Missing or invalid argument: source")
-        memory_id = remember(kind[:64], content[:4000], source[:64])
-        return {"memory_id": memory_id, "content": content[:4000]}
+        item = memory_service.create_memory(kind, content, source, request_id=request_id)
+        return {"memory_id": item["id"], "content": item["content"]}
 
     if action == "memory.correct":
         memory_id = _require(arguments, "memory_id", int)
         content = _require(arguments, "content")
-        if not correct_memory(memory_id, content[:4000]):
+        item = memory_service.correct_memory(memory_id, content, request_id=request_id)
+        if item is None:
             raise LookupError("Memory not found")
-        return {"memory_id": memory_id, "content": content[:4000]}
+        return {"memory_id": item["id"], "content": item["content"]}
 
     if action == "memory.delete":
         memory_id = _require(arguments, "memory_id", int)
-        if not forget(memory_id):
+        if not memory_service.delete_memory(memory_id, request_id=request_id):
             raise LookupError("Memory not found")
         return {"memory_id": memory_id}
 
@@ -217,36 +192,28 @@ async def _invoke(action: str, arguments: dict) -> dict:
 
 def _verify(action: str, result: dict) -> dict:
     if action == "memory.read":
-        ok = isinstance(result.get("items"), list)
-        return {"ok": ok, "method": "read_result"}
+        return {"ok": isinstance(result.get("items"), list), "method": "read_result"}
 
     if action in {"memory.write", "memory.correct"}:
         memory_id = result.get("memory_id")
-        item = get_memory(memory_id) if isinstance(memory_id, int) else None
+        item = memory_service.get_memory(memory_id) if isinstance(memory_id, int) else None
         ok = bool(item) and item.get("content") == result.get("content")
         return {"ok": ok, "method": "stored_row", "memory_id": memory_id}
 
     if action == "memory.delete":
         memory_id = result.get("memory_id")
-        ok = isinstance(memory_id, int) and get_memory(memory_id) is None
+        ok = isinstance(memory_id, int) and memory_service.get_memory(memory_id) is None
         return {"ok": ok, "method": "row_absent", "memory_id": memory_id}
 
     if action == "home_assistant.service":
-        ok = result.get("ok") is True
-        return {"ok": ok, "method": "service_response"}
+        return {"ok": result.get("ok") is True, "method": "service_response"}
 
     return {"ok": False, "method": "unregistered"}
 
 
-async def execute_tool(
-    *,
-    request_id: str,
-    action: str,
-    arguments: dict,
-    plan_id: str | None = None,
-    step_index: int | None = None,
-) -> dict:
-    """Execute one registered tool after policy and approval checks."""
+async def execute_tool(*, request_id: str, action: str, arguments: dict,
+                       plan_id: str | None = None, step_index: int | None = None) -> dict:
+    """Execute one registered tool after deterministic policy and approval checks."""
     if action not in TOOLS:
         policy = decide(action)
         record_audit("execution.denied", {"action": action, "reason": policy.reason}, request_id)
@@ -256,12 +223,7 @@ async def execute_tool(
         ).to_dict()
 
     prior = _existing_step(plan_id, step_index)
-    if prior and prior.state == "completed":
-        payload = prior.to_dict()
-        payload["replayed"] = True
-        return payload
-    if prior and prior.state in {"running", "failed"}:
-        # Failed/running persisted rows require operator review instead of blind retries.
+    if prior and prior.state in {"completed", "running", "failed"}:
         payload = prior.to_dict()
         payload["replayed"] = True
         return payload
@@ -298,7 +260,7 @@ async def execute_tool(
             {"execution_id": execution_id, "action": action, "plan_id": plan_id, "step_index": step_index},
             request_id,
         )
-        result = await _invoke(action, arguments)
+        result = await _invoke(action, arguments, request_id)
         verification = _verify(action, result)
         state = "completed" if verification.get("ok") is True else "failed"
         error = None if state == "completed" else "Execution result could not be verified"
@@ -313,8 +275,6 @@ async def execute_tool(
             action=action, state=state, result=result, verification=verification, error=error,
         ).to_dict()
     except Exception as exc:
-        # A row may not exist if validation failed before persistence; ensure the
-        # failure is still durable in the audit ledger without leaking secrets.
         try:
             _record_finish(execution_id, "failed", None, None, type(exc).__name__)
         except Exception:
@@ -374,11 +334,8 @@ async def execute_plan(plan_id: str) -> dict:
                     "executions": executions, "error": f"Invalid plan step {index}"}
 
         execution = await execute_tool(
-            request_id=request_id,
-            plan_id=plan_id,
-            step_index=index,
-            action=action,
-            arguments=arguments,
+            request_id=request_id, plan_id=plan_id, step_index=index,
+            action=action, arguments=arguments,
         )
         executions.append(execution)
 

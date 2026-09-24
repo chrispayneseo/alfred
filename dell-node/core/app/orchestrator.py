@@ -13,10 +13,11 @@ from typing import Literal
 
 from .clients import ollama_chat, ollama_route
 from .core import normalise_request
-from .db import recall, record_audit
+from .db import record_audit
 from .lifecycle import begin_request, transition_request
+from .memory_service import retrieve_context
 from .providers import get_provider
-from .recall_store import recall_intent, search as search_local
+from .recall_store import recall_intent
 
 Route = Literal["local", "cloud_ready", "approval_required", "connection_needed"]
 
@@ -122,12 +123,13 @@ async def orchestrate(
 
         if recall_intent(clean) and not _explicit_cloud(clean):
             transition_request(request_id, "local_processing", route="local")
-            sources = search_local(clean)
+            sources = retrieve_context(clean)
             if recall_answerer is None:
-                if sources:
-                    reply = "I found matching saved information in Alfred's local memory."
-                else:
-                    reply = "I couldn't find anything matching that in Alfred's local memory, tasks or reminders."
+                reply = (
+                    "I found matching saved information in Alfred's local memory."
+                    if sources else
+                    "I couldn't find anything matching that in Alfred's local memory, tasks or reminders."
+                )
             else:
                 reply = await recall_answerer(clean, sources)
             provider = "ollama.chat" if sources else "deterministic"
@@ -185,20 +187,20 @@ async def orchestrate(
             return result.to_dict()
 
         transition_request(request_id, "local_processing", route="local", provider="ollama.chat")
-        memories = recall(clean)
-        reply = await ollama_chat(clean, memories)
+        context = retrieve_context(clean, 8)
+        reply = await ollama_chat(clean, context)
         result = OrchestrationResult(
             request_id=request_id,
             conversation_id=conversation_id,
             route="local",
             reply=reply,
             provider="ollama.chat",
-            memories_used=len(memories),
+            memories_used=len(context),
         )
         transition_request(request_id, "completed", route=result.route, provider=result.provider)
         record_audit(
             "request.routed",
-            {"decision": result.route, "provider": result.provider, "memories_used": len(memories)},
+            {"decision": result.route, "provider": result.provider, "memories_used": len(context)},
             request_id,
             conversation_id,
         )
