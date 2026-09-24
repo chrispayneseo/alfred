@@ -2,7 +2,8 @@
 
 Callers should use this module rather than reaching into SQLite helpers or the
 recall index directly. Durable memory records remain editable resources, while
-context retrieval can span saved memories, tasks and reminders.
+context retrieval can span saved memories, tasks, reminders and derived local
+memory relationships.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from .memory_context import (
     refresh_memory_metadata,
     set_memory_attributes,
 )
+from .memory_graph import expand_context_pack, refresh_relations, relations_for, remove_relations
 
 
 def create_memory(kind: str, content: str, source: str = "api", *, request_id: str | None = None) -> dict:
@@ -29,6 +31,7 @@ def create_memory(kind: str, content: str, source: str = "api", *, request_id: s
         raise ValueError("Memory content is required")
     memory_id = db.remember(clean_kind, clean_content, clean_source)
     ensure_memory_metadata(memory_id, clean_kind, clean_content, clean_source)
+    refresh_relations(memory_id)
     db.record_audit(
         "memory.saved",
         {"memory_id": memory_id, "kind": clean_kind, "source": clean_source},
@@ -50,6 +53,13 @@ def get_memory_attributes(memory_id: int) -> dict | None:
     return ensure_memory_metadata(
         memory_id, item["kind"], item["content"], item["source"]
     )
+
+
+def get_memory_relations(memory_id: int, limit: int = 20) -> list[dict]:
+    if db.get_memory(memory_id) is None:
+        return []
+    refresh_relations(memory_id)
+    return relations_for(memory_id, limit)
 
 
 def update_memory_attributes(memory_id: int, *, importance: float | None = None,
@@ -123,8 +133,9 @@ def _memory_context(item: dict) -> dict:
 def build_context_pack(query: str, limit: int = 6, max_chars: int = 6000) -> dict:
     """Build a deterministic, budgeted Phase-2 context pack.
 
-    If the task/reminder index is temporarily unavailable, Alfred degrades to
-    durable-memory-only retrieval rather than failing the whole local request.
+    Direct lexical matches are ranked first. Tightly related memories can then
+    be added through Alfred's local, rebuildable memory graph while remaining
+    inside the same item and character budgets.
     """
     clean = query.strip()[:500]
     if not clean:
@@ -132,16 +143,17 @@ def build_context_pack(query: str, limit: int = 6, max_chars: int = 6000) -> dic
             "items": [],
             "budget": {"max_chars": max_chars, "used_chars": 0, "selected": 0, "candidates": 0},
             "ranking": "phase2-v1",
+            "graph": {"expanded": 0, "relations_considered": 0},
         }
     size = max(1, min(limit, 20))
     try:
-        return build_ranked_context_pack(clean, limit=size, max_chars=max_chars)
+        pack = build_ranked_context_pack(clean, limit=size, max_chars=max_chars)
     except sqlite3.OperationalError as exc:
         if "inbox_filed" not in str(exc):
             raise
         items = [_memory_context(item) for item in db.recall(clean, size)]
         used = sum(len(item["title"]) + len(item["content"]) + 96 for item in items)
-        return {
+        pack = {
             "items": items,
             "budget": {
                 "max_chars": max_chars,
@@ -152,6 +164,7 @@ def build_context_pack(query: str, limit: int = 6, max_chars: int = 6000) -> dic
             },
             "ranking": "phase2-v1-fallback",
         }
+    return expand_context_pack(pack, limit=size, max_chars=max_chars)
 
 
 def retrieve_context(query: str, limit: int = 6) -> list[dict]:
@@ -167,11 +180,13 @@ def correct_memory(memory_id: int, content: str, *, request_id: str | None = Non
     if existing is None or not db.correct_memory(memory_id, clean):
         return None
     refresh_memory_metadata(memory_id, existing["kind"], clean, existing["source"])
+    refresh_relations(memory_id)
     db.record_audit("memory.corrected", {"memory_id": memory_id}, request_id)
     return db.get_memory(memory_id)
 
 
 def delete_memory(memory_id: int, *, request_id: str | None = None) -> bool:
+    remove_relations(memory_id)
     if not db.forget(memory_id):
         return False
     db.record_audit("memory.deleted", {"memory_id": memory_id}, request_id)
