@@ -22,15 +22,29 @@ TOOLS = {
     "memory.write": {"risk": "safe_write", "permission": "confirm", "verification": "stored_row"},
     "memory.correct": {"risk": "safe_write", "permission": "confirm", "verification": "stored_row"},
     "memory.delete": {"risk": "safe_write", "permission": "confirm", "verification": "row_absent"},
+    "memory.candidate.list": {"risk": "read", "permission": "auto", "verification": "read_result"},
+    "memory.candidate.propose": {"risk": "safe_write", "permission": "auto", "verification": "candidate_row"},
+    "memory.candidate.dismiss": {"risk": "safe_write", "permission": "auto", "verification": "candidate_state"},
+    "memory.candidate.promote": {"risk": "safe_write", "permission": "confirm", "verification": "promoted_memory"},
     "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
-    if action in {"memory.read", "recall.search", "chat.local", "route"}:
+    if action in {"memory.read", "memory.candidate.list", "recall.search", "chat.local", "route"}:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
-    if action in {"memory.write", "memory.correct", "memory.delete"}:
-        return PolicyDecision("safe_write", "auto" if confirmed else "confirm", "The owner must explicitly confirm a durable memory change.")
+    if action in {"memory.candidate.propose", "memory.candidate.dismiss"}:
+        return PolicyDecision(
+            "safe_write",
+            "auto",
+            "Candidate-queue metadata is local working state and does not become durable memory.",
+        )
+    if action in {"memory.write", "memory.correct", "memory.delete", "memory.candidate.promote"}:
+        return PolicyDecision(
+            "safe_write",
+            "auto" if confirmed else "confirm",
+            "The owner must explicitly confirm a durable memory change.",
+        )
     if action == "home_assistant.service":
         return PolicyDecision("reversible", "auto" if confirmed else "confirm", "Changing a device state requires explicit confirmation.")
     return PolicyDecision("high_impact", "deny", "This action is not registered with Alfred Core.")
