@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { askLocalGateway, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
@@ -96,7 +97,7 @@ export function ChatScreen() {
       }
       setMessages((prev) => [...prev, {
         id: makeId(), role: "assistant", text: plan.reply, model: "local",
-        note: plan.memoriesUsed ? `Used ${plan.memoriesUsed} local memory item(s)` : undefined,
+        sources: plan.sources,
         createdAt: new Date().toISOString(),
       }]);
     } catch (error) {
@@ -286,6 +287,17 @@ export function ChatScreen() {
             </p>
             {message.note && (
               <p className="mt-1 text-[11px] text-ink-faint dark:text-ink-faint-dark">{message.note}</p>
+            )}
+            {message.sources && message.sources.length > 0 && (
+              <div className="mt-2 max-w-xl space-y-1 text-left">
+                <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Saved on your Dell · sources</p>
+                {message.sources.map((source) => {
+                  const safeUrl = /^\/settings\?memory=\d+$/.test(source.url) || /^\/today\?localItem=[a-zA-Z0-9_%.-]+$/.test(source.url);
+                  return safeUrl && <Link key={source.id} to={source.url} className="block rounded-xl border border-line px-3 py-2 text-xs text-ink underline dark:border-line-dark dark:text-ink-dark">
+                    {source.kind === "memory" ? "Note" : source.kind === "task" ? "Task" : "Reminder"}: {source.title}{source.due ? ` · ${source.due}` : ""}
+                  </Link>;
+                })}
+              </div>
             )}
             {message.cloudPrompt && (
               <div className="mt-2 max-w-xl rounded-2xl border border-line p-3 text-left dark:border-line-dark">

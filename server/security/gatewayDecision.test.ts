@@ -29,3 +29,12 @@ test("local answers stay local", () => {
     decision: "local", reply: "Hello", model: "qwen3:4b", memories_used: 0,
   }, "Say hello"), { kind: "local", reply: "Hello", memoriesUsed: 0 });
 });
+
+test("local recall keeps source links without creating cloud approval", () => {
+  const sources = [{ id: "memory:7", kind: "memory" as const, title: "Spare key", due: null, url: "/settings?memory=7" }];
+  assert.deepEqual(planGatewayDecision({
+    decision: "local", reply: "In the drawer", model: "qwen3:4b", memories_used: 1, sources,
+  }, "Where is my spare key?"), {
+    kind: "local", reply: "In the drawer", memoriesUsed: 1, sources,
+  });
+});

@@ -5,9 +5,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .config import settings
-from .db import forget, initialise, list_memories, recall, remember
-from .clients import home_assistant, ollama_chat, ollama_route
+from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember
+from .clients import home_assistant, ollama_chat, ollama_recall, ollama_route
 from . import inbox_api
+from .recall_store import recall_intent, requested_list, search as search_local
 
 
 def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str = Header(default="")):
@@ -49,6 +50,10 @@ class Memory(BaseModel):
     source: str = Field(default="api", max_length=64)
 
 
+class MemoryCorrection(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class Chat(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     fast: bool = False
@@ -66,10 +71,10 @@ PRIVATE_TERMS = (
 )
 CONNECTED_TERMS = (
     "my email", "my emails", "gmail", "inbox", "calendar", "my schedule",
-    "my notes", "my tasks", "notion", "my contacts", "my files",
+    "notion", "my contacts", "my files",
 )
 CLOUD_TERMS = (
-    "research", "latest", "current news", "browse", "search the web", "source",
+    "research", "latest", "current news", "browse", "search the web",
     "debug", "write code", "implement", "analyse this document", "analyze this document",
 )
 
@@ -102,8 +107,45 @@ async def delete_memory(memory_id: int):
     return {"deleted": True}
 
 
+@app.get("/v1/memories/{memory_id}", dependencies=[Depends(authorised)])
+async def read_memory(memory_id: int):
+    item = get_memory(memory_id)
+    if item is None:
+        raise HTTPException(404, "Memory not found")
+    return item
+
+
+@app.post("/v1/memories/{memory_id}/edit", dependencies=[Depends(authorised)])
+async def edit_memory(memory_id: int, correction: MemoryCorrection):
+    if not correct_memory(memory_id, correction.content.strip()):
+        raise HTTPException(404, "Memory not found")
+    return {"updated": True}
+
+
+@app.get("/v1/recall", dependencies=[Depends(authorised)])
+async def search_recall(q: str, limit: int = 6):
+    return {"sources": search_local(q[:500], max(1, min(limit, 10)))}
+
+
+async def answer_from_recall(message: str, sources: list[dict]) -> str:
+    if requested_list(message):
+        if not sources:
+            return "I couldn't find any matching open items saved on the Dell."
+        labels = [f"{item['title']}{' — ' + item['due'] if item['due'] else ''}" for item in sources]
+        return "Here are the saved items I found: " + "; ".join(labels) + "."
+    if not sources:
+        return "I couldn't find anything matching that in Alfred's local memory, tasks or reminders."
+    try:
+        return await ollama_recall(message, sources)
+    except Exception:
+        return "I found saved items that may help. Open the sources below to check their exact details."
+
+
 @app.post("/v1/chat", dependencies=[Depends(authorised)])
 async def chat(request: Chat):
+    if recall_intent(request.message):
+        sources = search_local(request.message)
+        return {"reply": await answer_from_recall(request.message, sources), "memories_used": len(sources), "sources": sources}
     memories = recall(request.message)
     return {"reply": await ollama_chat(request.message, memories, request.fast), "memories_used": len(memories)}
 
@@ -117,10 +159,17 @@ async def gateway(request: GatewayRequest):
                or bool(re.search(r"\b(my|mine|me|i|we|our)\b", lowered))
                or bool(re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", message)))
     cloud_requested = any(term in lowered for term in CLOUD_TERMS)
-    memories = recall(message)
     if any(term in lowered for term in CONNECTED_TERMS):
         return {"decision": "connection_needed",
                 "reply": "I can't check that connected account from the Dell yet. Its data has not been linked to the local gateway."}
+    # A saved-item question stays local unless the user explicitly asks for web/cloud work.
+    explicit_cloud = any(term in lowered for term in ("research", "browse", "search the web", "use chatgpt", "use claude", "send to cloud"))
+    if recall_intent(message) and not explicit_cloud:
+        sources = search_local(message)
+        reply = await answer_from_recall(message, sources)
+        return {"decision": "local", "reply": reply,
+                "model": settings.chat_model if sources and not requested_list(message) else "deterministic",
+                "memories_used": len(sources), "sources": sources}
     try:
         model_route = "local" if len(message.split()) <= 12 and not cloud_requested else await ollama_route(message)
     except Exception:
@@ -139,6 +188,7 @@ async def gateway(request: GatewayRequest):
             "cloud_prompt": message,
             "memory_sent": False,
         }
+    memories = recall(message)
     reply = await ollama_chat(message, memories)
     return {"decision": "local", "reply": reply, "model": settings.chat_model,
             "memories_used": len(memories)}
