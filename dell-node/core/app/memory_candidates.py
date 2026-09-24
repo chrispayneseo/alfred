@@ -21,8 +21,8 @@ OPEN_STATES = {"pending", "conflict"}
 FINAL_STATES = {"duplicate", "promoted", "dismissed"}
 NEGATIVE_TERMS = {
     "not", "never", "no", "dislike", "dislikes", "disliked", "hate", "hates",
-    "hated", "cannot", "can't", "doesn't", "doesnt", "isn't", "isnt", "won't",
-    "wont", "stopped", "stops", "avoid", "avoids",
+    "hated", "cannot", "cant", "doesnt", "isnt", "wont",
+    "stopped", "stops", "avoid", "avoids",
 }
 POSITIVE_TERMS = {
     "like", "likes", "liked", "love", "loves", "loved", "enjoy", "enjoys",
@@ -62,7 +62,8 @@ def initialise() -> None:
 
 
 def _polarity(value: str) -> int:
-    tokens = set(re.findall(r"[^\W_']+", value.casefold(), re.UNICODE))
+    normalised = value.casefold().replace("’", "'").replace("'", "")
+    tokens = set(re.findall(r"[^\W_]+", normalised, re.UNICODE))
     if tokens & NEGATIVE_TERMS:
         return -1
     if tokens & POSITIVE_TERMS:
@@ -270,16 +271,24 @@ def validate_promotion(candidate_id: str, supersede_memory_id: int | None = None
     return candidate
 
 
+def mark_superseded(memory_id: int, superseded_by_memory_id: int, *, reason: str) -> None:
+    initialise()
+    if memory_id == superseded_by_memory_id:
+        return
+    with connection() as db:
+        db.execute(
+            """INSERT OR REPLACE INTO memory_supersessions
+               (memory_id, superseded_by_memory_id, reason)
+               VALUES (?, ?, ?)""",
+            (memory_id, superseded_by_memory_id, reason[:64]),
+        )
+
+
 def mark_promoted(candidate_id: str, memory_id: int, supersede_memory_id: int | None = None) -> dict:
     initialise()
+    if supersede_memory_id is not None:
+        mark_superseded(supersede_memory_id, memory_id, reason="owner_replacement")
     with connection() as db:
-        if supersede_memory_id is not None and supersede_memory_id != memory_id:
-            db.execute(
-                """INSERT OR REPLACE INTO memory_supersessions
-                   (memory_id, superseded_by_memory_id, reason)
-                   VALUES (?, ?, 'owner_replacement')""",
-                (supersede_memory_id, memory_id),
-            )
         db.execute(
             """UPDATE memory_candidates
                SET state = 'promoted', promoted_memory_id = ?, resolved_at = CURRENT_TIMESTAMP
