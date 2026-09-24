@@ -38,8 +38,15 @@ def initialise() -> None:
         db.execute("""CREATE TABLE IF NOT EXISTS approvals (
           id TEXT PRIMARY KEY, request_id TEXT, plan_id TEXT, action TEXT NOT NULL,
           summary TEXT NOT NULL, risk_level TEXT NOT NULL, state TEXT NOT NULL,
+          scope_hash TEXT, step_index INTEGER,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT
         )""")
+        approval_columns = {row["name"] for row in db.execute("PRAGMA table_info(approvals)").fetchall()}
+        if "scope_hash" not in approval_columns:
+            db.execute("ALTER TABLE approvals ADD COLUMN scope_hash TEXT")
+        if "step_index" not in approval_columns:
+            db.execute("ALTER TABLE approvals ADD COLUMN step_index INTEGER")
+        db.execute("CREATE INDEX IF NOT EXISTS approvals_scope ON approvals(request_id, plan_id, action, scope_hash, state)")
         db.execute("""CREATE TABLE IF NOT EXISTS core_events (
           id TEXT PRIMARY KEY, event_type TEXT NOT NULL, source TEXT NOT NULL,
           decision TEXT NOT NULL, payload TEXT NOT NULL,
@@ -91,19 +98,33 @@ def list_plans(limit: int = 50) -> list[dict]:
     return [{**dict(row), "steps": json.loads(row["steps"])} for row in rows]
 
 
-def create_approval(request_id: str, plan_id: Optional[str], action: str, summary: str, risk_level: str) -> dict:
+def create_approval(request_id: str, plan_id: Optional[str], action: str, summary: str,
+                    risk_level: str, scope_hash: Optional[str] = None,
+                    step_index: Optional[int] = None) -> dict:
     import uuid
     approval_id = str(uuid.uuid4())
     with connection() as db:
-        db.execute("INSERT INTO approvals (id, request_id, plan_id, action, summary, risk_level, state) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
-                   (approval_id, request_id, plan_id, action, summary, risk_level))
-    return {"id": approval_id, "state": "pending", "action": action, "summary": summary, "risk_level": risk_level}
+        db.execute("""INSERT INTO approvals
+          (id, request_id, plan_id, action, summary, risk_level, state, scope_hash, step_index)
+          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+          (approval_id, request_id, plan_id, action, summary, risk_level, scope_hash, step_index))
+    return {
+        "id": approval_id,
+        "state": "pending",
+        "action": action,
+        "summary": summary,
+        "risk_level": risk_level,
+        "scope_hash": scope_hash,
+        "step_index": step_index,
+    }
 
 
 def resolve_approval(approval_id: str, approved: bool) -> bool:
     with connection() as db:
-        result = db.execute("UPDATE approvals SET state = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'pending'",
-                            ("approved" if approved else "rejected", approval_id))
+        result = db.execute(
+            "UPDATE approvals SET state = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'pending'",
+            ("approved" if approved else "rejected", approval_id),
+        )
     return bool(result.rowcount)
 
 
