@@ -11,6 +11,7 @@ import hashlib
 import json
 
 from .cloud_providers import CloudProviderError, cloud_complete
+from .conversation_store import record_assistant_for_request
 from .db import connection, create_approval, record_audit, resolve_approval
 from .privacy import is_private, needs_web_search
 from .providers import enabled_cloud_providers, get_provider
@@ -208,11 +209,16 @@ async def execute_cloud_request(
         },
         request_id,
     )
+    reply = result.get("reply")
+    if isinstance(reply, str) and reply.strip():
+        # The cloud model never receives prior conversation here. Its completed
+        # response is stored only after it returns, for future local continuity.
+        record_assistant_for_request(request_id, reply)
     return {
         "state": "completed",
         "provider": provider_name,
         "model": result.get("model"),
-        "reply": result.get("reply"),
+        "reply": reply,
         "usage": usage,
         "web_search": bool(result.get("web_search")),
         "memory_sent": False,
