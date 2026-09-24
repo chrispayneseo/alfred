@@ -91,6 +91,12 @@ def _approval_summary(action: str, arguments: dict) -> str:
         return f"Correct memory {arguments.get('memory_id', 'unknown')}."
     if action == "memory.delete":
         return f"Delete memory {arguments.get('memory_id', 'unknown')}."
+    if action == "memory.candidate.promote":
+        candidate_id = arguments.get("candidate_id", "unknown")
+        supersede = arguments.get("supersede_memory_id")
+        if supersede is not None:
+            return f"Promote memory candidate {candidate_id} and supersede memory {supersede}."
+        return f"Promote memory candidate {candidate_id} to durable memory."
     if action == "home_assistant.service":
         service = arguments.get("service", "unknown service")
         entity = arguments.get("entity_id", "unknown entity")
@@ -216,6 +222,56 @@ async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
             raise LookupError("Memory not found")
         return {"memory_id": memory_id}
 
+    if action == "memory.candidate.list":
+        state = arguments.get("state")
+        if state is not None and not isinstance(state, str):
+            raise ValueError("Missing or invalid argument: state")
+        limit = arguments.get("limit", 50)
+        if not isinstance(limit, int):
+            raise ValueError("Missing or invalid argument: limit")
+        return {"items": memory_service.list_memory_candidates(state, limit)}
+
+    if action == "memory.candidate.propose":
+        content = _require(arguments, "content")
+        memory_type = arguments.get("memory_type", "fact")
+        source = arguments.get("source", "local-context")
+        confidence = arguments.get("confidence", 0.8)
+        conversation_id = arguments.get("conversation_id")
+        if not isinstance(memory_type, str) or not isinstance(source, str):
+            raise ValueError("Missing or invalid candidate metadata")
+        if not isinstance(confidence, (int, float)):
+            raise ValueError("Missing or invalid argument: confidence")
+        if conversation_id is not None and not isinstance(conversation_id, str):
+            raise ValueError("Missing or invalid argument: conversation_id")
+        candidate = memory_service.propose_memory_candidate(
+            content,
+            memory_type=memory_type,
+            source=source,
+            source_request_id=request_id,
+            source_conversation_id=conversation_id,
+            confidence=float(confidence),
+            request_id=request_id,
+        )
+        return {"candidate": candidate}
+
+    if action == "memory.candidate.dismiss":
+        candidate_id = _require(arguments, "candidate_id")
+        candidate = memory_service.dismiss_memory_candidate(candidate_id, request_id=request_id)
+        if candidate is None:
+            raise LookupError("Memory candidate not found")
+        return {"candidate": candidate}
+
+    if action == "memory.candidate.promote":
+        candidate_id = _require(arguments, "candidate_id")
+        supersede_memory_id = arguments.get("supersede_memory_id")
+        if supersede_memory_id is not None and not isinstance(supersede_memory_id, int):
+            raise ValueError("Missing or invalid argument: supersede_memory_id")
+        return memory_service.promote_memory_candidate(
+            candidate_id,
+            supersede_memory_id=supersede_memory_id,
+            request_id=request_id,
+        )
+
     if action == "home_assistant.service":
         service = _require(arguments, "service")
         entity_id = _require(arguments, "entity_id")
@@ -225,7 +281,7 @@ async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
 
 
 def _verify(action: str, result: dict) -> dict:
-    if action == "memory.read":
+    if action in {"memory.read", "memory.candidate.list"}:
         return {"ok": isinstance(result.get("items"), list), "method": "read_result"}
 
     if action in {"memory.write", "memory.correct"}:
@@ -238,6 +294,36 @@ def _verify(action: str, result: dict) -> dict:
         memory_id = result.get("memory_id")
         ok = isinstance(memory_id, int) and memory_service.get_memory(memory_id) is None
         return {"ok": ok, "method": "row_absent", "memory_id": memory_id}
+
+    if action == "memory.candidate.propose":
+        candidate = result.get("candidate")
+        candidate_id = candidate.get("id") if isinstance(candidate, dict) else None
+        stored = memory_service.get_memory_candidate(candidate_id) if isinstance(candidate_id, str) else None
+        ok = bool(stored) and stored.get("state") == candidate.get("state")
+        return {"ok": ok, "method": "candidate_row", "candidate_id": candidate_id}
+
+    if action == "memory.candidate.dismiss":
+        candidate = result.get("candidate")
+        candidate_id = candidate.get("id") if isinstance(candidate, dict) else None
+        stored = memory_service.get_memory_candidate(candidate_id) if isinstance(candidate_id, str) else None
+        ok = bool(stored) and stored.get("state") == "dismissed"
+        return {"ok": ok, "method": "candidate_state", "candidate_id": candidate_id}
+
+    if action == "memory.candidate.promote":
+        candidate = result.get("candidate")
+        memory = result.get("memory")
+        candidate_id = candidate.get("id") if isinstance(candidate, dict) else None
+        memory_id = memory.get("id") if isinstance(memory, dict) else None
+        stored_candidate = memory_service.get_memory_candidate(candidate_id) if isinstance(candidate_id, str) else None
+        stored_memory = memory_service.get_memory(memory_id) if isinstance(memory_id, int) else None
+        ok = bool(stored_candidate) and stored_candidate.get("state") == "promoted" and bool(stored_memory)
+        return {
+            "ok": ok,
+            "method": "promoted_memory",
+            "candidate_id": candidate_id,
+            "memory_id": memory_id,
+            "superseded_memory_id": result.get("superseded_memory_id"),
+        }
 
     if action == "home_assistant.service":
         return {"ok": result.get("ok") is True, "method": "service_response"}
