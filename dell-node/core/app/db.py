@@ -25,6 +25,33 @@ def initialise() -> None:
           kind TEXT NOT NULL, content TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'api'
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS memories_created ON memories(created_at DESC)")
+        db.execute("""CREATE TABLE IF NOT EXISTS memory_metadata (
+          memory_id INTEGER PRIMARY KEY,
+          memory_type TEXT NOT NULL,
+          importance REAL NOT NULL DEFAULT 0.5 CHECK(importance >= 0 AND importance <= 1),
+          confidence REAL NOT NULL DEFAULT 1.0 CHECK(confidence >= 0 AND confidence <= 1),
+          fingerprint TEXT,
+          access_count INTEGER NOT NULL DEFAULT 0,
+          last_accessed_at TEXT,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS memory_metadata_fingerprint ON memory_metadata(fingerprint)")
+        db.execute("""INSERT OR IGNORE INTO memory_metadata(memory_id, memory_type)
+          SELECT id, kind FROM memories""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS memories_metadata_ad AFTER DELETE ON memories BEGIN
+          DELETE FROM memory_metadata WHERE memory_id = old.id;
+        END""")
+        db.execute("""CREATE TABLE IF NOT EXISTS memory_relations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_memory_id INTEGER NOT NULL,
+          to_memory_id INTEGER NOT NULL,
+          relation TEXT NOT NULL,
+          confidence REAL NOT NULL DEFAULT 1.0 CHECK(confidence >= 0 AND confidence <= 1),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(from_memory_id, to_memory_id, relation)
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS memory_relations_from ON memory_relations(from_memory_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS memory_relations_to ON memory_relations(to_memory_id)")
         db.execute("""CREATE TABLE IF NOT EXISTS audit_events (
           id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, event_type TEXT NOT NULL,
           request_id TEXT, conversation_id TEXT, data TEXT NOT NULL
