@@ -68,14 +68,14 @@ class Phase2AcceptanceTests(unittest.TestCase):
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         distant = (date.today() + timedelta(days=180)).isoformat()
         reminder = inbox_api.ManualFiling(
-            source_id="manual:phase2-reminder",
+            source_id="manual:11111111-1111-4111-8111-111111111111",
             kind="reminder",
             title="Renew household insurance",
             detail="Check renewal quote",
             due=tomorrow,
         )
         task = inbox_api.ManualFiling(
-            source_id="manual:phase2-task",
+            source_id="manual:22222222-2222-4222-8222-222222222222",
             kind="task",
             title="Renew household insurance",
             detail="Compare providers",
