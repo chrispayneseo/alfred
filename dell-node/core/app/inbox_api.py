@@ -6,10 +6,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -23,6 +25,11 @@ LOG = logging.getLogger("alfred.inbox")
 router = APIRouter(prefix="/v1/inbox")
 INBOX_DB = os.getenv("ALFRED_WHATSAPP_DB", "/inbox-data/whatsapp-inbox.sqlite3")
 KINDS = {"note", "task", "reminder", "clarify"}
+KIND_ALIASES = {"memory": "note", "remember": "note", "to-do": "task", "todo": "task", "action": "task", "question": "clarify"}
+
+
+def local_today() -> date:
+    return datetime.now(ZoneInfo("Europe/London")).date()
 
 
 def inbox_connection():
@@ -84,7 +91,7 @@ async def classify(body: str) -> dict:
         "kind is note, task, reminder, or clarify. Use clarify if the requested action or date is ambiguous. "
         "due is a YYYY-MM-DD date only if explicit and unambiguous; otherwise null. "
         "A reminder with no unambiguous date must be clarify. Keep title short. "
-        f"Today's date is {date.today().isoformat()}. Do not perform the action."
+        f"Today's date in Europe/London is {local_today().isoformat()}. Do not perform the action."
     )
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{settings.ollama_url}/api/chat", json={
@@ -96,9 +103,17 @@ async def classify(body: str) -> dict:
         })
         response.raise_for_status()
         result = json.loads(response.json()["message"]["content"])
+    return normalise_suggestion(body, result)
+
+
+def normalise_suggestion(body: str, result: object) -> dict:
     if not isinstance(result, dict):
         raise ValueError("Invalid classifier output")
-    kind = result.get("kind") if result.get("kind") in KINDS else "clarify"
+    raw_kind = result.get("kind")
+    raw_kind = raw_kind.strip().lower() if isinstance(raw_kind, str) else ""
+    kind = KIND_ALIASES.get(raw_kind, raw_kind)
+    if kind not in KINDS:
+        kind = "clarify"
     title = result.get("title") if isinstance(result.get("title"), str) else ""
     title = title.strip()[:200] or body.strip()[:200]
     detail = result.get("detail") if isinstance(result.get("detail"), str) else ""
@@ -106,6 +121,14 @@ async def classify(body: str) -> dict:
         due = parse_due(result.get("due"))
     except ValueError:
         due = None
+    # The model may propose dates, but only the source text can establish one.
+    if due is not None:
+        today = local_today()
+        mentions_exact_date = bool(re.search(rf"(?<!\d){re.escape(due)}(?!\d)", body))
+        mentions_today = due == today.isoformat() and bool(re.search(r"\btoday\b", body, re.I))
+        mentions_tomorrow = due == (today + timedelta(days=1)).isoformat() and bool(re.search(r"\btomorrow\b", body, re.I))
+        if not (mentions_exact_date or mentions_today or mentions_tomorrow):
+            due = None
     if kind == "reminder" and due is None:
         kind = "clarify"
     return {"kind": kind, "title": title, "due": due, "detail": detail.strip()[:1000]}

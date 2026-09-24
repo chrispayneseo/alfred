@@ -66,6 +66,24 @@ class InboxTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inbox_api.parse_due("tomorrow")
 
+    def test_model_cannot_invent_task_deadline(self):
+        result = inbox_api.normalise_suggestion("Add a task to check the loft insulation.", {
+            "kind": "task", "title": "Check loft insulation", "due": inbox_api.local_today().isoformat(), "detail": "",
+        })
+        self.assertEqual(result["kind"], "task")
+        self.assertIsNone(result["due"])
+
+    def test_explicit_date_is_kept_and_undated_reminder_needs_review(self):
+        dated = inbox_api.normalise_suggestion("Remind me on 2026-09-26 to renew the policy.", {
+            "kind": "reminder", "title": "Renew policy", "due": "2026-09-26", "detail": "",
+        })
+        self.assertEqual(dated["due"], "2026-09-26")
+        undated = inbox_api.normalise_suggestion("Remind me to renew the policy.", {
+            "kind": "reminder", "title": "Renew policy", "due": "2026-09-26", "detail": "",
+        })
+        self.assertEqual(undated["kind"], "clarify")
+        self.assertIsNone(undated["due"])
+
 
 if __name__ == "__main__":
     unittest.main()
