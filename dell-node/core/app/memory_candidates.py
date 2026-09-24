@@ -1,9 +1,9 @@
 """Deterministic memory-candidate review, duplicate detection and supersession.
 
-Candidates are not durable memories and never participate in retrieval until an
-explicit promotion succeeds through Alfred Core. Conflict detection is local and
-conservative: likely contradictions are flagged for owner review, never resolved
-by a model.
+Candidates are temporary review state, not durable memories. Pending candidates
+expire after 30 days, unresolved conflicts after 90 days, and resolved/expired
+candidate rows are purged after a further 30 days. Durable memories and the
+supersession ledger are not removed by candidate maintenance.
 """
 
 from __future__ import annotations
@@ -18,7 +18,10 @@ from .memory_graph import similarity
 
 
 OPEN_STATES = {"pending", "conflict"}
-FINAL_STATES = {"duplicate", "promoted", "dismissed"}
+FINAL_STATES = {"duplicate", "promoted", "dismissed", "expired"}
+PENDING_TTL_DAYS = 30
+CONFLICT_TTL_DAYS = 90
+FINAL_RETENTION_DAYS = 30
 NEGATIVE_TERMS = {
     "not", "never", "no", "dislike", "dislikes", "disliked", "hate", "hates",
     "hated", "cannot", "cant", "doesnt", "isnt", "wont",
@@ -59,6 +62,68 @@ def initialise() -> None:
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS memory_supersessions_by ON memory_supersessions(superseded_by_memory_id)")
+
+
+def maintain() -> dict:
+    """Expire stale review work and purge old candidate rows, never memories."""
+    initialise()
+    with connection() as db:
+        pending = db.execute(
+            """UPDATE memory_candidates
+               SET state = 'expired', resolved_at = CURRENT_TIMESTAMP
+               WHERE state = 'pending'
+                 AND datetime(created_at) <= datetime('now', ?)""",
+            (f"-{PENDING_TTL_DAYS} days",),
+        )
+        conflicts = db.execute(
+            """UPDATE memory_candidates
+               SET state = 'expired', resolved_at = CURRENT_TIMESTAMP
+               WHERE state = 'conflict'
+                 AND datetime(created_at) <= datetime('now', ?)""",
+            (f"-{CONFLICT_TTL_DAYS} days",),
+        )
+        purged = db.execute(
+            """DELETE FROM memory_candidates
+               WHERE state IN ('duplicate', 'promoted', 'dismissed', 'expired')
+                 AND datetime(COALESCE(resolved_at, created_at)) <= datetime('now', ?)""",
+            (f"-{FINAL_RETENTION_DAYS} days",),
+        )
+    return {
+        "expired_pending": int(pending.rowcount),
+        "expired_conflicts": int(conflicts.rowcount),
+        "purged": int(purged.rowcount),
+    }
+
+
+def review_summary(*, run_maintenance: bool = True) -> dict:
+    maintenance = maintain() if run_maintenance else {
+        "expired_pending": 0, "expired_conflicts": 0, "purged": 0
+    }
+    initialise()
+    with connection() as db:
+        rows = db.execute(
+            "SELECT state, COUNT(*) AS count FROM memory_candidates GROUP BY state"
+        ).fetchall()
+        oldest = db.execute(
+            """SELECT created_at FROM memory_candidates
+               WHERE state IN ('pending', 'conflict')
+               ORDER BY datetime(created_at) ASC LIMIT 1"""
+        ).fetchone()
+        superseded = db.execute("SELECT COUNT(*) FROM memory_supersessions").fetchone()[0]
+    counts = {row["state"]: int(row["count"]) for row in rows}
+    return {
+        "counts": counts,
+        "open": counts.get("pending", 0) + counts.get("conflict", 0),
+        "conflicts": counts.get("conflict", 0),
+        "oldest_open_at": oldest["created_at"] if oldest else None,
+        "superseded_memories": int(superseded),
+        "retention": {
+            "pending_days": PENDING_TTL_DAYS,
+            "conflict_days": CONFLICT_TTL_DAYS,
+            "resolved_days": FINAL_RETENTION_DAYS,
+        },
+        "maintenance": maintenance,
+    }
 
 
 def _polarity(value: str) -> int:
@@ -156,7 +221,7 @@ def propose(
     source_conversation_id: str | None = None,
     confidence: float = 0.8,
 ) -> dict:
-    initialise()
+    maintain()
     clean_content = content.strip()[:4000]
     clean_type = memory_type.strip().casefold()[:64] or "fact"
     clean_source = source.strip()[:64] or "local-context"
@@ -211,7 +276,7 @@ def get(candidate_id: str) -> dict | None:
 
 
 def list_candidates(state: str | None = None, limit: int = 50) -> list[dict]:
-    initialise()
+    maintain()
     size = max(1, min(limit, 100))
     with connection() as db:
         if state:
@@ -228,7 +293,7 @@ def list_candidates(state: str | None = None, limit: int = 50) -> list[dict]:
 
 
 def dismiss(candidate_id: str) -> dict | None:
-    initialise()
+    maintain()
     with connection() as db:
         result = db.execute(
             """UPDATE memory_candidates SET state = 'dismissed', resolved_at = CURRENT_TIMESTAMP
@@ -243,11 +308,14 @@ def dismiss(candidate_id: str) -> dict | None:
 
 
 def validate_promotion(candidate_id: str, supersede_memory_id: int | None = None) -> dict:
+    maintain()
     candidate = get(candidate_id)
     if candidate is None:
         raise LookupError("Memory candidate not found")
     if candidate["state"] == "duplicate":
         raise ValueError("Duplicate candidate cannot be promoted")
+    if candidate["state"] == "expired":
+        raise ValueError("Expired candidate cannot be promoted")
     if candidate["state"] == "promoted":
         return candidate
     if candidate["state"] == "dismissed":
