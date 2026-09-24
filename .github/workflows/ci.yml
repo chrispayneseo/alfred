@@ -33,3 +33,23 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+
+  dell-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dell-node/core
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: dell-node/core/requirements.txt
+      - name: Install Core dependencies
+        run: pip install -r requirements.txt
+      - name: Run Core tests
+        run: python -m unittest discover -p 'test_*.py' -v
