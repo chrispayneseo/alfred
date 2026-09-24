@@ -30,6 +30,21 @@ def initialise() -> None:
           request_id TEXT, conversation_id TEXT, data TEXT NOT NULL
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS audit_events_request ON audit_events(request_id, occurred_at DESC)")
+        db.execute("""CREATE TABLE IF NOT EXISTS plans (
+          id TEXT PRIMARY KEY, request_id TEXT, goal TEXT NOT NULL, state TEXT NOT NULL,
+          steps TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS approvals (
+          id TEXT PRIMARY KEY, request_id TEXT, plan_id TEXT, action TEXT NOT NULL,
+          summary TEXT NOT NULL, risk_level TEXT NOT NULL, state TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS core_events (
+          id TEXT PRIMARY KEY, event_type TEXT NOT NULL, source TEXT NOT NULL,
+          decision TEXT NOT NULL, payload TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
         new_index = db.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'").fetchone() is None
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, content='memories', content_rowid='id')")
         db.execute("""CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
@@ -57,6 +72,49 @@ def record_audit(event_type: str, data: dict, request_id: Optional[str] = None,
           VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)""",
           (event_id, event_type, request_id, conversation_id, json.dumps(data, separators=(",", ":"))))
     return event_id
+
+
+def create_plan(request_id: str, goal: str, steps: list[dict]) -> dict:
+    import json
+    import uuid
+    plan_id = str(uuid.uuid4())
+    with connection() as db:
+        db.execute("INSERT INTO plans (id, request_id, goal, state, steps) VALUES (?, ?, ?, 'draft', ?)",
+                   (plan_id, request_id, goal, json.dumps(steps, separators=(",", ":"))))
+    return {"id": plan_id, "request_id": request_id, "goal": goal, "state": "draft", "steps": steps}
+
+
+def list_plans(limit: int = 50) -> list[dict]:
+    import json
+    with connection() as db:
+        rows = db.execute("SELECT id, request_id, goal, state, steps, created_at, updated_at FROM plans ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    return [{**dict(row), "steps": json.loads(row["steps"])} for row in rows]
+
+
+def create_approval(request_id: str, plan_id: Optional[str], action: str, summary: str, risk_level: str) -> dict:
+    import uuid
+    approval_id = str(uuid.uuid4())
+    with connection() as db:
+        db.execute("INSERT INTO approvals (id, request_id, plan_id, action, summary, risk_level, state) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                   (approval_id, request_id, plan_id, action, summary, risk_level))
+    return {"id": approval_id, "state": "pending", "action": action, "summary": summary, "risk_level": risk_level}
+
+
+def resolve_approval(approval_id: str, approved: bool) -> bool:
+    with connection() as db:
+        result = db.execute("UPDATE approvals SET state = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'pending'",
+                            ("approved" if approved else "rejected", approval_id))
+    return bool(result.rowcount)
+
+
+def record_event(event_type: str, source: str, decision: str, payload: dict) -> dict:
+    import json
+    import uuid
+    event_id = str(uuid.uuid4())
+    with connection() as db:
+        db.execute("INSERT INTO core_events (id, event_type, source, decision, payload) VALUES (?, ?, ?, ?, ?)",
+                   (event_id, event_type, source, decision, json.dumps(payload, separators=(",", ":"))))
+    return {"id": event_id, "event_type": event_type, "source": source, "decision": decision}
 
 
 def remember(kind: str, content: str, source: str) -> int:

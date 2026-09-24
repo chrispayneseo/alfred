@@ -16,6 +16,15 @@ class PolicyDecision:
     decision: Decision
     reason: str
 
+
+TOOLS = {
+    "memory.read": {"risk": "read", "permission": "auto", "verification": "read_result"},
+    "memory.write": {"risk": "safe_write", "permission": "confirm", "verification": "stored_row"},
+    "memory.correct": {"risk": "safe_write", "permission": "confirm", "verification": "stored_row"},
+    "memory.delete": {"risk": "safe_write", "permission": "confirm", "verification": "row_absent"},
+    "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
+}
+
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
     if action in {"memory.read", "recall.search", "chat.local", "route"}:
@@ -25,6 +34,17 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     if action == "home_assistant.service":
         return PolicyDecision("reversible", "auto" if confirmed else "confirm", "Changing a device state requires explicit confirmation.")
     return PolicyDecision("high_impact", "deny", "This action is not registered with Alfred Core.")
+
+
+def tool_registry() -> list[dict]:
+    return [{"name": name, **definition} for name, definition in TOOLS.items()]
+
+
+def event_decision(event_type: str) -> str:
+    """Events are stored first; only explicitly registered classes may notify."""
+    if event_type in {"calendar.changed", "home_assistant.changed", "timer.due", "whatsapp.received"}:
+        return "store"
+    return "ignore"
 
 def normalise_request(channel: str, message: str, conversation_id: str | None = None) -> dict:
     """Produce the canonical record used by every first-party channel."""

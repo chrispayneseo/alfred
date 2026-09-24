@@ -125,6 +125,20 @@ class RecallTests(unittest.TestCase):
         self.assertEqual(item["trust_level"], "owner")
         self.assertEqual(item["conversation_id"], "calendar-check")
 
+    def test_tool_registry_and_event_policy_fail_closed(self):
+        from app.core import event_decision, tool_registry
+        self.assertIn("memory.write", {tool["name"] for tool in tool_registry()})
+        self.assertEqual(event_decision("calendar.changed"), "store")
+        self.assertEqual(event_decision("unknown.untrusted"), "ignore")
+
+    def test_plan_approval_and_event_ledger_are_durable(self):
+        plan = db.create_plan("request-1", "Prepare tomorrow", [{"action": "calendar.read"}])
+        self.assertEqual(db.list_plans()[0]["id"], plan["id"])
+        approval = db.create_approval("request-1", plan["id"], "home_assistant.service", "Turn on lamp", "reversible")
+        self.assertTrue(db.resolve_approval(approval["id"], True))
+        self.assertFalse(db.resolve_approval(approval["id"], True))
+        self.assertEqual(db.record_event("timer.due", "test", "store", {"name": "briefing"})["decision"], "store")
+
 
 if __name__ == "__main__":
     unittest.main()
