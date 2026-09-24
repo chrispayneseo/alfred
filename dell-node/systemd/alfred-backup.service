@@ -1,0 +1,6 @@
+[Unit]
+Description=Alfred Core database backup
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/opt/alfred-node/scripts/backup.sh
