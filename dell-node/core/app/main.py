@@ -16,6 +16,7 @@ from .db import (
 from .clients import ollama_chat, ollama_recall
 from .cloud_execution import execute_cloud_request
 from .cloud_providers import provider_health
+from .conversation_store import initialise as initialise_conversation_store
 from . import inbox_api, memory_service
 from .recall_store import recall_intent, requested_list
 from .core import tool_registry, event_decision
@@ -46,6 +47,7 @@ async def lifespan(_: FastAPI):
     initialise()
     initialise_execution_store()
     initialise_request_store()
+    initialise_conversation_store()
     recover_interrupted_work()
     inbox_api.initialise()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
@@ -61,7 +63,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.8.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.9.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -94,12 +96,14 @@ class Chat(BaseModel):
 class GatewayRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     history: list[dict[str, str]] = Field(default_factory=list, max_length=12)
+    conversation_id: Optional[str] = Field(default=None, max_length=160)
 
 
 class CoreRequest(BaseModel):
     channel: str = Field(pattern="^(web|whatsapp|voice|email|api|webhook)$")
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: Optional[str] = Field(default=None, max_length=160)
+    history: list[dict[str, str]] = Field(default_factory=list, max_length=12)
 
 
 class PlanRequest(BaseModel):
@@ -172,6 +176,7 @@ async def health():
             "verification": "enabled",
             "request_lifecycle": "durable",
             "memory_service": "unified",
+            "short_term_context": "ttl_local",
             "legacy_mutations": "executor_routed",
             "recovery_policy": "fail_closed",
             "provider_runtime": "policy_gated",
@@ -271,7 +276,11 @@ async def chat(request: Chat):
 @app.post("/v1/gateway", dependencies=[Depends(authorised)])
 async def gateway(request: GatewayRequest):
     result = await orchestrate(
-        channel="web", message=request.message, recall_answerer=answer_from_recall,
+        channel="web",
+        message=request.message,
+        conversation_id=request.conversation_id,
+        recall_answerer=answer_from_recall,
+        history=request.history,
     )
     if result.get("decision") == "local":
         if result.get("provider") == "ollama.chat":
@@ -303,6 +312,7 @@ async def receive_request(request: CoreRequest):
         message=request.message,
         conversation_id=request.conversation_id,
         recall_answerer=answer_from_recall,
+        history=request.history,
     )
 
 
@@ -313,7 +323,7 @@ async def core_status():
         "lifecycle": lifecycle_summary(),
         "tools": {"registered": len(tool_registry())},
         "providers": provider_registry(),
-        "memory": {"service": "unified"},
+        "memory": {"service": "unified", "short_term_context": "ttl_local"},
         "compatibility": {"legacy_mutations": "executor_routed"},
         "recovery": recovery_summary(20),
     }
