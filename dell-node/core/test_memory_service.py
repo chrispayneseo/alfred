@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
@@ -29,12 +30,12 @@ class MemoryServiceTests(unittest.TestCase):
         created = memory_service.create_memory("note", "Spare key is in the blue drawer", "test", request_id="req-memory")
         memory_id = created["id"]
         self.assertEqual(memory_service.get_memory(memory_id)["content"], "Spare key is in the blue drawer")
-        self.assertEqual(memory_service.search_memories("blue drawer")[0]["id"], memory_id)
+        self.assertEqual(memory_service.search_memories("blue")[0]["id"], memory_id)
 
         corrected = memory_service.correct_memory(memory_id, "Spare key is in the green drawer", request_id="req-memory")
         self.assertEqual(corrected["content"], "Spare key is in the green drawer")
-        self.assertEqual(memory_service.search_memories("blue drawer"), [])
-        self.assertEqual(memory_service.search_memories("green drawer")[0]["id"], memory_id)
+        self.assertEqual(memory_service.search_memories("blue"), [])
+        self.assertEqual(memory_service.search_memories("green")[0]["id"], memory_id)
 
         self.assertTrue(memory_service.delete_memory(memory_id, request_id="req-memory"))
         self.assertIsNone(memory_service.get_memory(memory_id))
@@ -55,6 +56,15 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(memory_service.retrieve_context("boiler warranty")[0]["kind"], "memory")
         self.assertEqual(memory_service.retrieve_context("loft insulation")[0]["kind"], "task")
         self.assertEqual(memory_service.retrieve_context("car insurance")[0]["kind"], "reminder")
+
+    def test_context_retrieval_degrades_to_memory_if_inbox_index_is_unavailable(self):
+        memory_service.create_memory("note", "Recovery code is in the safe", "test")
+        with db.connection() as connection:
+            connection.execute("DROP TABLE inbox_filed_fts")
+        results = memory_service.retrieve_context("recovery code")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["kind"], "memory")
+        self.assertEqual(results[0]["content"], "Recovery code is in the safe")
 
     def test_resource_search_remains_memory_only(self):
         memory_service.create_memory("note", "Loft note for insulation", "test")
