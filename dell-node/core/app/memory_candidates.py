@@ -304,6 +304,16 @@ def is_superseded(memory_id: int) -> bool:
     return row is not None
 
 
+def remove_memory_references(memory_id: int) -> None:
+    """Keep supersession state coherent if either side of a replacement is deleted."""
+    initialise()
+    with connection() as db:
+        db.execute(
+            "DELETE FROM memory_supersessions WHERE memory_id = ? OR superseded_by_memory_id = ?",
+            (memory_id, memory_id),
+        )
+
+
 def filter_active_context(items: list[dict]) -> list[dict]:
     superseded = superseded_memory_ids()
     if not superseded:
