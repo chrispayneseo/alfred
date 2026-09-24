@@ -1,7 +1,7 @@
 """Provider metadata owned by Alfred Core.
 
-The registry is intentionally declarative: models may suggest work, but the Core
-remains responsible for deciding whether a provider may receive a request.
+The registry is declarative and secret-free: models may suggest work, but the
+Core remains responsible for deciding whether a provider may receive a request.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class Provider:
 
 
 def providers() -> list[Provider]:
-    """Return the providers known to this Alfred Core instance."""
+    """Return providers known to this Core without exposing credentials."""
     return [
         Provider(
             name="ollama.chat",
@@ -40,21 +40,21 @@ def providers() -> list[Provider]:
             sends_off_device=False,
             model=settings.router_model,
         ),
-        # Cloud providers are registered now so routing, policy and audit records
-        # can refer to stable provider names before direct invocation is added.
         Provider(
             name="openai",
             location="cloud",
-            enabled=False,
+            enabled=bool(settings.openai_api_key and settings.openai_model),
             capabilities=("reasoning", "research", "coding"),
             sends_off_device=True,
+            model=settings.openai_model,
         ),
         Provider(
             name="claude",
             location="cloud",
-            enabled=False,
+            enabled=bool(settings.anthropic_api_key and settings.anthropic_model),
             capabilities=("reasoning", "coding", "long_context"),
             sends_off_device=True,
+            model=settings.anthropic_model,
         ),
     ]
 
@@ -65,3 +65,7 @@ def provider_registry() -> list[dict]:
 
 def get_provider(name: str) -> Provider | None:
     return next((provider for provider in providers() if provider.name == name), None)
+
+
+def enabled_cloud_providers() -> list[Provider]:
+    return [provider for provider in providers() if provider.location == "cloud" and provider.enabled]
