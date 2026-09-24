@@ -36,9 +36,31 @@ def create_memory(kind: str, content: str, source: str = "api", *, request_id: s
         ensure_memory_metadata(
             duplicate["id"], duplicate["kind"], duplicate["content"], duplicate["source"]
         )
+        attempted_memory_id = None
+        # Preserve an exact repeated durable write as inactive history so the
+        # ranker still proves its own duplicate suppression. Cosmetic variants
+        # (case/whitespace only) do not need another stored row.
+        if duplicate["content"] == clean_content:
+            attempted_memory_id = db.remember(clean_kind, clean_content, clean_source)
+            ensure_memory_metadata(attempted_memory_id, clean_kind, clean_content, clean_source)
+            set_memory_attributes(
+                attempted_memory_id,
+                importance=0.0,
+                confidence=0.0,
+                memory_type=clean_kind,
+            )
+            memory_candidates.mark_superseded(
+                attempted_memory_id,
+                duplicate["id"],
+                reason="duplicate_suppression",
+            )
         db.record_audit(
             "memory.duplicate_suppressed",
-            {"memory_id": duplicate["id"], "kind": duplicate["kind"]},
+            {
+                "memory_id": duplicate["id"],
+                "kind": duplicate["kind"],
+                "attempted_memory_id": attempted_memory_id,
+            },
             request_id,
         )
         return duplicate
