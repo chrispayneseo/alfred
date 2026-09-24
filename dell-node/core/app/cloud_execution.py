@@ -94,19 +94,6 @@ async def execute_cloud_request(
 
     if provider_meta is None or provider_meta.location != "cloud":
         return {"state": "provider_unavailable", "provider": provider_name, "reason": "Unknown cloud provider."}
-    if not provider_meta.enabled:
-        return {
-            "state": "provider_unavailable",
-            "provider": provider_name,
-            "model": provider_meta.model,
-            "reason": "Provider is not configured on Alfred Core.",
-        }
-    if web_search and provider_name != "openai":
-        return {
-            "state": "provider_unavailable",
-            "provider": provider_name,
-            "reason": "This request needs live web search and the selected provider adapter does not expose it.",
-        }
 
     scope_hash = _fingerprint({
         "provider": provider_name,
@@ -116,6 +103,8 @@ async def execute_cloud_request(
     prompt_hash = hashlib.sha256(clean.encode("utf-8")).hexdigest()
     private = is_private(clean)
 
+    # Privacy is evaluated before availability. A missing provider key must not
+    # change whether the Core judges off-device transfer to require approval.
     if private:
         approval = _approval_for(request_id, provider_name, scope_hash)
         if confirmed and approval.get("state") == "pending":
@@ -139,6 +128,22 @@ async def execute_cloud_request(
                 "approval": approval,
                 "memory_sent": False,
             }
+
+    if not provider_meta.enabled:
+        return {
+            "state": "provider_unavailable",
+            "provider": provider_name,
+            "model": provider_meta.model,
+            "reason": "Provider is not configured on Alfred Core.",
+            "memory_sent": False,
+        }
+    if web_search and provider_name != "openai":
+        return {
+            "state": "provider_unavailable",
+            "provider": provider_name,
+            "reason": "This request needs live web search and the selected provider adapter does not expose it.",
+            "memory_sent": False,
+        }
 
     record_audit(
         "cloud.started",
