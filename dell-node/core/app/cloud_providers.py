@@ -30,7 +30,6 @@ class CloudProviderError(RuntimeError):
 
 
 def _extract_openai_text(payload: dict[str, Any]) -> str:
-    # Responses API returns output -> message -> content -> output_text.
     chunks: list[str] = []
     for item in payload.get("output", []):
         if not isinstance(item, dict):
@@ -40,7 +39,6 @@ def _extract_openai_text(payload: dict[str, Any]) -> str:
                 text = block.get("text")
                 if isinstance(text, str):
                     chunks.append(text)
-    # Some SDK/proxy-compatible responses expose a convenience field.
     if not chunks and isinstance(payload.get("output_text"), str):
         chunks.append(payload["output_text"])
     text = "\n".join(part.strip() for part in chunks if part.strip()).strip()
@@ -61,9 +59,22 @@ def _extract_anthropic_text(payload: dict[str, Any]) -> str:
     return text
 
 
-async def openai_complete(prompt: str, *, max_output_tokens: int = 1024) -> dict:
+async def openai_complete(
+    prompt: str,
+    *,
+    max_output_tokens: int = 1024,
+    web_search: bool = False,
+) -> dict:
     if not settings.openai_api_key:
         raise CloudProviderError("openai", "not_configured")
+    body: dict[str, Any] = {
+        "model": settings.openai_model,
+        "instructions": SYSTEM_PROMPT,
+        "input": prompt,
+        "max_output_tokens": max(64, min(max_output_tokens, 4096)),
+    }
+    if web_search:
+        body["tools"] = [{"type": "web_search"}]
     async with httpx.AsyncClient(timeout=settings.cloud_timeout_seconds) as client:
         response = await client.post(
             "https://api.openai.com/v1/responses",
@@ -71,12 +82,7 @@ async def openai_complete(prompt: str, *, max_output_tokens: int = 1024) -> dict
                 "Authorization": f"Bearer {settings.openai_api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": settings.openai_model,
-                "instructions": SYSTEM_PROMPT,
-                "input": prompt,
-                "max_output_tokens": max(64, min(max_output_tokens, 4096)),
-            },
+            json=body,
         )
     if response.status_code >= 400:
         raise CloudProviderError("openai", "http_error", response.status_code)
@@ -86,6 +92,7 @@ async def openai_complete(prompt: str, *, max_output_tokens: int = 1024) -> dict
         "provider": "openai",
         "model": payload.get("model") or settings.openai_model,
         "reply": _extract_openai_text(payload),
+        "web_search": web_search,
         "usage": {
             "input_tokens": int(usage.get("input_tokens") or 0),
             "output_tokens": int(usage.get("output_tokens") or 0),
@@ -119,6 +126,7 @@ async def claude_complete(prompt: str, *, max_output_tokens: int = 1024) -> dict
         "provider": "claude",
         "model": payload.get("model") or settings.anthropic_model,
         "reply": _extract_anthropic_text(payload),
+        "web_search": False,
         "usage": {
             "input_tokens": int(usage.get("input_tokens") or 0),
             "output_tokens": int(usage.get("output_tokens") or 0),
@@ -126,12 +134,22 @@ async def claude_complete(prompt: str, *, max_output_tokens: int = 1024) -> dict
     }
 
 
-async def cloud_complete(provider: str, prompt: str, *, max_output_tokens: int = 1024) -> dict:
+async def cloud_complete(
+    provider: str,
+    prompt: str,
+    *,
+    max_output_tokens: int = 1024,
+    web_search: bool = False,
+) -> dict:
     clean = prompt.strip()
     if not clean:
         raise ValueError("Prompt is required")
     if provider == "openai":
-        return await openai_complete(clean, max_output_tokens=max_output_tokens)
+        return await openai_complete(
+            clean,
+            max_output_tokens=max_output_tokens,
+            web_search=web_search,
+        )
     if provider == "claude":
         return await claude_complete(clean, max_output_tokens=max_output_tokens)
     raise CloudProviderError(provider, "unknown_provider")
