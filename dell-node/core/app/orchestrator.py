@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Literal
 
+from .candidate_extractor import capture as capture_memory_candidates
 from .clients import ollama_chat, ollama_route
 from .cloud_execution import execute_cloud_request
 from .conversation_store import merge_history, recent_turns, record_turn
@@ -50,6 +51,24 @@ class OrchestrationResult:
             if payload.get(key) is None:
                 payload.pop(key, None)
         return payload
+
+
+def _capture_candidates_safely(message: str, request_id: str, conversation_id: str) -> int:
+    """Candidate housekeeping must never make an otherwise valid request fail."""
+    try:
+        return len(capture_memory_candidates(
+            message,
+            request_id=request_id,
+            conversation_id=conversation_id,
+        ))
+    except Exception as exc:
+        record_audit(
+            "memory.candidate_extraction_failed",
+            {"error_type": type(exc).__name__},
+            request_id,
+            conversation_id,
+        )
+        return 0
 
 
 async def orchestrate(
@@ -120,10 +139,16 @@ async def orchestrate(
                 sources=sources,
             )
             record_turn(conversation_id, "assistant", reply, request_id=request_id)
+            candidates = _capture_candidates_safely(clean, request_id, conversation_id)
             transition_request(request_id, "completed", route=result.route, provider=provider)
             record_audit(
                 "request.routed",
-                {"decision": result.route, "provider": provider, "memories_used": len(sources)},
+                {
+                    "decision": result.route,
+                    "provider": provider,
+                    "memories_used": len(sources),
+                    "memory_candidates": candidates,
+                },
                 request_id,
                 conversation_id,
             )
@@ -138,7 +163,8 @@ async def orchestrate(
         if wants_cloud or suggested_route == "cloud":
             # Short-term conversation history is deliberately NOT supplied here.
             # Off-device execution receives only the current prompt unless a
-            # future explicit policy/approval path says otherwise.
+            # future explicit policy/approval path says otherwise. Candidate
+            # extraction is also deliberately skipped for cloud-routed prompts.
             cloud = await execute_cloud_request(request_id=request_id, prompt=clean)
             state = cloud.get("state")
             provider = cloud.get("provider")
@@ -230,6 +256,7 @@ async def orchestrate(
         context = retrieve_context(clean, 8)
         reply = await ollama_chat(clean, context, history=short_term_history)
         record_turn(conversation_id, "assistant", reply, request_id=request_id)
+        candidates = _capture_candidates_safely(clean, request_id, conversation_id)
         result = OrchestrationResult(
             request_id=request_id,
             conversation_id=conversation_id,
@@ -241,7 +268,12 @@ async def orchestrate(
         transition_request(request_id, "completed", route=result.route, provider=result.provider)
         record_audit(
             "request.routed",
-            {"decision": result.route, "provider": result.provider, "memories_used": len(context)},
+            {
+                "decision": result.route,
+                "provider": result.provider,
+                "memories_used": len(context),
+                "memory_candidates": candidates,
+            },
             request_id,
             conversation_id,
         )
