@@ -64,16 +64,19 @@ class CandidateLifecycleTests(unittest.TestCase):
         memory_service.dismiss_memory_candidate(first["id"])
         self._age(first["id"], 31, resolved=True)
 
+        # Proposal itself runs maintenance, so the old resolved candidate is
+        # removed eagerly before the new candidate is inserted.
         second = memory_service.propose_memory_candidate(
             "I prefer window seats", memory_type="preference", source="test"
         )
+        self.assertIsNone(memory_candidates.get(first["id"]))
+
         self._age(second["id"], 31)
         memory_candidates.maintain()  # pending -> expired with a fresh resolved_at
         self._age(second["id"], 31, resolved=True)
 
         maintenance = memory_candidates.maintain()
-        self.assertEqual(maintenance["purged"], 2)
-        self.assertIsNone(memory_candidates.get(first["id"]))
+        self.assertEqual(maintenance["purged"], 1)
         self.assertIsNone(memory_candidates.get(second["id"]))
 
     def test_candidate_cleanup_never_deletes_durable_memory_or_supersession_history(self):
