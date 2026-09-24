@@ -12,7 +12,7 @@ Environment=ALFRED_COLLECTOR_TOKEN_FILE=/opt/alfred-node/whatsapp-ingress/collec
 ExecStart=/usr/bin/python3 -B /opt/alfred-node/whatsapp-ingress/collector.py
 Restart=always
 RestartSec=15
-UMask=0077
+UMask=0007
 NoNewPrivileges=yes
 
 [Install]

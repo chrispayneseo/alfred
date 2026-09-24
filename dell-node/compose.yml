@@ -1,0 +1,37 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # Ollama is deliberately private to the Docker network.
+
+  core:
+    build: ./core
+    group_add:
+      - "1000" # chris: shared local inbox SQLite, without running Core as root
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    env_file: .env
+    volumes:
+      - alfred_data:/data
+      - /opt/alfred-node/whatsapp-ingress/collector-data:/inbox-data
+    ports:
+      - "127.0.0.1:8080:8080"
+    mem_limit: 512m
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    profiles: ["mqtt"]
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+
+volumes:
+  ollama:
+  alfred_data:
+  mqtt_data:

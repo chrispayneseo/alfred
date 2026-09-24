@@ -12,7 +12,9 @@ import sqlite3
 import time
 import urllib.error
 import urllib.request
+import uuid
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -102,11 +104,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Alfred WhatsApp receive-only collector")
     parser.add_argument("--once", action="store_true", help="Poll once and exit")
     parser.add_argument("--list", action="store_true", help="Show staged messages without their text")
+    parser.add_argument("--inject-test", metavar="TEXT", help="Stage one local test message without WhatsApp")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     path = os.environ.get("ALFRED_WHATSAPP_DB", "/data/whatsapp-inbox.sqlite3")
     with closing(open_database(path)) as db:
+        if args.inject_test:
+            body = args.inject_test.strip()
+            if not body or len(body) > 10_000:
+                raise SystemExit("Test message must be 1–10,000 characters")
+            timestamp = datetime.now(timezone.utc).isoformat()
+            with db:
+                db.execute("INSERT INTO whatsapp_inbox (id, body, sent_at, received_at) VALUES (?, ?, ?, ?)",
+                           ("wamid.sample." + uuid.uuid4().hex, body, timestamp, timestamp))
+            print("Local test message staged")
+            return
         if args.list:
             for row in db.execute("SELECT id, state, created_at FROM whatsapp_inbox ORDER BY created_at DESC LIMIT 20"):
                 print("\t".join(row))
