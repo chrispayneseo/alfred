@@ -60,16 +60,12 @@ def _latest_approval(request_id: str, action: str, scope_hash: str) -> dict | No
     return dict(row) if row else None
 
 
-def _approval_for(request_id: str, provider: str, scope_hash: str) -> dict:
-    action = f"provider.{provider}"
-    approval = _latest_approval(request_id, action, scope_hash)
-    if approval:
-        return approval
+def _new_approval(request_id: str, provider: str, scope_hash: str) -> dict:
     label = "OpenAI" if provider == "openai" else "Claude"
     return create_approval(
         request_id,
         None,
-        action,
+        f"provider.{provider}",
         f"Send this request to {label}.",
         "external",
         scope_hash=scope_hash,
@@ -106,10 +102,16 @@ async def execute_cloud_request(
     # Privacy is evaluated before availability. A missing provider key must not
     # change whether the Core judges off-device transfer to require approval.
     if private:
-        approval = _approval_for(request_id, provider_name, scope_hash)
-        if confirmed and approval.get("state") == "pending":
+        action = f"provider.{provider_name}"
+        approval = _latest_approval(request_id, action, scope_hash)
+        existed = approval is not None
+        if approval is None:
+            approval = _new_approval(request_id, provider_name, scope_hash)
+        # Confirmation can resolve only the exact pending approval that existed
+        # before this call. A changed prompt gets a new pending scope instead.
+        if confirmed and existed and approval.get("state") == "pending":
             resolve_approval(approval["id"], True)
-            approval = _latest_approval(request_id, f"provider.{provider_name}", scope_hash) or approval
+            approval = _latest_approval(request_id, action, scope_hash) or approval
             record_audit(
                 "approval.resolved",
                 {"approval_id": approval["id"], "approved": True, "source": "cloud_explicit_confirmation"},
