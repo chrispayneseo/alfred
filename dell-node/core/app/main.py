@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 import asyncio
 import re
+from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .config import settings
-from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember
+from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember, record_audit
 from .clients import home_assistant, ollama_chat, ollama_recall, ollama_route
 from . import inbox_api
 from .recall_store import recall_intent, requested_list, search as search_local
+from .core import decide, normalise_request
 
 
 def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str = Header(default="")):
@@ -48,10 +52,12 @@ class Memory(BaseModel):
     kind: str = Field(max_length=64)
     content: str = Field(min_length=1, max_length=4000)
     source: str = Field(default="api", max_length=64)
+    confirmed: bool = False
 
 
 class MemoryCorrection(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
+    confirmed: bool = False
 
 
 class Chat(BaseModel):
@@ -62,6 +68,12 @@ class Chat(BaseModel):
 class GatewayRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     history: list[dict[str, str]] = Field(default_factory=list, max_length=12)
+
+
+class CoreRequest(BaseModel):
+    channel: str = Field(pattern="^(web|whatsapp|voice|email|api|webhook)$")
+    message: str = Field(min_length=1, max_length=4000)
+    conversation_id: Optional[str] = Field(default=None, max_length=160)
 
 
 PRIVATE_TERMS = (
@@ -82,6 +94,7 @@ CLOUD_TERMS = (
 class DeviceAction(BaseModel):
     service: str = Field(pattern=r"^[a-z_]+\.[a-z_]+$")
     entity_id: str = Field(pattern=r"^[a-z_]+\.[a-zA-Z0-9_]+$")
+    confirmed: bool = False
 
 
 @app.get("/health")
@@ -91,6 +104,10 @@ async def health():
 
 @app.post("/v1/memories", dependencies=[Depends(authorised)])
 async def create_memory(memory: Memory):
+    policy = decide("memory.write", memory.confirmed)
+    if policy.decision != "auto":
+        raise HTTPException(status_code=409, detail={"policy": policy.__dict__})
+    record_audit("memory.saved", {"kind": memory.kind, "source": memory.source})
     return {"id": remember(memory.kind, memory.content, memory.source)}
 
 
@@ -102,8 +119,10 @@ async def get_memories(q: str, limit: int = 8):
 
 @app.delete("/v1/memories/{memory_id}", dependencies=[Depends(authorised)])
 async def delete_memory(memory_id: int):
+    policy = decide("memory.delete", confirmed=True)  # DELETE is an explicit owner UI action.
     if not forget(memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
+    record_audit("memory.deleted", {"memory_id": memory_id, "policy": policy.__dict__})
     return {"deleted": True}
 
 
@@ -117,8 +136,12 @@ async def read_memory(memory_id: int):
 
 @app.post("/v1/memories/{memory_id}/edit", dependencies=[Depends(authorised)])
 async def edit_memory(memory_id: int, correction: MemoryCorrection):
+    policy = decide("memory.correct", correction.confirmed)
+    if policy.decision != "auto":
+        raise HTTPException(status_code=409, detail={"policy": policy.__dict__})
     if not correct_memory(memory_id, correction.content.strip()):
         raise HTTPException(404, "Memory not found")
+    record_audit("memory.corrected", {"memory_id": memory_id})
     return {"updated": True}
 
 
@@ -155,6 +178,8 @@ async def chat(request: Chat):
 async def gateway(request: GatewayRequest):
     """Local triage. Never transmits content to a cloud provider."""
     message = request.message.strip()
+    core_request = normalise_request("web", message)
+    record_audit("request.received", {"channel": "web", "operation": "gateway"}, core_request["request_id"], core_request["conversation_id"])
     lowered = message.lower()
     private = (any(term in lowered for term in PRIVATE_TERMS)
                or bool(re.search(r"\b(my|mine|me|i|we|our)\b", lowered))
@@ -197,8 +222,21 @@ async def gateway(request: GatewayRequest):
 
 @app.post("/v1/home-assistant/service", dependencies=[Depends(authorised)])
 async def device_action(action: DeviceAction):
-    # This explicit endpoint is intentionally confirmation-friendly: callers choose the exact service/entity.
+    policy = decide("home_assistant.service", action.confirmed)
+    if policy.decision != "auto":
+        raise HTTPException(status_code=409, detail={"policy": policy.__dict__, "proposal": action.model_dump(exclude={"confirmed"})})
     try:
-        return await home_assistant(action.service, action.entity_id)
+        result = await home_assistant(action.service, action.entity_id)
+        record_audit("home_assistant.executed", {"service": action.service, "entity_id": action.entity_id})
+        return result
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error))
+
+
+@app.post("/v1/requests", dependencies=[Depends(authorised)])
+async def receive_request(request: CoreRequest):
+    """Canonical ingress for future UI, WhatsApp, voice and webhook channels."""
+    normalized = normalise_request(request.channel, request.message, request.conversation_id)
+    policy = decide("route")
+    record_audit("request.received", {"channel": request.channel, "policy": policy.__dict__}, normalized["request_id"], normalized["conversation_id"])
+    return {"request": normalized, "policy": policy.__dict__, "status": "accepted"}
