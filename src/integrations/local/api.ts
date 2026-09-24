@@ -51,6 +51,13 @@ export interface FiledInboxItem {
   due: string | null;
   detail: string | null;
   created_at: string;
+  completed_at: string | null;
+  notified_at: string | null;
+}
+
+export interface LocalItemsResponse {
+  items: FiledInboxItem[];
+  notifications_enabled: boolean;
 }
 
 async function inboxRequest(path: string, init?: RequestInit): Promise<Response> {
@@ -72,9 +79,27 @@ export async function listWhatsAppInbox(): Promise<WhatsAppInboxItem[]> {
   return ((await response.json()) as { items: WhatsAppInboxItem[] }).items;
 }
 
-export async function listFiledWhatsApp(): Promise<FiledInboxItem[]> {
+export async function listFiledWhatsApp(): Promise<LocalItemsResponse> {
   const response = await inboxRequest("/filed");
-  return ((await response.json()) as { items: FiledInboxItem[] }).items;
+  return (await response.json()) as LocalItemsResponse;
+}
+
+export async function createLocalItem(item: {
+  source_id: string;
+  kind: Exclude<InboxKind, "clarify">;
+  title: string;
+  due: string | null;
+  detail: string;
+}): Promise<void> {
+  await inboxRequest("/filed", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item),
+  });
+}
+
+export async function completeLocalItem(sourceId: string, completed: boolean): Promise<void> {
+  await inboxRequest(`/filed/${encodeURIComponent(sourceId)}/completion`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed }),
+  });
 }
 
 export async function triageWhatsApp(id: string): Promise<void> {

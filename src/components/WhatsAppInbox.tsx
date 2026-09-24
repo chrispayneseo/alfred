@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  discardWhatsApp, fileWhatsApp, listFiledWhatsApp, listWhatsAppInbox,
+  createLocalItem, discardWhatsApp, fileWhatsApp, listFiledWhatsApp, listWhatsAppInbox,
   triageWhatsApp, type FiledInboxItem, type InboxKind, type WhatsAppInboxItem,
 } from "../integrations/local/api";
 
@@ -20,6 +20,9 @@ export function WhatsAppInbox() {
   const [filed, setFiled] = useState<FiledInboxItem[]>([]);
   const [edits, setEdits] = useState<Record<string, Filing>>({});
   const [busy, setBusy] = useState<string>();
+  const [manual, setManual] = useState<Filing>({ kind: "task", title: "", due: "", detail: "" });
+  const [manualId, setManualId] = useState(() => `manual:${crypto.randomUUID()}`);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +30,8 @@ export function WhatsAppInbox() {
     try {
       const [incoming, saved] = await Promise.all([listWhatsAppInbox(), listFiledWhatsApp()]);
       setItems(incoming);
-      setFiled(saved);
+      setFiled(saved.items);
+      setNotificationsEnabled(saved.notifications_enabled);
       setEdits((current) => {
         const next = { ...current };
         for (const item of incoming) if (!next[item.id]) next[item.id] = defaultFiling(item);
@@ -98,6 +102,25 @@ export function WhatsAppInbox() {
     }
   }
 
+  async function saveManual() {
+    if (!manual.title.trim() || (manual.kind === "reminder" && !manual.due)) return;
+    setBusy("manual");
+    setError(undefined);
+    try {
+      await createLocalItem({
+        source_id: manualId, kind: manual.kind as "note" | "task" | "reminder",
+        title: manual.title.trim(), due: manual.due || null, detail: manual.detail.trim(),
+      });
+      setManual({ kind: "task", title: "", due: "", detail: "" });
+      setManualId(`manual:${crypto.randomUUID()}`);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the item.");
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
   const pending = items.filter((item) => item.state !== "filed");
   return (
     <section className="space-y-4">
@@ -111,6 +134,33 @@ export function WhatsAppInbox() {
         <button type="button" onClick={() => void refresh()} className="text-xs underline text-ink-soft dark:text-ink-soft-dark">Refresh</button>
       </div>
       {error && <p role="alert" className="text-sm text-claude">{error}</p>}
+      <div className="space-y-3 rounded-2xl border border-line p-4 dark:border-line-dark">
+        <h3 className="text-sm font-semibold text-ink dark:text-ink-dark">Add something now</h3>
+        <p className="text-xs text-ink-soft dark:text-ink-soft-dark">Save a local task, reminder or memory without waiting for WhatsApp.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-ink-soft dark:text-ink-soft-dark">Type
+            <select value={manual.kind} onChange={(event) => setManual((current) => ({ ...current, kind: event.target.value as InboxKind }))}
+              className="mt-1 w-full rounded-lg border border-line bg-paper-raised p-2 text-sm text-ink dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark">
+              <option value="task">Task</option><option value="reminder">Reminder</option><option value="note">Remember</option>
+            </select>
+          </label>
+          <label className="text-xs text-ink-soft dark:text-ink-soft-dark">Date {manual.kind === "reminder" ? "(required)" : "(optional)"}
+            <input type="date" value={manual.due} onChange={(event) => setManual((current) => ({ ...current, due: event.target.value }))}
+              className="mt-1 w-full rounded-lg border border-line bg-paper-raised p-2 text-sm text-ink dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark" />
+          </label>
+        </div>
+        <label className="block text-xs text-ink-soft dark:text-ink-soft-dark">Title
+          <input value={manual.title} maxLength={200} onChange={(event) => setManual((current) => ({ ...current, title: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-line bg-paper-raised p-2 text-sm text-ink dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark" />
+        </label>
+        <label className="block text-xs text-ink-soft dark:text-ink-soft-dark">Details
+          <textarea value={manual.detail} maxLength={1000} onChange={(event) => setManual((current) => ({ ...current, detail: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-line bg-paper-raised p-2 text-sm text-ink dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark" />
+        </label>
+        <button type="button" onClick={() => void saveManual()} disabled={busy === "manual" || !manual.title.trim() || (manual.kind === "reminder" && !manual.due)}
+          className="rounded-full bg-ink px-4 py-2 text-xs font-medium text-paper disabled:opacity-40 dark:bg-ink-dark dark:text-paper-dark">Save locally</button>
+      </div>
+      {!notificationsEnabled && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Phone notifications are not connected yet. Reminders will appear in Alfred Today until they are.</p>}
       {loading && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading…</p>}
       {!loading && pending.length === 0 && <p className="rounded-2xl border border-line p-4 text-sm text-ink-soft dark:border-line-dark dark:text-ink-soft-dark">No forwarded messages waiting for review.</p>}
       {pending.map((item) => {
@@ -144,7 +194,7 @@ export function WhatsAppInbox() {
               <textarea value={edit.detail} maxLength={1000} onChange={(event) => change(item.id, { detail: event.target.value })}
                 className="mt-1 w-full rounded-lg border border-line bg-paper-raised p-2 text-sm text-ink dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark" />
             </label>
-            {edit.kind === "reminder" && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">This saves a dated reminder draft; notifications are not enabled yet.</p>}
+            {edit.kind === "reminder" && <p className="text-xs text-ink-faint dark:text-ink-faint-dark">Date-only reminders are checked at the configured UK morning hour. {notificationsEnabled ? "A generic phone alert will be sent when due." : "Phone alerts are not connected yet."}</p>}
             <div className="flex flex-wrap gap-3 text-xs">
               <button type="button" onClick={() => void save(item)} disabled={busy === item.id || edit.kind === "clarify" || !edit.title.trim() || (edit.kind === "reminder" && !edit.due)}
                 className="rounded-full bg-ink px-4 py-2 font-medium text-paper disabled:opacity-40 dark:bg-ink-dark dark:text-paper-dark">Approve and save</button>

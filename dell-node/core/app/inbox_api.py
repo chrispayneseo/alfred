@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sqlite3
+import uuid
 from contextlib import closing
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -60,6 +61,11 @@ def initialise() -> None:
             source_id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL,
             due TEXT, detail TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )""")
+        existing = {row[1] for row in db.execute("PRAGMA table_info(inbox_filed)")}
+        for name in ("completed_at", "notified_at", "notify_attempt_at"):
+            if name not in existing:
+                db.execute(f"ALTER TABLE inbox_filed ADD COLUMN {name} TEXT")
+        db.execute("CREATE INDEX IF NOT EXISTS inbox_filed_due ON inbox_filed(kind, due, completed_at, notified_at)")
 
 
 def rows(limit: int = 50) -> list[dict]:
@@ -190,8 +196,7 @@ class Filing(BaseModel):
     detail: str = Field(default="", max_length=1000)
 
 
-@router.post("/{message_id}/file")
-async def file_message(message_id: str, filing: Filing):
+def validate_filing(filing: Filing) -> tuple[str, str | None]:
     try:
         due = parse_due(filing.due)
     except ValueError as error:
@@ -201,6 +206,22 @@ async def file_message(message_id: str, filing: Filing):
     title = filing.title.strip()
     if not title:
         raise HTTPException(422, "Title is required")
+    return title, due
+
+
+def insert_filing(db: sqlite3.Connection, source_id: str, filing: Filing, title: str, due: str | None) -> bool:
+    cursor = db.execute("""INSERT OR IGNORE INTO inbox_filed
+        (source_id, kind, title, due, detail) VALUES (?, ?, ?, ?, ?)""",
+        (source_id, filing.kind, title, due, filing.detail.strip()))
+    if cursor.rowcount and filing.kind == "note":
+        db.execute("INSERT INTO memories(kind, content, source) VALUES (?, ?, ?)",
+                   ("note", title + ("\n" + filing.detail.strip() if filing.detail.strip() else ""), "alfred-local-inbox"))
+    return bool(cursor.rowcount)
+
+
+@router.post("/{message_id}/file")
+async def file_message(message_id: str, filing: Filing):
+    title, due = validate_filing(filing)
     with closing(inbox_connection()) as inbox:
         message = inbox.execute("SELECT body, state FROM whatsapp_inbox WHERE id = ?", (message_id,)).fetchone()
         if message is None:
@@ -209,12 +230,7 @@ async def file_message(message_id: str, filing: Filing):
             raise HTTPException(409, "Message was discarded")
         # The source ID is unique in the destination DB, making retries idempotent.
         with connection() as db:
-            cursor = db.execute("""INSERT OR IGNORE INTO inbox_filed
-                (source_id, kind, title, due, detail) VALUES (?, ?, ?, ?, ?)""",
-                (message_id, filing.kind, title, due, filing.detail.strip()))
-            if cursor.rowcount and filing.kind == "note":
-                db.execute("INSERT INTO memories(kind, content, source) VALUES (?, ?, ?)",
-                           ("note", title + ("\n" + filing.detail.strip() if filing.detail.strip() else ""), "whatsapp-inbox"))
+            insert_filing(db, message_id, filing, title, due)
         inbox.execute("UPDATE whatsapp_inbox SET state = 'filed', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", (message_id,))
         inbox.commit()
     return {"filed": True, "kind": filing.kind}
@@ -236,5 +252,104 @@ async def discard_message(message_id: str):
 @router.get("/filed")
 async def get_filed():
     with connection() as db:
-        items = db.execute("SELECT * FROM inbox_filed ORDER BY created_at DESC LIMIT 50").fetchall()
-        return {"items": [dict(row) for row in items]}
+        items = db.execute("SELECT * FROM inbox_filed ORDER BY created_at DESC LIMIT 200").fetchall()
+        return {"items": [dict(row) for row in items], "notifications_enabled": bool(notification_topic())}
+
+
+class ManualFiling(Filing):
+    source_id: str = Field(pattern=r"^manual:[0-9a-f-]{36}$")
+
+
+@router.post("/filed")
+async def create_filed(filing: ManualFiling):
+    title, due = validate_filing(filing)
+    try:
+        uuid.UUID(filing.source_id.removeprefix("manual:"))
+    except ValueError as error:
+        raise HTTPException(422, "Invalid item ID") from error
+    with connection() as db:
+        insert_filing(db, filing.source_id, filing, title, due)
+    return {"saved": True, "source_id": filing.source_id}
+
+
+class Completion(BaseModel):
+    completed: bool
+
+
+@router.post("/filed/{source_id}/completion")
+async def set_completion(source_id: str, change: Completion):
+    with connection() as db:
+        result = db.execute("UPDATE inbox_filed SET completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END WHERE source_id = ? AND kind IN ('task', 'reminder')",
+                            (change.completed, source_id))
+        if result.rowcount == 0:
+            raise HTTPException(404, "Task or reminder not found")
+    return {"completed": change.completed}
+
+
+def notification_topic() -> str | None:
+    topic = os.getenv("ALFRED_NTFY_TOPIC", "").strip()
+    if not topic:
+        return None
+    # A long, unguessable topic is essential: ntfy.sh topics are public.
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", topic):
+        LOG.error("ALFRED_NTFY_TOPIC must be a 32+ character alphanumeric topic")
+        return None
+    return topic
+
+
+def reminder_hour() -> int:
+    try:
+        value = int(os.getenv("ALFRED_REMINDER_HOUR", "9"))
+        return value if 0 <= value <= 23 else 9
+    except ValueError:
+        return 9
+
+
+async def notify_due_reminders(now: datetime | None = None) -> int:
+    topic = notification_topic()
+    if topic is None:
+        return 0
+    now = now or datetime.now(ZoneInfo("Europe/London"))
+    if now.tzinfo is None:
+        raise ValueError("A timezone-aware timestamp is required")
+    london_now = now.astimezone(ZoneInfo("Europe/London"))
+    today = london_now.date().isoformat()
+    if london_now.hour < reminder_hour():
+        today = (london_now.date() - timedelta(days=1)).isoformat()
+    with connection() as db:
+        candidates = db.execute("""SELECT source_id FROM inbox_filed
+            WHERE kind = 'reminder' AND due <= ? AND completed_at IS NULL AND notified_at IS NULL
+            AND (notify_attempt_at IS NULL OR datetime(notify_attempt_at) <= datetime('now', '-15 minutes'))
+            ORDER BY due, created_at LIMIT 20""", (today,)).fetchall()
+    sent = 0
+    async with httpx.AsyncClient(timeout=10) as client:
+        for item in candidates:
+            source_id = item["source_id"]
+            with connection() as db:
+                claimed = db.execute("""UPDATE inbox_filed SET notify_attempt_at = CURRENT_TIMESTAMP
+                    WHERE source_id = ? AND completed_at IS NULL AND notified_at IS NULL
+                    AND (notify_attempt_at IS NULL OR datetime(notify_attempt_at) <= datetime('now', '-15 minutes'))""",
+                    (source_id,)).rowcount
+            if not claimed:
+                continue
+            try:
+                response = await client.post(f"https://ntfy.sh/{topic}",
+                    content="An Alfred reminder is due. Open Alfred Today to review it.",
+                    headers={"Title": "Alfred reminder", "Click": "https://alfred-five-livid.vercel.app/today"})
+                response.raise_for_status()
+            except httpx.HTTPError as error:
+                LOG.warning("Reminder notification failed (%s)", type(error).__name__)
+                continue
+            with connection() as db:
+                db.execute("UPDATE inbox_filed SET notified_at = CURRENT_TIMESTAMP WHERE source_id = ?", (source_id,))
+            sent += 1
+    return sent
+
+
+async def reminder_loop() -> None:
+    while True:
+        try:
+            await notify_due_reminders()
+        except sqlite3.Error as error:
+            LOG.warning("Reminder check failed (%s)", type(error).__name__)
+        await asyncio.sleep(60)

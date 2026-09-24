@@ -3,8 +3,10 @@ import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
+from zoneinfo import ZoneInfo
 
 from app import db as core_db
 from app import inbox_api
@@ -83,6 +85,41 @@ class InboxTests(unittest.TestCase):
         })
         self.assertEqual(undated["kind"], "clarify")
         self.assertIsNone(undated["due"])
+
+    def test_manual_task_is_idempotent_and_can_be_completed(self):
+        filing = inbox_api.ManualFiling(source_id="manual:bb778937-58b9-4c63-b22a-123451234512",
+                                        kind="task", title="Check loft", detail="")
+        asyncio.run(inbox_api.create_filed(filing))
+        asyncio.run(inbox_api.create_filed(filing))
+        self.assertEqual(len(asyncio.run(inbox_api.get_filed())["items"]), 1)
+        asyncio.run(inbox_api.set_completion(filing.source_id, inbox_api.Completion(completed=True)))
+        self.assertIsNotNone(asyncio.run(inbox_api.get_filed())["items"][0]["completed_at"])
+        asyncio.run(inbox_api.set_completion(filing.source_id, inbox_api.Completion(completed=False)))
+        self.assertIsNone(asyncio.run(inbox_api.get_filed())["items"][0]["completed_at"])
+
+    def test_manual_reminder_requires_date(self):
+        filing = inbox_api.ManualFiling(source_id="manual:bb778937-58b9-4c63-b22a-123451234512",
+                                        kind="reminder", title="Renew policy")
+        with self.assertRaises(Exception) as raised:
+            asyncio.run(inbox_api.create_filed(filing))
+        self.assertEqual(raised.exception.status_code, 422)
+
+    def test_notification_is_generic_once_and_waits_until_due_hour(self):
+        filing = inbox_api.ManualFiling(source_id="manual:bb778937-58b9-4c63-b22a-123451234512",
+                                        kind="reminder", title="Private medical appointment", due="2026-09-26")
+        asyncio.run(inbox_api.create_filed(filing))
+        topic = "a" * 40
+        with patch.dict("os.environ", {"ALFRED_NTFY_TOPIC": topic, "ALFRED_REMINDER_HOUR": "9"}), \
+             patch("app.inbox_api.httpx.AsyncClient") as client:
+            response = client.return_value.__aenter__.return_value.post
+            response.return_value = Mock()
+            before = datetime(2026, 9, 26, 8, 59, tzinfo=ZoneInfo("Europe/London"))
+            after = datetime(2026, 9, 26, 9, 0, tzinfo=ZoneInfo("Europe/London"))
+            self.assertEqual(asyncio.run(inbox_api.notify_due_reminders(before)), 0)
+            self.assertEqual(asyncio.run(inbox_api.notify_due_reminders(after)), 1)
+            self.assertEqual(asyncio.run(inbox_api.notify_due_reminders(after)), 0)
+            self.assertNotIn("Private medical appointment", response.call_args.kwargs["content"])
+        self.assertIsNotNone(asyncio.run(inbox_api.get_filed())["items"][0]["notified_at"])
 
 
 if __name__ == "__main__":
