@@ -14,6 +14,8 @@ from .db import (
     create_approval, resolve_approval, record_event,
 )
 from .clients import ollama_chat, ollama_recall
+from .cloud_execution import execute_cloud_request
+from .cloud_providers import provider_health
 from . import inbox_api, memory_service
 from .recall_store import recall_intent, requested_list
 from .core import tool_registry, event_decision
@@ -28,6 +30,7 @@ from .lifecycle import (
     lifecycle_summary,
     list_requests,
     request_timeline,
+    transition_request,
 )
 
 
@@ -58,7 +61,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.8.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -109,6 +112,13 @@ class ToolExecutionRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=64)
     action: str = Field(min_length=1, max_length=120)
     arguments: dict = Field(default_factory=dict)
+
+
+class CloudExecutionRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=64)
+    prompt: str = Field(min_length=1, max_length=12000)
+    provider: Optional[str] = Field(default=None, pattern="^(openai|claude)$")
+    confirmed: bool = False
 
 
 class ApprovalRequest(BaseModel):
@@ -164,6 +174,7 @@ async def health():
             "memory_service": "unified",
             "legacy_mutations": "executor_routed",
             "recovery_policy": "fail_closed",
+            "provider_runtime": "policy_gated",
             "safe_mode": False,
         },
     }
@@ -329,6 +340,40 @@ async def get_tools():
 @app.get("/v1/core/providers", dependencies=[Depends(authorised)])
 async def get_providers():
     return {"providers": provider_registry()}
+
+
+@app.get("/v1/core/providers/health", dependencies=[Depends(authorised)])
+async def get_provider_health():
+    return {"providers": await provider_health()}
+
+
+@app.post("/v1/core/cloud/execute", dependencies=[Depends(authorised)])
+async def execute_cloud(request: CloudExecutionRequest):
+    if get_request_state(request.request_id) is None:
+        raise HTTPException(404, "Request not found")
+    result = await execute_cloud_request(
+        request_id=request.request_id,
+        prompt=request.prompt,
+        provider=request.provider,
+        confirmed=request.confirmed,
+    )
+    state = result.get("state")
+    provider = result.get("provider")
+    if state == "approval_required":
+        transition_request(request.request_id, "awaiting_approval", route="approval_required", provider=provider)
+    elif state == "provider_unavailable":
+        transition_request(request.request_id, "cloud_ready", route="cloud_ready", provider=provider)
+    elif state == "completed":
+        transition_request(request.request_id, "completed", route="cloud", provider=provider)
+    elif state == "failed":
+        transition_request(
+            request.request_id,
+            "failed",
+            route="cloud_failed",
+            provider=provider,
+            error_type=result.get("error_type") or "CloudProviderError",
+        )
+    return result
 
 
 @app.post("/v1/core/execute", dependencies=[Depends(authorised)])

@@ -18,5 +18,13 @@ class Settings:
     mqtt_username: str = os.getenv("MQTT_USERNAME", "")
     mqtt_password: str = os.getenv("MQTT_PASSWORD", "")
 
+    # Optional cloud specialists. A missing key disables the provider in Core.
+    # These names intentionally match the existing Alfred web/server environment.
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-opus-5")
+    cloud_timeout_seconds: float = float(os.getenv("ALFRED_CLOUD_TIMEOUT_SECONDS", "120"))
+
 
 settings = Settings()
