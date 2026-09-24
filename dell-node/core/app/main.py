@@ -138,7 +138,8 @@ async def answer_from_recall(message: str, sources: list[dict]) -> str:
     try:
         return await ollama_recall(message, sources)
     except Exception:
-        return "I found saved items that may help. Open the sources below to check their exact details."
+        snippets = [item["content"][:250].replace("\n", " ") for item in sources[:3]]
+        return "I found this saved on the Dell: " + "; ".join(snippets) + ". Check the linked sources for the full details."
 
 
 @app.post("/v1/chat", dependencies=[Depends(authorised)])

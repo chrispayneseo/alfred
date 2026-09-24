@@ -87,6 +87,12 @@ class RecallTests(unittest.TestCase):
         found = recall_store.search("What did I save about copper kettle?")
         self.assertEqual(found[0]["id"], f"memory:{memory_id}")
 
+    def test_model_failure_shows_exact_saved_text_not_an_invented_answer(self):
+        source = {"kind": "memory", "title": "Spare key", "content": "Spare key is in the kitchen drawer", "due": None, "completed": False}
+        with patch.object(main, "ollama_recall", new=AsyncMock(side_effect=RuntimeError("model unavailable"))):
+            reply = asyncio.run(main.answer_from_recall("Where is the spare key?", [source]))
+        self.assertIn("Spare key is in the kitchen drawer", reply)
+
     def test_local_recall_never_calls_cloud_route(self):
         db.remember("note", "The spare key is in the blue drawer", "test")
         with patch.object(main, "ollama_recall", new=AsyncMock(return_value="It is in the blue drawer.")), \
