@@ -89,9 +89,9 @@ class MemoryGraphTests(unittest.TestCase):
         )
         self.assertEqual(shared, 2)
         self.assertGreater(score, 0)
-        score, shared = memory_graph.similarity("Boiler manual", "Boiler warranty")
+        _, shared = memory_graph.similarity("Boiler manual", "Boiler warranty")
         self.assertEqual(shared, 1)
-        self.assertLess(score, memory_graph.MIN_SIMILARITY)
+        self.assertLess(shared, memory_graph.MIN_SHARED_TERMS)
 
 
 if __name__ == "__main__":
