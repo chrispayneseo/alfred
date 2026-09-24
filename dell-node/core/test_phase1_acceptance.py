@@ -152,9 +152,15 @@ class Phase1AcceptanceTests(unittest.TestCase):
             self.assertEqual(lifecycle.status_code, 200)
             lifecycle_payload = lifecycle.json()
             self.assertEqual(lifecycle_payload["request"]["state"], "completed")
-            timeline_states = [item["state"] for item in lifecycle_payload["timeline"]]
-            self.assertIn("awaiting_approval", timeline_states)
-            self.assertIn("completed", timeline_states)
+            timeline = lifecycle_payload["timeline"]
+            timeline_types = [item["event_type"] for item in timeline]
+            self.assertTrue(any(
+                item["event_type"] == "request.routed"
+                and item["data"].get("decision") == "approval_required"
+                for item in timeline
+            ))
+            self.assertIn("approval.resolved", timeline_types)
+            self.assertIn("cloud.completed", timeline_types)
 
             complete.assert_awaited_once()
 
