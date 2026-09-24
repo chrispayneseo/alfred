@@ -7,6 +7,8 @@ context retrieval can span saved memories, tasks and reminders.
 
 from __future__ import annotations
 
+import sqlite3
+
 from . import db
 from .recall_store import search as search_context_index
 
@@ -25,7 +27,9 @@ def create_memory(kind: str, content: str, source: str = "api", *, request_id: s
         {"memory_id": memory_id, "kind": clean_kind, "source": clean_source},
         request_id,
     )
-    return db.get_memory(memory_id) or {"id": memory_id, "kind": clean_kind, "content": clean_content, "source": clean_source}
+    return db.get_memory(memory_id) or {
+        "id": memory_id, "kind": clean_kind, "content": clean_content, "source": clean_source
+    }
 
 
 def get_memory(memory_id: int) -> dict | None:
@@ -37,19 +41,42 @@ def list_memories(limit: int = 50) -> list[dict]:
 
 
 def search_memories(query: str, limit: int = 8) -> list[dict]:
-    """Search durable memory records only, for the Settings/memory resource API."""
+    """Search durable memory records only, preserving the existing resource API semantics."""
     clean = query.strip()[:500]
     if not clean:
         return list_memories(limit)
     return db.recall(clean, max(1, min(limit, 50)))
 
 
+def _memory_context(item: dict) -> dict:
+    content = item["content"]
+    return {
+        "id": f"memory:{item['id']}",
+        "kind": "memory",
+        "title": content.splitlines()[0][:200],
+        "content": content,
+        "due": None,
+        "completed": False,
+        "url": f"/settings?memory={item['id']}",
+    }
+
+
 def retrieve_context(query: str, limit: int = 6) -> list[dict]:
-    """Retrieve local context across memories, tasks and reminders."""
+    """Retrieve local context across memories, tasks and reminders.
+
+    If the task/reminder index is temporarily unavailable, Alfred degrades to
+    durable-memory-only retrieval rather than failing the whole local request.
+    """
     clean = query.strip()[:500]
     if not clean:
         return []
-    return search_context_index(clean, max(1, min(limit, 20)))
+    size = max(1, min(limit, 20))
+    try:
+        return search_context_index(clean, size)
+    except sqlite3.OperationalError as exc:
+        if "inbox_filed" not in str(exc):
+            raise
+        return [_memory_context(item) for item in db.recall(clean, size)]
 
 
 def correct_memory(memory_id: int, content: str, *, request_id: str | None = None) -> dict | None:
