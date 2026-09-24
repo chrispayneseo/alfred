@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import db, inbox_api, main, recall_store
+from app import db, inbox_api, main, orchestrator, recall_store
 from app.core import decide, normalise_request
 
 
@@ -97,7 +97,7 @@ class RecallTests(unittest.TestCase):
     def test_local_recall_never_calls_cloud_route(self):
         db.remember("note", "The spare key is in the blue drawer", "test")
         with patch.object(main, "ollama_recall", new=AsyncMock(return_value="It is in the blue drawer.")), \
-             patch.object(main, "ollama_route", new=AsyncMock(side_effect=AssertionError("cloud route called"))):
+             patch.object(orchestrator, "ollama_route", new=AsyncMock(side_effect=AssertionError("cloud route called"))):
             response = asyncio.run(main.gateway(main.GatewayRequest(message="Where is the spare key?")))
         self.assertEqual(response["decision"], "local")
         self.assertEqual(response["sources"][0]["url"].startswith("/settings?memory="), True)
@@ -105,7 +105,7 @@ class RecallTests(unittest.TestCase):
     def test_saved_item_with_current_word_stays_local_but_explicit_research_asks_approval(self):
         db.remember("note", "Latest boiler warranty is in the kitchen drawer", "test")
         with patch.object(main, "ollama_recall", new=AsyncMock(return_value="It is in the kitchen drawer.")), \
-             patch.object(main, "ollama_route", new=AsyncMock(side_effect=AssertionError("cloud route called"))):
+             patch.object(orchestrator, "ollama_route", new=AsyncMock(side_effect=AssertionError("cloud route called"))):
             answer = asyncio.run(main.gateway(main.GatewayRequest(message="What did I save about latest boiler warranty?")))
         self.assertEqual(answer["decision"], "local")
         approval = asyncio.run(main.gateway(main.GatewayRequest(message="Research my boiler warranty online")))
