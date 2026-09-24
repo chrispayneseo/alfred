@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -67,6 +68,36 @@ def _json(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), default=str)
 
 
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _scope_hash(action: str, arguments: dict, plan_id: str | None, step_index: int | None) -> str:
+    payload = {
+        "action": action,
+        "arguments": arguments,
+        "plan_id": plan_id,
+        "step_index": step_index,
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _approval_summary(action: str, arguments: dict) -> str:
+    """Describe the action without duplicating arbitrary user content into approvals."""
+    if action == "memory.write":
+        kind = arguments.get("kind", "memory")
+        return f"Save a new {kind} memory."
+    if action == "memory.correct":
+        return f"Correct memory {arguments.get('memory_id', 'unknown')}."
+    if action == "memory.delete":
+        return f"Delete memory {arguments.get('memory_id', 'unknown')}."
+    if action == "home_assistant.service":
+        service = arguments.get("service", "unknown service")
+        entity = arguments.get("entity_id", "unknown entity")
+        return f"Run {service} on {entity}."
+    return f"Execute {action}."
+
+
 def _load_json(value: str | None) -> dict | None:
     return json.loads(value) if value else None
 
@@ -92,32 +123,35 @@ def _existing_step(plan_id: str | None, step_index: int | None) -> ExecutionResu
     return _row_to_result(row) if row else None
 
 
-def _latest_approval(request_id: str, plan_id: str | None, action: str) -> dict | None:
+def _latest_approval(request_id: str, plan_id: str | None, action: str,
+                     scope_hash: str) -> dict | None:
     with connection() as db:
-        if plan_id is None:
-            row = db.execute(
-                """SELECT id, request_id, plan_id, action, summary, risk_level, state, created_at, resolved_at
-                   FROM approvals WHERE request_id = ? AND plan_id IS NULL AND action = ?
-                   ORDER BY created_at DESC LIMIT 1""",
-                (request_id, action),
-            ).fetchone()
-        else:
-            row = db.execute(
-                """SELECT id, request_id, plan_id, action, summary, risk_level, state, created_at, resolved_at
-                   FROM approvals WHERE request_id = ? AND plan_id = ? AND action = ?
-                   ORDER BY created_at DESC LIMIT 1""",
-                (request_id, plan_id, action),
-            ).fetchone()
+        row = db.execute(
+            """SELECT id, request_id, plan_id, action, summary, risk_level, state,
+                      scope_hash, step_index, created_at, resolved_at
+               FROM approvals
+               WHERE request_id = ? AND plan_id IS ? AND action = ? AND scope_hash = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (request_id, plan_id, action, scope_hash),
+        ).fetchone()
     return dict(row) if row else None
 
 
-def _pending_or_new_approval(request_id: str, plan_id: str | None, action: str, arguments: dict) -> dict:
-    existing = _latest_approval(request_id, plan_id, action)
+def _pending_or_new_approval(request_id: str, plan_id: str | None, step_index: int | None,
+                             action: str, arguments: dict, scope_hash: str) -> dict:
+    existing = _latest_approval(request_id, plan_id, action, scope_hash)
     if existing and existing["state"] in {"pending", "approved", "rejected"}:
         return existing
     policy = decide(action)
-    summary = f"Execute {action} with arguments: {_json(arguments)[:700]}"
-    return create_approval(request_id, plan_id, action, summary, policy.level)
+    return create_approval(
+        request_id,
+        plan_id,
+        action,
+        _approval_summary(action, arguments),
+        policy.level,
+        scope_hash=scope_hash,
+        step_index=step_index,
+    )
 
 
 def _record_start(execution_id: str, request_id: str, plan_id: str | None,
@@ -213,7 +247,7 @@ def _verify(action: str, result: dict) -> dict:
 
 async def execute_tool(*, request_id: str, action: str, arguments: dict,
                        plan_id: str | None = None, step_index: int | None = None) -> dict:
-    """Execute one registered tool after deterministic policy and approval checks."""
+    """Execute one registered tool after deterministic policy and exact-scope approval checks."""
     if action not in TOOLS:
         policy = decide(action)
         record_audit("execution.denied", {"action": action, "reason": policy.reason}, request_id)
@@ -228,7 +262,8 @@ async def execute_tool(*, request_id: str, action: str, arguments: dict,
         payload["replayed"] = True
         return payload
 
-    approval = _latest_approval(request_id, plan_id, action)
+    scope_hash = _scope_hash(action, arguments, plan_id, step_index)
+    approval = _latest_approval(request_id, plan_id, action, scope_hash)
     confirmed = bool(approval and approval.get("state") == "approved")
     policy = decide(action, confirmed=confirmed)
 
@@ -240,11 +275,19 @@ async def execute_tool(*, request_id: str, action: str, arguments: dict,
         ).to_dict()
 
     if policy.decision == "confirm":
-        approval = _pending_or_new_approval(request_id, plan_id, action, arguments)
+        approval = _pending_or_new_approval(
+            request_id, plan_id, step_index, action, arguments, scope_hash
+        )
         state = "denied" if approval.get("state") == "rejected" else "approval_required"
         record_audit(
             "execution.approval_required" if state == "approval_required" else "execution.denied",
-            {"action": action, "approval_id": approval["id"], "approval_state": approval["state"]},
+            {
+                "action": action,
+                "approval_id": approval["id"],
+                "approval_state": approval["state"],
+                "scope_hash": scope_hash,
+                "step_index": step_index,
+            },
             request_id,
         )
         return ExecutionResult(
@@ -257,7 +300,13 @@ async def execute_tool(*, request_id: str, action: str, arguments: dict,
         _record_start(execution_id, request_id, plan_id, step_index, action, arguments)
         record_audit(
             "execution.started",
-            {"execution_id": execution_id, "action": action, "plan_id": plan_id, "step_index": step_index},
+            {
+                "execution_id": execution_id,
+                "action": action,
+                "plan_id": plan_id,
+                "step_index": step_index,
+                "scope_hash": scope_hash,
+            },
             request_id,
         )
         result = await _invoke(action, arguments, request_id)
