@@ -22,12 +22,14 @@ async def lifespan(_: FastAPI):
     initialise()
     inbox_api.initialise()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
+    reminder_task = asyncio.create_task(inbox_api.reminder_loop())
     try:
         yield
     finally:
         triage_task.cancel()
+        reminder_task.cancel()
         try:
-            await triage_task
+            await asyncio.gather(triage_task, reminder_task)
         except asyncio.CancelledError:
             pass
 

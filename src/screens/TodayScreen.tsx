@@ -9,6 +9,7 @@ import { LeedsBadge } from "../components/LeedsBadge";
 import { LeedsTickets } from "../components/LeedsTickets";
 import { LeedsTv } from "../components/LeedsTv";
 import { LocationPrompt } from "../components/LocationPrompt";
+import { LocalActions } from "../components/LocalActions";
 import { Nudges } from "../components/Nudges";
 import { ProjectGroupingSuggestions } from "../components/ProjectGroupingSuggestions";
 import { RecurringSuggestions } from "../components/RecurringSuggestions";
@@ -413,6 +414,8 @@ export function TodayScreen() {
       <LocationPrompt onAllow={refetchLocation} />
 
       <WeatherSummary coords={coords} />
+
+      <LocalActions />
 
       {isDesktop ? (
         <>
