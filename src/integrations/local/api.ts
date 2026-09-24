@@ -54,7 +54,15 @@ export interface FiledInboxItem {
 }
 
 async function inboxRequest(path: string, init?: RequestInit): Promise<Response> {
-  const response = await fetch(`${BASE}/v1/inbox${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}/v1/inbox${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    throw new Error("Can't reach Alfred's Dell. Check that Tailscale is connected, then try Refresh.");
+  }
   if (!response.ok) throw new Error(`Could not reach Alfred's local inbox (${response.status})`);
   return response;
 }
