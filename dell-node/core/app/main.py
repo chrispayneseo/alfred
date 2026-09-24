@@ -14,6 +14,7 @@ from .recall_store import recall_intent, requested_list, search as search_local
 from .core import decide, tool_registry, event_decision
 from .orchestrator import orchestrate
 from .providers import provider_registry
+from .execution import execute_plan, execute_tool, initialise_execution_store, list_executions
 
 
 def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str = Header(default="")):
@@ -26,6 +27,7 @@ def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialise()
+    initialise_execution_store()
     inbox_api.initialise()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
     reminder_task = asyncio.create_task(inbox_api.reminder_loop())
@@ -40,7 +42,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.3.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -83,6 +85,12 @@ class PlanRequest(BaseModel):
     steps: list[dict] = Field(min_length=1, max_length=20)
 
 
+class ToolExecutionRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=64)
+    action: str = Field(min_length=1, max_length=120)
+    arguments: dict = Field(default_factory=dict)
+
+
 class ApprovalRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=64)
     action: str = Field(min_length=1, max_length=120)
@@ -116,6 +124,8 @@ async def health():
             "tool_count": len(tool_registry()),
             "provider_count": len(provider_registry()),
             "orchestrator": "authoritative",
+            "executor": "policy_gated",
+            "verification": "enabled",
             "safe_mode": False,
         },
     }
@@ -243,6 +253,21 @@ async def get_providers():
     return {"providers": provider_registry()}
 
 
+@app.post("/v1/core/execute", dependencies=[Depends(authorised)])
+async def execute_registered_tool(request: ToolExecutionRequest):
+    """Execute one registered tool through Core policy and verification."""
+    return await execute_tool(
+        request_id=request.request_id,
+        action=request.action,
+        arguments=request.arguments,
+    )
+
+
+@app.get("/v1/core/executions", dependencies=[Depends(authorised)])
+async def get_executions(request_id: Optional[str] = None, limit: int = 50):
+    return {"items": list_executions(request_id=request_id, limit=limit)}
+
+
 @app.post("/v1/core/plans", dependencies=[Depends(authorised)])
 async def create_task_plan(request: PlanRequest):
     plan = create_plan(request.request_id, request.goal, request.steps)
@@ -253,6 +278,15 @@ async def create_task_plan(request: PlanRequest):
 @app.get("/v1/core/plans", dependencies=[Depends(authorised)])
 async def get_plans(limit: int = 50):
     return {"items": list_plans(max(1, min(limit, 100)))}
+
+
+@app.post("/v1/core/plans/{plan_id}/execute", dependencies=[Depends(authorised)])
+async def execute_task_plan(plan_id: str):
+    """Execute a plan sequentially, pausing on approval or verification failure."""
+    result = await execute_plan(plan_id)
+    if result["state"] == "not_found":
+        raise HTTPException(404, "Plan not found")
+    return result
 
 
 @app.post("/v1/core/approvals", dependencies=[Depends(authorised)])
