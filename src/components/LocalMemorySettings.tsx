@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { addLocalMemory, deleteLocalMemory, listLocalMemories, type LocalMemory } from "../integrations/local/api";
+import { addLocalMemory, deleteLocalMemory, editLocalMemory, getLocalMemory, listLocalMemories, type LocalMemory } from "../integrations/local/api";
 
 export function LocalMemorySettings() {
   const [items, setItems] = useState<LocalMemory[]>([]);
@@ -7,13 +7,24 @@ export function LocalMemorySettings() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<number>();
+  const [correction, setCorrection] = useState("");
 
   useEffect(() => {
     let active = true;
-    listLocalMemories().then((rows) => { if (active) setItems(rows); })
+    const target = Number(new URLSearchParams(window.location.search).get("memory"));
+    Promise.all([listLocalMemories(), Number.isInteger(target) && target > 0 ? getLocalMemory(target).catch(() => null) : Promise.resolve(null)])
+      .then(([rows, selected]) => { if (active) setItems(selected && !rows.some((row) => row.id === selected.id) ? [selected, ...rows] : rows); })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Local memory unavailable"); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    const target = Number(new URLSearchParams(window.location.search).get("memory"));
+    if (target > 0 && items.some((item) => item.id === target)) {
+      document.getElementById(`memory-${target}`)?.scrollIntoView({ block: "center" });
+    }
+  }, [items]);
 
   async function search(event: FormEvent) {
     event.preventDefault();
@@ -48,6 +59,18 @@ export function LocalMemorySettings() {
     finally { setBusy(false); }
   }
 
+  async function correct(id: number) {
+    if (!correction.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await editLocalMemory(id, correction.trim());
+      setItems((current) => current.map((item) => item.id === id ? { ...item, content: correction.trim() } : item));
+      setEditing(undefined);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Correction failed"); }
+    finally { setBusy(false); }
+  }
+
   return (
     <div className="space-y-4 rounded-2xl border border-line p-4 dark:border-line-dark">
       <p className="text-xs text-ink-soft dark:text-ink-soft-dark">Saved on the Dell. Alfred may use matching memories for local answers; cloud requests exclude them.</p>
@@ -64,10 +87,16 @@ export function LocalMemorySettings() {
       </form>
       {error && <p role="alert" className="text-xs text-claude">{error}</p>}
       <ul className="space-y-2">
-        {items.map((item) => <li key={item.id} className="flex items-start justify-between gap-3 rounded-xl bg-paper-raised p-3 text-sm dark:bg-paper-raised-dark">
-          <span className="whitespace-pre-wrap text-ink dark:text-ink-dark">{item.content}</span>
-          <button type="button" disabled={busy} onClick={() => remove(item.id)}
-            aria-label={`Forget memory ${item.id}`} className="shrink-0 text-xs text-ink-soft underline disabled:opacity-50 dark:text-ink-soft-dark">Forget</button>
+        {items.map((item) => <li id={`memory-${item.id}`} key={item.id} className="rounded-xl bg-paper-raised p-3 text-sm scroll-mt-4 dark:bg-paper-raised-dark">
+          {editing === item.id ? <div className="space-y-2">
+            <textarea aria-label="Correct saved memory" value={correction} onChange={(event) => setCorrection(event.target.value)} maxLength={4000} className="w-full rounded-lg border border-line bg-transparent p-2 dark:border-line-dark" />
+            <button type="button" disabled={busy || !correction.trim()} onClick={() => void correct(item.id)} className="mr-3 text-xs underline">Save correction</button>
+            <button type="button" onClick={() => setEditing(undefined)} className="text-xs underline">Cancel</button>
+          </div> : <div className="flex items-start justify-between gap-3">
+            <span className="whitespace-pre-wrap text-ink dark:text-ink-dark">{item.content}</span>
+            <div className="flex shrink-0 gap-2"><button type="button" onClick={() => { setEditing(item.id); setCorrection(item.content); }} className="text-xs underline">Correct</button>
+              <button type="button" disabled={busy} onClick={() => void remove(item.id)} aria-label={`Forget memory ${item.id}`} className="text-xs underline disabled:opacity-50">Forget</button></div>
+          </div>}
         </li>)}
       </ul>
     </div>

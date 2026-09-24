@@ -28,6 +28,19 @@ export async function deleteLocalMemory(id: number): Promise<void> {
   if (!res.ok) throw new Error(`Could not delete memory (${res.status})`);
 }
 
+export async function getLocalMemory(id: number): Promise<LocalMemory> {
+  const res = await fetch(`${BASE}/v1/memories/${id}`);
+  if (!res.ok) throw new Error(`Could not load memory (${res.status})`);
+  return await res.json() as LocalMemory;
+}
+
+export async function editLocalMemory(id: number, content: string): Promise<void> {
+  const res = await fetch(`${BASE}/v1/memories/${id}/edit`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`Could not correct memory (${res.status})`);
+}
+
 export type InboxKind = "note" | "task" | "reminder" | "clarify";
 
 export interface WhatsAppInboxItem {
@@ -100,6 +113,17 @@ export async function completeLocalItem(sourceId: string, completed: boolean): P
   await inboxRequest(`/filed/${encodeURIComponent(sourceId)}/completion`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed }),
   });
+}
+
+export async function editLocalItem(item: Pick<FiledInboxItem, "source_id" | "title" | "due" | "detail">): Promise<void> {
+  await inboxRequest(`/filed/${encodeURIComponent(item.source_id)}/edit`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: item.title, due: item.due, detail: item.detail ?? "" }),
+  });
+}
+
+export async function forgetLocalItem(sourceId: string): Promise<void> {
+  await inboxRequest(`/filed/${encodeURIComponent(sourceId)}`, { method: "DELETE" });
 }
 
 export async function triageWhatsApp(id: string): Promise<void> {

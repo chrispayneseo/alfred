@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { completeLocalItem, listFiledWhatsApp, type FiledInboxItem } from "../integrations/local/api";
+import { completeLocalItem, editLocalItem, forgetLocalItem, listFiledWhatsApp, type FiledInboxItem } from "../integrations/local/api";
 
 export function LocalActions() {
   const [items, setItems] = useState<FiledInboxItem[]>([]);
@@ -8,6 +8,9 @@ export function LocalActions() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
+  const [editing, setEditing] = useState<string>();
+  const [correction, setCorrection] = useState({ title: "", due: "", detail: "" });
+  const selectedId = new URLSearchParams(window.location.search).get("localItem");
 
   const refresh = useCallback(async () => {
     try {
@@ -28,6 +31,12 @@ export function LocalActions() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    if (selectedId && items.some((item) => item.source_id === selectedId)) {
+      document.getElementById(`local-${selectedId}`)?.scrollIntoView({ block: "center" });
+    }
+  }, [items, selectedId]);
+
   async function toggle(item: FiledInboxItem) {
     setBusy(item.source_id);
     try {
@@ -38,6 +47,37 @@ export function LocalActions() {
     } finally {
       setBusy(undefined);
     }
+  }
+
+  async function saveCorrection(item: FiledInboxItem) {
+    setBusy(item.source_id);
+    try {
+      await editLocalItem({ source_id: item.source_id, title: correction.title.trim(), due: correction.due || null, detail: correction.detail });
+      setEditing(undefined);
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not correct the item."); }
+    finally { setBusy(undefined); }
+  }
+
+  async function forget(item: FiledInboxItem) {
+    if (!window.confirm(`Forget this ${item.kind}?`)) return;
+    setBusy(item.source_id);
+    try { await forgetLocalItem(item.source_id); await refresh(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not forget the item."); }
+    finally { setBusy(undefined); }
+  }
+
+  function controls(item: FiledInboxItem) {
+    return editing === item.source_id ? <div className="mt-2 space-y-2">
+      <input aria-label="Correct title" value={correction.title} onChange={(event) => setCorrection((old) => ({ ...old, title: event.target.value }))} maxLength={200} className="w-full rounded border border-line bg-transparent p-1 text-xs" />
+      <input aria-label="Correct due date" type="date" value={correction.due} onChange={(event) => setCorrection((old) => ({ ...old, due: event.target.value }))} className="rounded border border-line bg-transparent p-1 text-xs" />
+      <textarea aria-label="Correct details" value={correction.detail} onChange={(event) => setCorrection((old) => ({ ...old, detail: event.target.value }))} maxLength={1000} className="w-full rounded border border-line bg-transparent p-1 text-xs" />
+      <button type="button" disabled={busy === item.source_id || !correction.title.trim()} onClick={() => void saveCorrection(item)} className="mr-3 text-xs underline">Save correction</button>
+      <button type="button" onClick={() => setEditing(undefined)} className="text-xs underline">Cancel</button>
+    </div> : <div className="mt-1 flex gap-3 text-xs">
+      <button type="button" onClick={() => { setEditing(item.source_id); setCorrection({ title: item.title, due: item.due ?? "", detail: item.detail ?? "" }); }} className="underline">Correct</button>
+      <button type="button" disabled={busy === item.source_id} onClick={() => void forget(item)} className="underline">Forget</button>
+    </div>;
   }
 
   const open = items.filter((item) => !item.completed_at)
@@ -57,7 +97,7 @@ export function LocalActions() {
     {connected === undefined && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading local items…</p>}
     {error && <p role="alert" className="mb-2 text-xs text-claude">{error}</p>}
     {connected === true && open.length === 0 && <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Nothing open locally.</p>}
-    {open.length > 0 && <ul className="space-y-3">{open.map((item) => <li key={item.source_id} className="flex items-start gap-3">
+    {open.length > 0 && <ul className="space-y-3">{open.map((item) => <li id={`local-${item.source_id}`} key={item.source_id} className={`flex scroll-mt-4 items-start gap-3 ${selectedId === item.source_id ? "rounded-xl border border-line p-2 dark:border-line-dark" : ""}`}>
       <button type="button" onClick={() => void toggle(item)} disabled={busy === item.source_id}
         aria-label={`Mark ${item.title} done`} className="mt-0.5 h-5 w-5 shrink-0 rounded-full border border-line disabled:opacity-40 dark:border-line-dark" />
       <div className="min-w-0">
@@ -67,13 +107,14 @@ export function LocalActions() {
           {item.kind === "reminder" && item.notified_at ? " · alert sent" : ""}
         </p>
         {item.detail && <p className="mt-1 whitespace-pre-wrap break-words text-xs text-ink-soft dark:text-ink-soft-dark">{item.detail}</p>}
+        {controls(item)}
       </div>
     </li>)}</ul>}
-    {done.length > 0 && <details className="mt-4 text-xs text-ink-soft dark:text-ink-soft-dark"><summary>Completed ({done.length})</summary>
-      <ul className="mt-2 space-y-2">{done.map((item) => <li key={item.source_id} className="flex items-center gap-2">
+    {done.length > 0 && <details open={done.some((item) => item.source_id === selectedId) ? true : undefined} className="mt-4 text-xs text-ink-soft dark:text-ink-soft-dark"><summary>Completed ({done.length})</summary>
+      <ul className="mt-2 space-y-2">{done.map((item) => <li id={`local-${item.source_id}`} key={item.source_id} className="flex items-center gap-2">
         <button type="button" onClick={() => void toggle(item)} disabled={busy === item.source_id}
           aria-label={`Reopen ${item.title}`} className="h-5 w-5 shrink-0 rounded-full bg-ink text-xs text-paper disabled:opacity-40 dark:bg-ink-dark dark:text-paper-dark">✓</button>
-        <span>{item.title}</span>
+        <span>{item.title}{controls(item)}</span>
       </li>)}</ul>
     </details>}
     {connected && !notificationsEnabled && open.some((item) => item.kind === "reminder") &&

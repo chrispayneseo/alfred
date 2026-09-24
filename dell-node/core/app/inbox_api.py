@@ -62,10 +62,26 @@ def initialise() -> None:
             due TEXT, detail TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )""")
         existing = {row[1] for row in db.execute("PRAGMA table_info(inbox_filed)")}
-        for name in ("completed_at", "notified_at", "notify_attempt_at"):
+        for name in ("completed_at", "notified_at", "notify_attempt_at", "memory_id"):
             if name not in existing:
-                db.execute(f"ALTER TABLE inbox_filed ADD COLUMN {name} TEXT")
+                db.execute(f"ALTER TABLE inbox_filed ADD COLUMN {name} {'INTEGER' if name == 'memory_id' else 'TEXT'}")
         db.execute("CREATE INDEX IF NOT EXISTS inbox_filed_due ON inbox_filed(kind, due, completed_at, notified_at)")
+        new_index = db.execute("SELECT 1 FROM sqlite_master WHERE name = 'inbox_filed_fts'").fetchone() is None
+        db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS inbox_filed_fts USING fts5(title, detail, content='inbox_filed', content_rowid='rowid')")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS inbox_filed_fts_ai AFTER INSERT ON inbox_filed BEGIN
+          INSERT INTO inbox_filed_fts(rowid, title, detail) VALUES (new.rowid, new.title, new.detail);
+        END""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS inbox_filed_fts_ad AFTER DELETE ON inbox_filed BEGIN
+          INSERT INTO inbox_filed_fts(inbox_filed_fts, rowid, title, detail)
+            VALUES ('delete', old.rowid, old.title, old.detail);
+        END""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS inbox_filed_fts_au AFTER UPDATE OF title, detail ON inbox_filed BEGIN
+          INSERT INTO inbox_filed_fts(inbox_filed_fts, rowid, title, detail)
+            VALUES ('delete', old.rowid, old.title, old.detail);
+          INSERT INTO inbox_filed_fts(rowid, title, detail) VALUES (new.rowid, new.title, new.detail);
+        END""")
+        if new_index:
+            db.execute("INSERT INTO inbox_filed_fts(inbox_filed_fts) VALUES ('rebuild')")
 
 
 def rows(limit: int = 50) -> list[dict]:
@@ -214,8 +230,9 @@ def insert_filing(db: sqlite3.Connection, source_id: str, filing: Filing, title:
         (source_id, kind, title, due, detail) VALUES (?, ?, ?, ?, ?)""",
         (source_id, filing.kind, title, due, filing.detail.strip()))
     if cursor.rowcount and filing.kind == "note":
-        db.execute("INSERT INTO memories(kind, content, source) VALUES (?, ?, ?)",
-                   ("note", title + ("\n" + filing.detail.strip() if filing.detail.strip() else ""), "alfred-local-inbox"))
+        memory_id = db.execute("INSERT INTO memories(kind, content, source) VALUES (?, ?, ?)",
+                               ("note", title + ("\n" + filing.detail.strip() if filing.detail.strip() else ""), "alfred-local-inbox")).lastrowid
+        db.execute("UPDATE inbox_filed SET memory_id = ? WHERE source_id = ?", (memory_id, source_id))
     return bool(cursor.rowcount)
 
 
@@ -228,6 +245,10 @@ async def file_message(message_id: str, filing: Filing):
             raise HTTPException(404, "Message not found")
         if message["state"] == "discarded":
             raise HTTPException(409, "Message was discarded")
+        if message["state"] == "filed":
+            with connection() as db:
+                if db.execute("SELECT 1 FROM inbox_filed WHERE source_id = ?", (message_id,)).fetchone() is None:
+                    raise HTTPException(410, "This filed item was forgotten")
         # The source ID is unique in the destination DB, making retries idempotent.
         with connection() as db:
             insert_filing(db, message_id, filing, title, due)
@@ -284,6 +305,35 @@ async def set_completion(source_id: str, change: Completion):
         if result.rowcount == 0:
             raise HTTPException(404, "Task or reminder not found")
     return {"completed": change.completed}
+
+
+class ItemCorrection(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    due: Optional[str] = None
+    detail: str = Field(default="", max_length=1000)
+
+
+@router.post("/filed/{source_id}/edit")
+async def correct_filed(source_id: str, change: ItemCorrection):
+    with connection() as db:
+        item = db.execute("SELECT kind, due FROM inbox_filed WHERE source_id = ?", (source_id,)).fetchone()
+        if item is None or item["kind"] not in {"task", "reminder"}:
+            raise HTTPException(404, "Task or reminder not found")
+        title, due = validate_filing(Filing(kind=item["kind"], title=change.title, due=change.due, detail=change.detail))
+        db.execute("""UPDATE inbox_filed SET title = ?, due = ?, detail = ?,
+            notified_at = CASE WHEN due IS NOT ? THEN NULL ELSE notified_at END,
+            notify_attempt_at = CASE WHEN due IS NOT ? THEN NULL ELSE notify_attempt_at END
+            WHERE source_id = ?""", (title, due, change.detail.strip(), due, due, source_id))
+    return {"updated": True}
+
+
+@router.delete("/filed/{source_id}")
+async def forget_filed(source_id: str):
+    with connection() as db:
+        result = db.execute("DELETE FROM inbox_filed WHERE source_id = ? AND kind IN ('task', 'reminder')", (source_id,))
+        if result.rowcount == 0:
+            raise HTTPException(404, "Task or reminder not found")
+    return {"forgotten": True}
 
 
 def notification_topic() -> str | None:

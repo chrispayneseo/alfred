@@ -42,6 +42,7 @@ export interface ChatMessage {
   model?: ModelSource;
   confidence?: Confidence;
   note?: string;
+  sources?: import("../integrations/llm/api").RecallSource[];
   cloudPrompt?: string;
   cloudScope?: "prompt_only" | "connected";
   cloudLocation?: { lat: number; lon: number };

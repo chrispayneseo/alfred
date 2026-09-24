@@ -22,6 +22,20 @@ def initialise() -> None:
           kind TEXT NOT NULL, content TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'api'
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS memories_created ON memories(created_at DESC)")
+        new_index = db.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'").fetchone() is None
+        db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, content='memories', content_rowid='id')")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
+          INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+        END""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS memories_fts_ad AFTER DELETE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
+        END""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS memories_fts_au AFTER UPDATE OF content ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
+          INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+        END""")
+        if new_index:
+            db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
 
 
 def remember(kind: str, content: str, source: str) -> int:
@@ -53,5 +67,23 @@ def list_memories(limit: int = 50) -> list[dict]:
 
 def forget(memory_id: int) -> bool:
     with connection() as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'inbox_filed'").fetchone():
+            db.execute("DELETE FROM inbox_filed WHERE memory_id = ? AND kind = 'note'", (memory_id,))
         result = db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        return result.rowcount > 0
+
+
+def get_memory(memory_id: int) -> dict | None:
+    with connection() as db:
+        row = db.execute("SELECT id, created_at, kind, content, source FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def correct_memory(memory_id: int, content: str) -> bool:
+    with connection() as db:
+        result = db.execute("UPDATE memories SET content = ? WHERE id = ?", (content, memory_id))
+        if result.rowcount and db.execute("SELECT 1 FROM sqlite_master WHERE name = 'inbox_filed'").fetchone():
+            title, _, detail = content.partition("\n")
+            db.execute("UPDATE inbox_filed SET title = ?, detail = ? WHERE memory_id = ? AND kind = 'note'",
+                       (title[:200], detail[:1000], memory_id))
         return result.rowcount > 0
