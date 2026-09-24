@@ -1,0 +1,21 @@
+[Unit]
+Description=Alfred Core
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alfred
+WorkingDirectory=/opt/alfred-core
+EnvironmentFile=/etc/alfred-core/alfred-core.env
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/alfred-core
+
+[Install]
+WantedBy=multi-user.target

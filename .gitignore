@@ -1,0 +1,8 @@
+node_modules/
+.eve/
+.output/
+data/
+.env
+.env.*
+!.env.example
+deploy/.env

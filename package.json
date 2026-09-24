@@ -1,0 +1,34 @@
+{
+  "name": "alfred-core",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "eve build",
+    "deploy": "eve deploy",
+    "dev": "eve dev",
+    "eval": "eve eval",
+    "db:migrate": "node scripts/migrate.mjs",
+    "start": "eve start",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@vercel/connect": "2.2.0",
+    "ai": "^7.0.105",
+    "eve": "^0.66.1",
+    "pg": "^8.23.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "@types/pg": "^8.23.1",
+    "just-bash": "^3.4.2",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
