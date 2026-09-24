@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from app import db, inbox_api, main, recall_store
+from app.core import decide, normalise_request
 
 
 class RecallTests(unittest.TestCase):
@@ -111,6 +112,18 @@ class RecallTests(unittest.TestCase):
         self.assertEqual(approval["decision"], "approval_required")
         self.assertFalse(approval["memory_sent"])
         self.assertEqual(approval["cloud_prompt"], "Research my boiler warranty online")
+
+    def test_core_policy_requires_confirmation_for_writes_and_device_actions(self):
+        self.assertEqual(decide("memory.write").decision, "confirm")
+        self.assertEqual(decide("memory.write", confirmed=True).decision, "auto")
+        self.assertEqual(decide("home_assistant.service").decision, "confirm")
+        self.assertEqual(decide("unregistered").decision, "deny")
+
+    def test_canonical_request_does_not_trust_a_channel_to_set_identity(self):
+        item = normalise_request("web", "What is on tomorrow?", "calendar-check")
+        self.assertEqual(item["user"], "Chris")
+        self.assertEqual(item["trust_level"], "owner")
+        self.assertEqual(item["conversation_id"], "calendar-check")
 
 
 if __name__ == "__main__":

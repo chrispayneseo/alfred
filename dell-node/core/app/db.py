@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import sqlite3
 import re
 from contextlib import contextmanager
+from typing import Optional
 from .config import settings
 
 
@@ -22,6 +25,11 @@ def initialise() -> None:
           kind TEXT NOT NULL, content TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'api'
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS memories_created ON memories(created_at DESC)")
+        db.execute("""CREATE TABLE IF NOT EXISTS audit_events (
+          id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, event_type TEXT NOT NULL,
+          request_id TEXT, conversation_id TEXT, data TEXT NOT NULL
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS audit_events_request ON audit_events(request_id, occurred_at DESC)")
         new_index = db.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'").fetchone() is None
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, content='memories', content_rowid='id')")
         db.execute("""CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
@@ -36,6 +44,19 @@ def initialise() -> None:
         END""")
         if new_index:
             db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+
+
+def record_audit(event_type: str, data: dict, request_id: Optional[str] = None,
+                 conversation_id: Optional[str] = None) -> str:
+    """Append a Core decision/event without storing unbounded raw conversations."""
+    import json
+    import uuid
+    event_id = str(uuid.uuid4())
+    with connection() as db:
+        db.execute("""INSERT INTO audit_events (id, occurred_at, event_type, request_id, conversation_id, data)
+          VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)""",
+          (event_id, event_type, request_id, conversation_id, json.dumps(data, separators=(",", ":"))))
+    return event_id
 
 
 def remember(kind: str, content: str, source: str) -> int:

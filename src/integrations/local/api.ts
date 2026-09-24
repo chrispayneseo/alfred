@@ -18,7 +18,8 @@ export async function listLocalMemories(query = ""): Promise<LocalMemory[]> {
 export async function addLocalMemory(content: string, kind = "note"): Promise<void> {
   const res = await fetch(`${BASE}/v1/memories`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, kind, source: "alfred-web" }),
+    // Submitting this form is the owner's explicit confirmation for this safe write.
+    body: JSON.stringify({ content, kind, source: "alfred-web", confirmed: true }),
   });
   if (!res.ok) throw new Error(`Could not save memory (${res.status})`);
 }
@@ -36,7 +37,7 @@ export async function getLocalMemory(id: number): Promise<LocalMemory> {
 
 export async function editLocalMemory(id: number, content: string): Promise<void> {
   const res = await fetch(`${BASE}/v1/memories/${id}/edit`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content, confirmed: true }),
   });
   if (!res.ok) throw new Error(`Could not correct memory (${res.status})`);
 }
