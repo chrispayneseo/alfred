@@ -7,6 +7,7 @@ to long-term memory without an explicit memory write.
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from .db import connection
@@ -138,7 +139,7 @@ def recent_turns(
 
     selected: list[dict[str, str]] = []
     used = 0
-    for row in rows:  # newest -> oldest; take as much recent context as fits
+    for row in rows:
         content = str(row["content"] or "")[:MAX_CONTENT_CHARS]
         cost = len(content) + 24
         if used + cost > budget:
@@ -196,11 +197,16 @@ def clear_conversation(conversation_id: str) -> int:
 def record_assistant_for_request(request_id: str, reply: str) -> bool:
     """Attach a completed response to the request's local conversation, if known."""
     initialise()
-    with connection() as db:
-        row = db.execute(
-            "SELECT conversation_id FROM core_requests WHERE request_id = ?",
-            (request_id,),
-        ).fetchone()
+    try:
+        with connection() as db:
+            row = db.execute(
+                "SELECT conversation_id FROM core_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "core_requests" in str(exc):
+            return False
+        raise
     if row is None:
         return False
     return record_turn(row["conversation_id"], "assistant", reply, request_id=request_id)
