@@ -3,14 +3,19 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio
 from typing import Optional
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
 from .config import settings
-from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember, record_audit, create_plan, list_plans, create_approval, resolve_approval, record_event
+from .db import (
+    initialise, record_audit, create_plan, list_plans,
+    create_approval, resolve_approval, record_event,
+)
 from .clients import home_assistant, ollama_chat, ollama_recall
-from . import inbox_api
-from .recall_store import recall_intent, requested_list, search as search_local
+from . import inbox_api, memory_service
+from .recall_store import recall_intent, requested_list
 from .core import decide, tool_registry, event_decision
 from .orchestrator import orchestrate
 from .providers import provider_registry
@@ -50,13 +55,17 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.5.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
-    app.add_middleware(CORSMiddleware, allow_origins=web_origins,
-                       allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
-                       allow_credentials=False)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=web_origins,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type"],
+        allow_credentials=False,
+    )
 
 
 class Memory(BaseModel):
@@ -135,6 +144,7 @@ async def health():
             "executor": "policy_gated",
             "verification": "enabled",
             "request_lifecycle": "durable",
+            "memory_service": "unified",
             "safe_mode": False,
         },
     }
@@ -145,28 +155,26 @@ async def create_memory(memory: Memory):
     policy = decide("memory.write", memory.confirmed)
     if policy.decision != "auto":
         raise HTTPException(status_code=409, detail={"policy": policy.__dict__})
-    record_audit("memory.saved", {"kind": memory.kind, "source": memory.source})
-    return {"id": remember(memory.kind, memory.content, memory.source)}
+    item = memory_service.create_memory(memory.kind, memory.content, memory.source)
+    return {"id": item["id"]}
 
 
 @app.get("/v1/memories", dependencies=[Depends(authorised)])
 async def get_memories(q: str, limit: int = 8):
-    size = max(1, min(limit, 50))
-    return {"items": recall(q, size) if q.strip() else list_memories(size)}
+    return {"items": memory_service.search_memories(q, limit)}
 
 
 @app.delete("/v1/memories/{memory_id}", dependencies=[Depends(authorised)])
 async def delete_memory(memory_id: int):
-    policy = decide("memory.delete", confirmed=True)
-    if not forget(memory_id):
+    decide("memory.delete", confirmed=True)
+    if not memory_service.delete_memory(memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
-    record_audit("memory.deleted", {"memory_id": memory_id, "policy": policy.__dict__})
     return {"deleted": True}
 
 
 @app.get("/v1/memories/{memory_id}", dependencies=[Depends(authorised)])
 async def read_memory(memory_id: int):
-    item = get_memory(memory_id)
+    item = memory_service.get_memory(memory_id)
     if item is None:
         raise HTTPException(404, "Memory not found")
     return item
@@ -177,15 +185,15 @@ async def edit_memory(memory_id: int, correction: MemoryCorrection):
     policy = decide("memory.correct", correction.confirmed)
     if policy.decision != "auto":
         raise HTTPException(status_code=409, detail={"policy": policy.__dict__})
-    if not correct_memory(memory_id, correction.content.strip()):
+    item = memory_service.correct_memory(memory_id, correction.content)
+    if item is None:
         raise HTTPException(404, "Memory not found")
-    record_audit("memory.corrected", {"memory_id": memory_id})
     return {"updated": True}
 
 
 @app.get("/v1/recall", dependencies=[Depends(authorised)])
 async def search_recall(q: str, limit: int = 6):
-    return {"sources": search_local(q[:500], max(1, min(limit, 10)))}
+    return {"sources": memory_service.retrieve_context(q, limit)}
 
 
 async def answer_from_recall(message: str, sources: list[dict]) -> str:
@@ -205,11 +213,17 @@ async def answer_from_recall(message: str, sources: list[dict]) -> str:
 
 @app.post("/v1/chat", dependencies=[Depends(authorised)])
 async def chat(request: Chat):
+    context = memory_service.retrieve_context(request.message, 8)
     if recall_intent(request.message):
-        sources = search_local(request.message)
-        return {"reply": await answer_from_recall(request.message, sources), "memories_used": len(sources), "sources": sources}
-    memories = recall(request.message)
-    return {"reply": await ollama_chat(request.message, memories, request.fast), "memories_used": len(memories)}
+        return {
+            "reply": await answer_from_recall(request.message, context),
+            "memories_used": len(context),
+            "sources": context,
+        }
+    return {
+        "reply": await ollama_chat(request.message, context, request.fast),
+        "memories_used": len(context),
+    }
 
 
 @app.post("/v1/gateway", dependencies=[Depends(authorised)])
@@ -232,7 +246,10 @@ async def gateway(request: GatewayRequest):
 async def device_action(action: DeviceAction):
     policy = decide("home_assistant.service", action.confirmed)
     if policy.decision != "auto":
-        raise HTTPException(status_code=409, detail={"policy": policy.__dict__, "proposal": action.model_dump(exclude={"confirmed"})})
+        raise HTTPException(
+            status_code=409,
+            detail={"policy": policy.__dict__, "proposal": action.model_dump(exclude={"confirmed"})},
+        )
     try:
         result = await home_assistant(action.service, action.entity_id)
         record_audit("home_assistant.executed", {"service": action.service, "entity_id": action.entity_id})
@@ -243,7 +260,6 @@ async def device_action(action: DeviceAction):
 
 @app.post("/v1/requests", dependencies=[Depends(authorised)])
 async def receive_request(request: CoreRequest):
-    """Canonical ingress for web, WhatsApp, voice, email, API and webhook channels."""
     return await orchestrate(
         channel=request.channel,
         message=request.message,
@@ -259,6 +275,7 @@ async def core_status():
         "lifecycle": lifecycle_summary(),
         "tools": {"registered": len(tool_registry())},
         "providers": provider_registry(),
+        "memory": {"service": "unified"},
     }
 
 
@@ -287,7 +304,6 @@ async def get_providers():
 
 @app.post("/v1/core/execute", dependencies=[Depends(authorised)])
 async def execute_registered_tool(request: ToolExecutionRequest):
-    """Execute one registered tool through Core policy and verification."""
     return await execute_tool(
         request_id=request.request_id,
         action=request.action,
@@ -314,7 +330,6 @@ async def get_plans(limit: int = 50):
 
 @app.post("/v1/core/plans/{plan_id}/execute", dependencies=[Depends(authorised)])
 async def execute_task_plan(plan_id: str):
-    """Execute a plan sequentially, pausing on approval or verification failure."""
     result = await execute_plan(plan_id)
     if result["state"] == "not_found":
         raise HTTPException(404, "Plan not found")
@@ -323,7 +338,10 @@ async def execute_task_plan(plan_id: str):
 
 @app.post("/v1/core/approvals", dependencies=[Depends(authorised)])
 async def request_approval(request: ApprovalRequest):
-    approval = create_approval(request.request_id, request.plan_id, request.action, request.summary, request.risk_level)
+    approval = create_approval(
+        request.request_id, request.plan_id, request.action,
+        request.summary, request.risk_level,
+    )
     record_audit("approval.requested", {"approval_id": approval["id"], "action": request.action}, request.request_id)
     return approval
 
@@ -340,5 +358,8 @@ async def decide_approval(approval_id: str, resolution: ApprovalResolution):
 async def receive_event(event: CoreEvent):
     decision = event_decision(event.event_type)
     stored = record_event(event.event_type, event.source, decision, event.payload)
-    record_audit("event.received", {"event_id": stored["id"], "decision": decision, "event_type": event.event_type})
+    record_audit(
+        "event.received",
+        {"event_id": stored["id"], "decision": decision, "event_type": event.event_type},
+    )
     return stored
