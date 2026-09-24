@@ -6,11 +6,12 @@ dev-dist
 *.tsbuildinfo
 .env
 .env.*
-!.env.example
 .claude/
 .data/
 .vercel
 .env*
+!.env.example
+!.env.notifications.example
 .agents/
 skills-lock.json
 whatsapp-ingress/collector.env
