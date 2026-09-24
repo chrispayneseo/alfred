@@ -8,11 +8,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .config import settings
-from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember, record_audit
+from .db import correct_memory, forget, get_memory, initialise, list_memories, recall, remember, record_audit, create_plan, list_plans, create_approval, resolve_approval, record_event
 from .clients import home_assistant, ollama_chat, ollama_recall, ollama_route
 from . import inbox_api
 from .recall_store import recall_intent, requested_list, search as search_local
-from .core import decide, normalise_request
+from .core import decide, normalise_request, tool_registry, event_decision
 
 
 def authorised(x_alfred_key: str = Header(default=""), tailscale_user_login: str = Header(default="")):
@@ -76,6 +76,30 @@ class CoreRequest(BaseModel):
     conversation_id: Optional[str] = Field(default=None, max_length=160)
 
 
+class PlanRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=64)
+    goal: str = Field(min_length=1, max_length=1000)
+    steps: list[dict] = Field(min_length=1, max_length=20)
+
+
+class ApprovalRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=64)
+    action: str = Field(min_length=1, max_length=120)
+    summary: str = Field(min_length=1, max_length=1000)
+    risk_level: str = Field(pattern="^(safe_write|reversible|external|high_impact)$")
+    plan_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class ApprovalResolution(BaseModel):
+    approved: bool
+
+
+class CoreEvent(BaseModel):
+    event_type: str = Field(min_length=3, max_length=120)
+    source: str = Field(min_length=1, max_length=120)
+    payload: dict = Field(default_factory=dict)
+
+
 PRIVATE_TERMS = (
     "my email", "my emails", "gmail", "inbox", "calendar", "my schedule",
     "my notes", "my tasks", "notion", "my account", "my contacts", "my files",
@@ -99,7 +123,7 @@ class DeviceAction(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "models": {"chat": settings.chat_model, "router": settings.router_model}}
+    return {"status": "ok", "models": {"chat": settings.chat_model, "router": settings.router_model}, "core": {"tool_count": len(tool_registry()), "safe_mode": False}}
 
 
 @app.post("/v1/memories", dependencies=[Depends(authorised)])
@@ -240,3 +264,43 @@ async def receive_request(request: CoreRequest):
     policy = decide("route")
     record_audit("request.received", {"channel": request.channel, "policy": policy.__dict__}, normalized["request_id"], normalized["conversation_id"])
     return {"request": normalized, "policy": policy.__dict__, "status": "accepted"}
+
+
+@app.get("/v1/core/tools", dependencies=[Depends(authorised)])
+async def get_tools():
+    return {"tools": tool_registry()}
+
+
+@app.post("/v1/core/plans", dependencies=[Depends(authorised)])
+async def create_task_plan(request: PlanRequest):
+    plan = create_plan(request.request_id, request.goal, request.steps)
+    record_audit("plan.created", {"plan_id": plan["id"], "step_count": len(request.steps)}, request.request_id)
+    return plan
+
+
+@app.get("/v1/core/plans", dependencies=[Depends(authorised)])
+async def get_plans(limit: int = 50):
+    return {"items": list_plans(max(1, min(limit, 100)))}
+
+
+@app.post("/v1/core/approvals", dependencies=[Depends(authorised)])
+async def request_approval(request: ApprovalRequest):
+    approval = create_approval(request.request_id, request.plan_id, request.action, request.summary, request.risk_level)
+    record_audit("approval.requested", {"approval_id": approval["id"], "action": request.action}, request.request_id)
+    return approval
+
+
+@app.post("/v1/core/approvals/{approval_id}", dependencies=[Depends(authorised)])
+async def decide_approval(approval_id: str, resolution: ApprovalResolution):
+    if not resolve_approval(approval_id, resolution.approved):
+        raise HTTPException(404, "Pending approval not found")
+    record_audit("approval.resolved", {"approval_id": approval_id, "approved": resolution.approved})
+    return {"id": approval_id, "state": "approved" if resolution.approved else "rejected"}
+
+
+@app.post("/v1/events", dependencies=[Depends(authorised)])
+async def receive_event(event: CoreEvent):
+    decision = event_decision(event.event_type)
+    stored = record_event(event.event_type, event.source, decision, event.payload)
+    record_audit("event.received", {"event_id": stored["id"], "decision": decision, "event_type": event.event_type})
+    return stored
