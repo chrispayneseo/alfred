@@ -12,6 +12,7 @@ from typing import Literal
 
 from .clients import ollama_chat, ollama_route
 from .cloud_execution import execute_cloud_request
+from .conversation_store import merge_history, recent_turns, record_turn
 from .core import normalise_request
 from .db import record_audit
 from .lifecycle import begin_request, transition_request
@@ -57,6 +58,7 @@ async def orchestrate(
     message: str,
     conversation_id: str | None = None,
     recall_answerer=None,
+    history: list[dict] | None = None,
 ) -> dict:
     """Process a request through Alfred Core's deterministic decision boundary."""
     request = normalise_request(channel, message, conversation_id)
@@ -65,10 +67,19 @@ async def orchestrate(
     clean = request["message"]
 
     begin_request(request)
+    # Read context before adding the current turn so the current message is not
+    # duplicated in the local model history.
+    short_term_history = merge_history(recent_turns(conversation_id), history)
+    record_turn(conversation_id, "user", clean, request_id=request_id)
+
     transition_request(request_id, "routing")
     record_audit(
         "request.received",
-        {"channel": channel, "operation": "orchestrate"},
+        {
+            "channel": channel,
+            "operation": "orchestrate",
+            "short_term_turns": len(short_term_history),
+        },
         request_id,
         conversation_id,
     )
@@ -82,6 +93,7 @@ async def orchestrate(
                 reason="The requested connected account is not linked to Alfred Core yet.",
                 reply="I can't check that connected account from the Dell yet. Its data has not been linked to the local gateway.",
             )
+            record_turn(conversation_id, "assistant", result.reply or "", request_id=request_id)
             transition_request(request_id, "connection_needed", route=result.route)
             record_audit("request.routed", {"decision": result.route}, request_id, conversation_id)
             return result.to_dict()
@@ -107,6 +119,7 @@ async def orchestrate(
                 memories_used=len(sources),
                 sources=sources,
             )
+            record_turn(conversation_id, "assistant", reply, request_id=request_id)
             transition_request(request_id, "completed", route=result.route, provider=provider)
             record_audit(
                 "request.routed",
@@ -123,6 +136,9 @@ async def orchestrate(
             suggested_route = "cloud" if wants_cloud else "local"
 
         if wants_cloud or suggested_route == "cloud":
+            # Short-term conversation history is deliberately NOT supplied here.
+            # Off-device execution receives only the current prompt unless a
+            # future explicit policy/approval path says otherwise.
             cloud = await execute_cloud_request(request_id=request_id, prompt=clean)
             state = cloud.get("state")
             provider = cloud.get("provider")
@@ -181,6 +197,8 @@ async def orchestrate(
                     reason="Handled by a Core-selected cloud specialist.",
                     memory_sent=False,
                 )
+                if isinstance(result.reply, str) and result.reply.strip():
+                    record_turn(conversation_id, "assistant", result.reply, request_id=request_id)
                 transition_request(request_id, "completed", route=result.route, provider=provider)
                 record_audit(
                     "request.routed",
@@ -210,7 +228,8 @@ async def orchestrate(
 
         transition_request(request_id, "local_processing", route="local", provider="ollama.chat")
         context = retrieve_context(clean, 8)
-        reply = await ollama_chat(clean, context)
+        reply = await ollama_chat(clean, context, history=short_term_history)
+        record_turn(conversation_id, "assistant", reply, request_id=request_id)
         result = OrchestrationResult(
             request_id=request_id,
             conversation_id=conversation_id,
