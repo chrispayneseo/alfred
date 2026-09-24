@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import db as core_db
 from app import inbox_api
@@ -52,6 +52,14 @@ class InboxTests(unittest.TestCase):
         self.insert()
         asyncio.run(inbox_api.discard_message("wamid.sample.test"))
         self.assertEqual(inbox_api.rows(), [])
+
+    def test_triage_only_suggests_and_never_files(self):
+        self.insert()
+        suggestion = {"kind": "note", "title": "Call Sam", "due": None, "detail": ""}
+        with patch.object(inbox_api, "classify", new=AsyncMock(return_value=suggestion)):
+            self.assertEqual(asyncio.run(inbox_api.triage_new()), 1)
+        self.assertEqual(inbox_api.rows()[0]["state"], "review")
+        self.assertEqual(core_db.list_memories(), [])
 
     def test_dates_must_be_iso(self):
         self.assertEqual(inbox_api.parse_due("2026-09-25"), "2026-09-25")
