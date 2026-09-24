@@ -48,12 +48,15 @@ class OrchestrationResult:
     memories_used: int = 0
     sources: list[dict] | None = None
     memory_sent: bool = False
+    cloud_prompt: str | None = None
 
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["decision"] = payload.pop("route")
         if payload["sources"] is None:
             payload.pop("sources")
+        if payload["cloud_prompt"] is None:
+            payload.pop("cloud_prompt")
         return payload
 
 
@@ -152,6 +155,7 @@ async def orchestrate(
                 route="approval_required",
                 reason="This request may send personal or connected-account data to a cloud provider.",
                 memory_sent=False,
+                cloud_prompt=clean,
             )
             record_audit("request.routed", {"decision": result.route, "memory_sent": False}, request_id, conversation_id)
             return result.to_dict()
@@ -167,6 +171,7 @@ async def orchestrate(
             provider=provider.name if provider else "openai",
             reason="This request benefits from a cloud specialist.",
             memory_sent=False,
+            cloud_prompt=clean,
         )
         record_audit("request.routed", {"decision": result.route, "provider": result.provider}, request_id, conversation_id)
         return result.to_dict()
