@@ -13,13 +13,14 @@ from .db import (
     initialise, record_audit, create_plan, list_plans,
     create_approval, resolve_approval, record_event,
 )
-from .clients import home_assistant, ollama_chat, ollama_recall
+from .clients import ollama_chat, ollama_recall
 from . import inbox_api, memory_service
 from .recall_store import recall_intent, requested_list
-from .core import decide, tool_registry, event_decision
+from .core import tool_registry, event_decision
 from .orchestrator import orchestrate
 from .providers import provider_registry
 from .execution import execute_plan, execute_tool, initialise_execution_store, list_executions
+from .legacy_actions import execute_legacy_action
 from .lifecycle import (
     get_request as get_request_state,
     initialise_request_store,
@@ -55,7 +56,7 @@ async def lifespan(_: FastAPI):
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.6.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
@@ -69,7 +70,7 @@ if web_origins:
 
 
 class Memory(BaseModel):
-    kind: str = Field(max_length=64)
+    kind: str = Field(min_length=1, max_length=64)
     content: str = Field(min_length=1, max_length=4000)
     source: str = Field(default="api", max_length=64)
     confirmed: bool = False
@@ -132,6 +133,20 @@ class DeviceAction(BaseModel):
     confirmed: bool = False
 
 
+def _legacy_conflict(result: dict, proposal: dict | None = None):
+    detail = {"policy": result.get("policy", {})}
+    if proposal is not None:
+        detail["proposal"] = proposal
+    raise HTTPException(status_code=409, detail=detail)
+
+
+def _legacy_failure(result: dict, *, not_found: bool = False):
+    error = result.get("error") or "Core execution failed"
+    if not_found and error == "Memory not found":
+        raise HTTPException(404, "Memory not found")
+    raise HTTPException(status_code=503, detail=error)
+
+
 @app.get("/health")
 async def health():
     return {
@@ -145,6 +160,7 @@ async def health():
             "verification": "enabled",
             "request_lifecycle": "durable",
             "memory_service": "unified",
+            "legacy_mutations": "executor_routed",
             "safe_mode": False,
         },
     }
@@ -152,11 +168,16 @@ async def health():
 
 @app.post("/v1/memories", dependencies=[Depends(authorised)])
 async def create_memory(memory: Memory):
-    policy = decide("memory.write", memory.confirmed)
-    if policy.decision != "auto":
-        raise HTTPException(status_code=409, detail={"policy": policy.__dict__})
-    item = memory_service.create_memory(memory.kind, memory.content, memory.source)
-    return {"id": item["id"]}
+    result = await execute_legacy_action(
+        action="memory.write",
+        arguments={"kind": memory.kind, "content": memory.content, "source": memory.source},
+        confirmed=memory.confirmed,
+    )
+    if result.get("state") == "approval_required":
+        _legacy_conflict(result)
+    if result.get("state") != "completed":
+        _legacy_failure(result)
+    return {"id": result["result"]["memory_id"]}
 
 
 @app.get("/v1/memories", dependencies=[Depends(authorised)])
@@ -166,9 +187,13 @@ async def get_memories(q: str, limit: int = 8):
 
 @app.delete("/v1/memories/{memory_id}", dependencies=[Depends(authorised)])
 async def delete_memory(memory_id: int):
-    decide("memory.delete", confirmed=True)
-    if not memory_service.delete_memory(memory_id):
-        raise HTTPException(status_code=404, detail="Memory not found")
+    result = await execute_legacy_action(
+        action="memory.delete",
+        arguments={"memory_id": memory_id},
+        confirmed=True,
+    )
+    if result.get("state") != "completed":
+        _legacy_failure(result, not_found=True)
     return {"deleted": True}
 
 
@@ -182,12 +207,15 @@ async def read_memory(memory_id: int):
 
 @app.post("/v1/memories/{memory_id}/edit", dependencies=[Depends(authorised)])
 async def edit_memory(memory_id: int, correction: MemoryCorrection):
-    policy = decide("memory.correct", correction.confirmed)
-    if policy.decision != "auto":
-        raise HTTPException(status_code=409, detail={"policy": policy.__dict__})
-    item = memory_service.correct_memory(memory_id, correction.content)
-    if item is None:
-        raise HTTPException(404, "Memory not found")
+    result = await execute_legacy_action(
+        action="memory.correct",
+        arguments={"memory_id": memory_id, "content": correction.content},
+        confirmed=correction.confirmed,
+    )
+    if result.get("state") == "approval_required":
+        _legacy_conflict(result)
+    if result.get("state") != "completed":
+        _legacy_failure(result, not_found=True)
     return {"updated": True}
 
 
@@ -228,11 +256,8 @@ async def chat(request: Chat):
 
 @app.post("/v1/gateway", dependencies=[Depends(authorised)])
 async def gateway(request: GatewayRequest):
-    """Compatibility gateway backed by the authoritative Core orchestrator."""
     result = await orchestrate(
-        channel="web",
-        message=request.message,
-        recall_answerer=answer_from_recall,
+        channel="web", message=request.message, recall_answerer=answer_from_recall,
     )
     if result.get("decision") == "local":
         if result.get("provider") == "ollama.chat":
@@ -244,18 +269,17 @@ async def gateway(request: GatewayRequest):
 
 @app.post("/v1/home-assistant/service", dependencies=[Depends(authorised)])
 async def device_action(action: DeviceAction):
-    policy = decide("home_assistant.service", action.confirmed)
-    if policy.decision != "auto":
-        raise HTTPException(
-            status_code=409,
-            detail={"policy": policy.__dict__, "proposal": action.model_dump(exclude={"confirmed"})},
-        )
-    try:
-        result = await home_assistant(action.service, action.entity_id)
-        record_audit("home_assistant.executed", {"service": action.service, "entity_id": action.entity_id})
-        return result
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error))
+    arguments = {"service": action.service, "entity_id": action.entity_id}
+    result = await execute_legacy_action(
+        action="home_assistant.service",
+        arguments=arguments,
+        confirmed=action.confirmed,
+    )
+    if result.get("state") == "approval_required":
+        _legacy_conflict(result, proposal=arguments)
+    if result.get("state") != "completed":
+        _legacy_failure(result)
+    return result["result"]
 
 
 @app.post("/v1/requests", dependencies=[Depends(authorised)])
@@ -276,6 +300,7 @@ async def core_status():
         "tools": {"registered": len(tool_registry())},
         "providers": provider_registry(),
         "memory": {"service": "unified"},
+        "compatibility": {"legacy_mutations": "executor_routed"},
     }
 
 
@@ -305,9 +330,7 @@ async def get_providers():
 @app.post("/v1/core/execute", dependencies=[Depends(authorised)])
 async def execute_registered_tool(request: ToolExecutionRequest):
     return await execute_tool(
-        request_id=request.request_id,
-        action=request.action,
-        arguments=request.arguments,
+        request_id=request.request_id, action=request.action, arguments=request.arguments,
     )
 
 
