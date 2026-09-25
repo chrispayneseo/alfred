@@ -15,6 +15,7 @@ from . import goal_hooks as goal_hooks
 from . import workflows as workflows
 from . import workflow_hooks as workflow_hooks
 from . import agent_loop as agent_loop
+from . import approval_engine as approval_engine
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -24,17 +25,20 @@ proactive_feedback.register_routes()
 proactive_acceptance.register_routes()
 
 # main.py already mounts proactive.router behind Alfred owner authentication.
-# Phase 5A-C contribute absolute /v1/core/* routes to that same authenticated
+# Phase 5A-D contribute absolute /v1/core/* routes to that same authenticated
 # route collection without adding a second auth or execution boundary.
 proactive.router.routes.extend(goals.router.routes)
 proactive.router.routes.extend(agent_loop.router.routes)
 proactive.router.routes.extend(workflows.router.routes)
+proactive.router.routes.extend(approval_engine.router.routes)
 
-# Install guards first, then verified data hand-off, then approval/restart
-# continuation. Approval modules imported by 5B therefore receive the wrapped
-# executor and cannot bypass 5C argument resolution.
+# Install guards first, then verified data hand-off, then goal-aware approval
+# context, then approval/restart continuation. 5D wraps only approval creation;
+# the exact-scope hash, deterministic policy and one existing executor remain
+# authoritative.
 goal_hooks.install()
 workflow_hooks.install()
+approval_engine.install_hook()
 agent_loop.install_hooks()
 
 proactive_schedule.install_background_loop()
