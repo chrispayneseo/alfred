@@ -61,16 +61,21 @@ class ApprovalEngineTests(unittest.TestCase):
         self.assertEqual(context["step_count"], 1)
         self.assertEqual(context["risk_level"], "safe_write")
         self.assertEqual(context["effect"], "create_local_task")
-        self.assertEqual(context["scope_hash"], approval["scope_hash"])
-        self.assertEqual(
-            approval["scope_hash"],
-            execution._scope_hash(
-                "tasks.create",
-                {"kind": "task", "title": "PRIVATE TASK TITLE"},
-                created["plan_id"],
-                0,
-            ),
+
+        with db.connection() as connection:
+            stored_approval = connection.execute(
+                "SELECT scope_hash FROM approvals WHERE id = ?", (approval["id"],)
+            ).fetchone()
+        self.assertIsNotNone(stored_approval)
+        expected_scope = execution._scope_hash(
+            "tasks.create",
+            {"kind": "task", "title": "PRIVATE TASK TITLE"},
+            created["plan_id"],
+            0,
         )
+        self.assertEqual(stored_approval["scope_hash"], expected_scope)
+        self.assertEqual(context["scope_hash"], expected_scope)
+
         encoded = json.dumps(context)
         self.assertNotIn("PRIVATE TASK TITLE", encoded)
         self.assertNotIn("private task title", encoded.lower())
