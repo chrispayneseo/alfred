@@ -24,6 +24,7 @@ MAX_DISMISS_PENALTY = 18
 MAX_SNOOZE_PENALTY = 4
 MAX_TOTAL_PENALTY = 18
 _REGISTERED = False
+_HOOKS_INSTALLED = False
 
 
 def initialise() -> None:
@@ -174,6 +175,102 @@ def reset() -> int:
         db.execute("DELETE FROM proactive_feedback_events")
     record_audit("proactive.feedback_reset", {"deleted_events": count})
     return count
+
+
+def _already_recorded_state(item_id: str, action: str) -> bool:
+    """Avoid treating immediate retry requests as additional preference signals."""
+    initialise()
+    with connection() as db:
+        row = db.execute(
+            "SELECT dismissed_at, snoozed_until FROM proactive_items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+    if row is None:
+        return False
+    if action == "dismiss":
+        return bool(row["dismissed_at"])
+    if action == "snooze":
+        raw = row["snoozed_until"]
+        if not raw:
+            return False
+        try:
+            until = datetime.strptime(str(raw), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        return until > datetime.now(timezone.utc)
+    return False
+
+
+def install_hooks() -> None:
+    """Attach explicit feedback to existing Phase 4 actions and ranking."""
+    global _HOOKS_INSTALLED
+    if _HOOKS_INSTALLED:
+        return
+
+    from . import proactive, proactive_brief
+
+    original_dismiss = proactive.dismiss
+    original_snooze = proactive.snooze
+    original_status = proactive.status
+    original_reasoned_feed = proactive_brief._reasoned_feed
+    original_public_item = proactive_brief._public_item
+    original_build_brief = proactive_brief.build_brief
+
+    def dismiss_with_feedback(item_id: str) -> bool:
+        duplicate = _already_recorded_state(item_id, "dismiss")
+        result = original_dismiss(item_id)
+        if result and not duplicate:
+            record_action(item_id, "dismiss")
+        return result
+
+    def snooze_with_feedback(item_id: str, minutes: int) -> bool:
+        duplicate = _already_recorded_state(item_id, "snooze")
+        result = original_snooze(item_id, minutes)
+        if result and not duplicate:
+            record_action(item_id, "snooze")
+        return result
+
+    def status_with_feedback(*, now: datetime | None = None) -> dict:
+        payload = original_status(now=now)
+        payload["feedback"] = status(now=now)
+        return payload
+
+    def reasoned_feed_with_feedback(*, now: datetime):
+        data, reasoning = original_reasoned_feed(now=now)
+        learned = apply_feedback(list(reasoning.get("items", [])), now=now)
+        reasoning = dict(reasoning)
+        reasoning["items"] = learned["items"]
+        reasoning["feedback"] = {
+            key: learned[key]
+            for key in (
+                "mode", "adjusted_items", "window_days", "creates_urgent",
+                "demotes_urgent", "cloud_models", "stores_connected_content",
+            )
+        }
+        return data, reasoning
+
+    def public_item_with_feedback(item: dict) -> dict:
+        payload = original_public_item(item)
+        adjustment = int(item.get("feedback_adjustment", 0))
+        if adjustment < 0:
+            payload["pre_feedback_priority"] = int(item.get("pre_feedback_priority", payload["priority"]))
+            payload["feedback_adjustment"] = adjustment
+            payload["feedback"] = dict(item.get("feedback") or {})
+        return payload
+
+    def build_brief_with_feedback(*, limit: int = 8, now: datetime | None = None) -> dict:
+        payload = original_build_brief(limit=limit, now=now)
+        local_now = proactive._aware_now(now)
+        payload["feedback"] = status(now=local_now)
+        return payload
+
+    proactive.dismiss = dismiss_with_feedback
+    proactive.snooze = snooze_with_feedback
+    proactive.status = status_with_feedback
+    proactive_brief._reasoned_feed = reasoned_feed_with_feedback
+    proactive_brief._public_item = public_item_with_feedback
+    proactive_brief.build_brief = build_brief_with_feedback
+    _HOOKS_INSTALLED = True
 
 
 def register_routes() -> None:
