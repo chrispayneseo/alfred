@@ -10,7 +10,9 @@ remains disabled elsewhere in the Phase 4 boundary.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time
+import sys
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -114,6 +116,41 @@ def current(defaults=settings) -> dict:
     return result
 
 
+def apply_runtime_preferences() -> dict:
+    """Apply effective proactive values to already-imported Core modules.
+
+    Settings is a frozen dataclass, so we replace only the proactive fields and
+    update each module's bound settings reference. This makes changes effective
+    immediately while keeping every unrelated secret/config value untouched.
+    """
+    effective = current(settings)
+    runtime = replace(
+        settings,
+        proactive_enabled=bool(effective["enabled"]),
+        proactive_poll_seconds=int(effective["poll_seconds"]),
+        proactive_quiet_start=str(effective["quiet_start"]),
+        proactive_quiet_end=str(effective["quiet_end"]),
+        proactive_min_priority=int(effective["min_priority"]),
+        proactive_cooldown_minutes=int(effective["cooldown_minutes"]),
+        proactive_morning_brief_enabled=bool(effective["morning_brief_enabled"]),
+        proactive_morning_brief_time=str(effective["morning_brief_time"]),
+    )
+
+    from . import config
+    config.settings = runtime
+
+    for module_name in (
+        "app.proactive",
+        "app.proactive_brief",
+        "app.proactive_schedule",
+        "app.main",
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None and hasattr(module, "settings"):
+            setattr(module, "settings", runtime)
+    return effective
+
+
 def update(values: PreferencesUpdate, defaults=settings) -> dict:
     initialise()
     changes = values.model_dump(exclude_none=True)
@@ -132,6 +169,7 @@ def update(values: PreferencesUpdate, defaults=settings) -> dict:
         "keys": sorted(changes),
         "delivery": "disabled",
     })
+    apply_runtime_preferences()
     return current(defaults)
 
 
