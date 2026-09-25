@@ -44,6 +44,7 @@ TOOLS = {
     "email.message.get": {"risk": "read", "permission": "auto", "verification": "email_message"},
     "email.draft.create": {"risk": "external", "permission": "confirm", "verification": "email_draft"},
     "browser.session.open": {"risk": "read", "permission": "auto", "verification": "browser_page_state"},
+    "browser.authenticated.session.open": {"risk": "read", "permission": "auto", "verification": "authenticated_browser_page_state"},
     "browser.navigate": {"risk": "read", "permission": "auto", "verification": "browser_page_state"},
     "browser.page.inspect": {"risk": "read", "permission": "auto", "verification": "browser_page_state"},
     "browser.form.prepare": {"risk": "reversible", "permission": "auto", "verification": "browser_offline_form_state"},
@@ -57,7 +58,7 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
         "memory.read", "memory.candidate.list", "tasks.list", "home_assistant.state",
         "files.list", "files.search", "files.read",
         "calendar.events.list", "email.messages.search", "email.message.get",
-        "browser.session.open", "browser.navigate", "browser.page.inspect",
+        "browser.session.open", "browser.authenticated.session.open", "browser.navigate", "browser.page.inspect",
         "recall.search", "chat.local", "route",
     }:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
