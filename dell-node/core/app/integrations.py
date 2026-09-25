@@ -38,6 +38,19 @@ class IntegrationDefinition:
 
 DEFINITIONS: tuple[IntegrationDefinition, ...] = (
     IntegrationDefinition(
+        id="alfred_tasks",
+        name="Alfred Tasks",
+        category="productivity",
+        boundary="local",
+        capabilities=(
+            Capability("tasks.list", "List local tasks and reminders", "read", False, ("task", "reminder")),
+            Capability("tasks.create", "Create a local task or reminder", "write", False, ("task", "reminder")),
+            Capability("tasks.update", "Edit a local task or reminder", "write", False, ("task", "reminder")),
+            Capability("tasks.complete", "Change task or reminder completion", "write", False, ("task", "reminder")),
+            Capability("tasks.delete", "Delete a local task or reminder", "write", False, ("task", "reminder")),
+        ),
+    ),
+    IntegrationDefinition(
         id="home_assistant",
         name="Home Assistant",
         category="smart_home",
@@ -79,6 +92,8 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
 
 def _configured(integration_id: str) -> bool:
     settings = config.settings
+    if integration_id == "alfred_tasks":
+        return True
     if integration_id == "home_assistant":
         return bool(settings.ha_url and settings.ha_token)
     if integration_id == "google_calendar":
