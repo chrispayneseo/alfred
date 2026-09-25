@@ -84,6 +84,8 @@ jobs:
           bash -n ../scripts/phase5-hardening-acceptance-smoke.sh
       - name: Check Phase 6 smoke script syntax
         run: bash -n ../scripts/phase6-daily-utility-smoke.sh
+      - name: Check Phase 7 smoke script syntax
+        run: bash -n ../scripts/phase7-personal-agent-smoke.sh
 
   browser-worker:
     runs-on: ubuntu-latest
