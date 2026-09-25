@@ -62,8 +62,25 @@ export interface ProactiveSettings {
   cooldown_minutes: number;
   morning_brief_enabled: boolean;
   morning_brief_time: string;
-  delivery: "disabled";
+  push_enabled: boolean;
+  delivery: "disabled" | "generic_ntfy";
   source: "environment_defaults" | "local_override" | string;
+}
+
+export interface ProactiveDeliveryStatus {
+  enabled: boolean;
+  configured: boolean;
+  channel: "ntfy_generic";
+  content_policy: "generic_only";
+  destination: "today";
+  retry_backoff_minutes: number;
+  delivered_count: number;
+  last: null | {
+    state: string;
+    attempted_at: string;
+    delivered_at: string | null;
+    error_type: string | null;
+  };
 }
 
 export type InterruptionDecision =
@@ -120,6 +137,10 @@ export async function updateProactiveSettings(settings: Partial<ProactiveSetting
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
   });
+}
+
+export async function fetchProactiveDeliveryStatus(): Promise<ProactiveDeliveryStatus> {
+  return jsonRequest<ProactiveDeliveryStatus>("/delivery/status");
 }
 
 export async function markProactiveSurfaced(itemId: string): Promise<void> {
