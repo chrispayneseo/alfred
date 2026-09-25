@@ -128,9 +128,7 @@ class DurableGoalTests(unittest.TestCase):
             )
 
         recovered = recovery.recover_interrupted_work()
-        self.assertEqual(recovered["executions"], 1)
-        self.assertEqual(recovered["plans"], 1)
-        self.assertEqual(recovered["goals"]["states"]["blocked"], 1)
+        self.assertEqual(recovered, {"executions": 1, "plans": 1})
         self.assertEqual(goals.get_goal(created["id"])["state"], "blocked")
 
     def test_status_is_content_minimised_and_declares_no_auto_execution(self):
