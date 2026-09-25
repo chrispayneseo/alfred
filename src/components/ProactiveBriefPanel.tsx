@@ -174,6 +174,11 @@ export function ProactiveBriefPanel() {
         {brief.counts.urgent > 0 && <span className="rounded-full border border-claude/40 px-2 py-1 text-claude">{brief.counts.urgent} urgent</span>}
         {brief.counts.important > 0 && <span className="rounded-full border border-ink-faint/40 px-2 py-1 text-ink dark:border-ink-faint-dark/40 dark:text-ink-dark">{brief.counts.important} important</span>}
         {brief.counts.later > 0 && <span className="rounded-full border border-line px-2 py-1 text-ink-faint dark:border-line-dark dark:text-ink-faint-dark">{brief.counts.later} later</span>}
+        {(brief.reasoning?.cluster_count ?? 0) > 0 && (
+          <span className="rounded-full border border-line px-2 py-1 text-ink-soft dark:border-line-dark dark:text-ink-soft-dark">
+            {brief.reasoning?.cluster_count} connected signal{brief.reasoning?.cluster_count === 1 ? "" : "s"}
+          </span>
+        )}
         {total === 0 && <span className="text-ink-faint dark:text-ink-faint-dark">Nothing needs attention right now.</span>}
       </div>
 
@@ -202,9 +207,19 @@ export function ProactiveBriefPanel() {
                     <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-faint dark:border-line-dark dark:text-ink-faint-dark">
                       {SOURCE_LABEL[item.source] ?? item.source}
                     </span>
+                    {(item.reasoning_boost ?? 0) > 0 && (
+                      <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-soft dark:border-line-dark dark:text-ink-soft-dark">
+                        Cross-source +{item.reasoning_boost}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm font-medium text-ink dark:text-ink-dark">{item.title}</p>
                   <p className="mt-0.5 text-xs text-ink-soft dark:text-ink-soft-dark">{item.summary}</p>
+                  {item.reasoning && item.reasoning.length > 0 && (
+                    <p className="mt-1 text-[11px] text-ink-faint dark:text-ink-faint-dark">
+                      {item.reasoning.join(" · ")}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-2 text-[11px]">
                   <button type="button" disabled={busy === item.id} onClick={() => void snooze(item)} className="underline text-ink-soft disabled:opacity-40 dark:text-ink-soft-dark">Snooze 3h</button>
@@ -219,8 +234,8 @@ export function ProactiveBriefPanel() {
       {error && <p role="alert" className="mt-3 text-xs text-claude">{error}</p>}
       <p className="mt-4 text-[10px] text-ink-faint dark:text-ink-faint-dark">
         {delivery?.enabled && delivery.configured
-          ? "Observed locally · generic phone nudges policy-gated · item content stays on the Dell"
-          : "Observed locally · phone nudges off"}
+          ? "Observed and reasoned locally · generic phone nudges policy-gated · item content stays on the Dell"
+          : "Observed and reasoned locally · phone nudges off"}
       </p>
     </section>
   );
