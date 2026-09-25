@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from app import config, db, execution, gmail, integration_adapters, integrations
-from app.core import TOOLS
+from app.core import TOOLS, decide
 
 
 class GmailIntegrationTests(unittest.TestCase):
@@ -35,31 +35,54 @@ class GmailIntegrationTests(unittest.TestCase):
             gmail_user_id="me",
         )
 
-    def test_gmail_is_read_only_in_manifest_policy_and_adapter_registry(self):
+    def test_gmail_reads_stay_read_only_and_draft_is_separately_gated(self):
         configured = self._configured()
         with patch.object(config, "settings", configured):
             integration = integrations.get_integration("gmail")
+            draft_available, reason = integrations.action_available("email.draft.create")
         self.assertTrue(integration["configured"])
         self.assertEqual(integration["state"], "ready")
+        capabilities = {item["action"]: item for item in integration["capabilities"]}
         self.assertEqual(
-            {item["action"] for item in integration["capabilities"]},
-            {"email.messages.search", "email.message.get"},
+            set(capabilities),
+            {"email.messages.search", "email.message.get", "email.draft.create"},
         )
-        self.assertTrue(all(item["mode"] == "read" for item in integration["capabilities"]))
-        self.assertIn("email.messages.search", TOOLS)
-        self.assertIn("email.message.get", TOOLS)
-        for action in ("email.send", "email.draft.create", "email.archive", "email.delete", "email.labels.modify"):
+        self.assertEqual(capabilities["email.messages.search"]["mode"], "read")
+        self.assertEqual(capabilities["email.message.get"]["mode"], "read")
+        self.assertTrue(capabilities["email.messages.search"]["enabled"])
+        self.assertTrue(capabilities["email.message.get"]["enabled"])
+        self.assertEqual(capabilities["email.draft.create"]["mode"], "write")
+        self.assertFalse(capabilities["email.draft.create"]["enabled"])
+        self.assertFalse(draft_available)
+        self.assertIn("write capability is disabled", reason)
+        self.assertEqual(decide("email.draft.create").decision, "confirm")
+        self.assertEqual(decide("email.draft.create").level, "external")
+        self.assertIn("email.draft.create", TOOLS)
+        self.assertIn("email.draft.create", integration_adapters.registered_actions())
+        for action in ("email.send", "email.archive", "email.delete", "email.labels.modify"):
             self.assertNotIn(action, TOOLS)
             self.assertNotIn(action, integration_adapters.registered_actions())
 
     def test_registry_never_exposes_gmail_credentials(self):
-        configured = self._configured()
+        configured = replace(
+            self._configured(),
+            gmail_write_client_id="gmail-write-client-id",
+            gmail_write_client_secret="gmail-write-client-secret",
+            gmail_write_refresh_token="gmail-write-refresh-token",
+            gmail_write_enabled=True,
+        )
         with patch.object(config, "settings", configured):
             registry = integrations.integration_registry()
         serialized = str(registry)
-        self.assertNotIn("gmail-client-secret", serialized)
-        self.assertNotIn("gmail-refresh-token", serialized)
-        self.assertNotIn("gmail-client-id", serialized)
+        for secret in (
+            "gmail-client-secret",
+            "gmail-refresh-token",
+            "gmail-client-id",
+            "gmail-write-client-id",
+            "gmail-write-client-secret",
+            "gmail-write-refresh-token",
+        ):
+            self.assertNotIn(secret, serialized)
 
     def test_unconfigured_gmail_fails_closed_without_execution_side_effect(self):
         unconfigured = replace(
