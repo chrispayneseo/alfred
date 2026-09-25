@@ -21,7 +21,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -69,3 +69,4 @@ jobs:
           bash -n ../scripts/phase4-morning-delivery-smoke.sh
           bash -n ../scripts/phase4-relevance-smoke.sh
           bash -n ../scripts/phase4-reasoning-smoke.sh
+          bash -n ../scripts/phase4-feedback-smoke.sh

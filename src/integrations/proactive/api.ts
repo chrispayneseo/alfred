@@ -12,6 +12,13 @@ export interface ProactiveItem {
   reasoning_boost?: number;
   reasoning?: string[];
   correlated_sources?: string[];
+  pre_feedback_priority?: number;
+  feedback_adjustment?: number;
+  feedback?: {
+    dismissals: number;
+    snoozes: number;
+    window_days: number;
+  };
   band: ProactiveBand;
   title: string;
   summary: string;
@@ -32,6 +39,18 @@ export interface ProactiveReasoningSummary {
   cloud_models: boolean;
 }
 
+export interface ProactiveFeedbackStatus {
+  mode: "explicit_local_v1" | string;
+  window_days: number;
+  dismissals: number;
+  snoozes: number;
+  learned_kinds: number;
+  creates_urgent: boolean;
+  demotes_urgent: boolean;
+  cloud_models: boolean;
+  stores_connected_content: boolean;
+}
+
 export interface ProactiveBrief {
   generated_at: string;
   headline: string;
@@ -41,6 +60,7 @@ export interface ProactiveBrief {
   delivery: "disabled";
   synthesis: "deterministic_local";
   reasoning?: ProactiveReasoningSummary;
+  feedback?: ProactiveFeedbackStatus;
 }
 
 export interface MorningBrief {
@@ -166,6 +186,18 @@ export async function fetchProactiveDeliveryStatus(): Promise<ProactiveDeliveryS
 
 export async function sendProactiveTestNudge(): Promise<ProactiveTestDeliveryResult> {
   return jsonRequest<ProactiveTestDeliveryResult>("/delivery/test", { method: "POST" });
+}
+
+export async function fetchProactiveFeedbackStatus(): Promise<ProactiveFeedbackStatus> {
+  return jsonRequest<ProactiveFeedbackStatus>("/feedback/status");
+}
+
+export async function resetProactiveFeedback(): Promise<ProactiveFeedbackStatus> {
+  const result = await jsonRequest<{ reset: boolean; deleted_events: number; status: ProactiveFeedbackStatus }>(
+    "/feedback/reset",
+    { method: "POST" },
+  );
+  return result.status;
 }
 
 export async function markProactiveSurfaced(itemId: string): Promise<void> {
