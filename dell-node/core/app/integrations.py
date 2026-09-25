@@ -113,3 +113,25 @@ def action_available(action: str) -> tuple[bool, str | None]:
     if integration["state"] == "planned":
         return False, f"{integration['name']} capability is not enabled yet."
     return False, f"{integration['name']} is not configured."
+
+
+async def integration_health() -> list[dict]:
+    """Return health states without returning secrets, entities or user content."""
+    from .clients import home_assistant_health
+
+    results: list[dict] = []
+    for integration in integration_registry():
+        item = {
+            "id": integration["id"],
+            "name": integration["name"],
+            "configured": integration["configured"],
+            "boundary": integration["boundary"],
+        }
+        if integration["state"] == "planned":
+            item["state"] = "planned"
+        elif integration["id"] == "home_assistant":
+            item.update(await home_assistant_health())
+        else:
+            item["state"] = integration["state"]
+        results.append(item)
+    return results
