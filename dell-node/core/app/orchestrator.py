@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Literal
 
+from .approval_resume import register_proposal
 from .candidate_extractor import capture as capture_memory_candidates
 from .clients import ollama_chat, ollama_route
 from .cloud_execution import execute_cloud_request
@@ -112,15 +113,31 @@ async def orchestrate(
         mutation_plan = plan_mutation_tool(clean)
         if mutation_plan is not None:
             provider = f"integration:{mutation_plan.integration}"
+            proposal_plan_id = f"mutation:{request_id}"
+            proposal_step_index = 0
             transition_request(request_id, "tool_planning", route="approval_required", provider=provider)
             execution = await execute_tool(
                 request_id=request_id,
                 action=mutation_plan.action,
                 arguments=mutation_plan.arguments,
+                plan_id=proposal_plan_id,
+                step_index=proposal_step_index,
             )
             state = execution.get("state")
             if state == "approval_required":
                 approval = execution.get("approval") if isinstance(execution.get("approval"), dict) else None
+                if approval is None:
+                    raise RuntimeError("Mutation approval was not returned by the executor")
+                register_proposal(
+                    approval=approval,
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    plan_id=proposal_plan_id,
+                    step_index=proposal_step_index,
+                    action=mutation_plan.action,
+                    arguments=mutation_plan.arguments,
+                    integration=mutation_plan.integration,
+                )
                 reply = "I can do that, but this change needs your confirmation first."
                 record_turn(conversation_id, "assistant", reply, request_id=request_id)
                 result = OrchestrationResult(
@@ -139,7 +156,8 @@ async def orchestrate(
                 record_audit(
                     "request.tool_approval_required",
                     {"action": mutation_plan.action, "integration": mutation_plan.integration,
-                     "approval_id": approval.get("id") if approval else None},
+                     "approval_id": approval.get("id"), "plan_id": proposal_plan_id,
+                     "step_index": proposal_step_index},
                     request_id,
                     conversation_id,
                 )

@@ -8,10 +8,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .approval_resume import initialise as initialise_approval_resume, resolve_and_resume
 from .config import settings
 from .db import (
     initialise, record_audit, create_plan, list_plans,
-    create_approval, resolve_approval, record_event,
+    create_approval, record_event,
 )
 from .clients import ollama_chat, ollama_recall
 from .cloud_execution import execute_cloud_request
@@ -48,6 +49,7 @@ async def lifespan(_: FastAPI):
     initialise_execution_store()
     initialise_request_store()
     initialise_conversation_store()
+    initialise_approval_resume()
     recover_interrupted_work()
     inbox_api.initialise()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
@@ -180,6 +182,7 @@ async def health():
             "legacy_mutations": "executor_routed",
             "recovery_policy": "fail_closed",
             "provider_runtime": "policy_gated",
+            "approval_resume": "exact_scope_idempotent",
             "safe_mode": False,
         },
     }
@@ -445,10 +448,12 @@ async def request_approval(request: ApprovalRequest):
 
 @app.post("/v1/core/approvals/{approval_id}", dependencies=[Depends(authorised)])
 async def decide_approval(approval_id: str, resolution: ApprovalResolution):
-    if not resolve_approval(approval_id, resolution.approved):
-        raise HTTPException(404, "Pending approval not found")
-    record_audit("approval.resolved", {"approval_id": approval_id, "approved": resolution.approved})
-    return {"id": approval_id, "state": "approved" if resolution.approved else "rejected"}
+    result = await resolve_and_resume(approval_id, resolution.approved)
+    if result.get("state") == "not_found":
+        raise HTTPException(404, "Approval not found")
+    if result.get("state") in {"conflict", "scope_mismatch"}:
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 @app.post("/v1/events", dependencies=[Depends(authorised)])
