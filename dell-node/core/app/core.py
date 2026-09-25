@@ -43,6 +43,7 @@ TOOLS = {
     "email.messages.search": {"risk": "read", "permission": "auto", "verification": "email_search"},
     "email.message.get": {"risk": "read", "permission": "auto", "verification": "email_message"},
     "email.draft.create": {"risk": "external", "permission": "confirm", "verification": "email_draft"},
+    "email.draft.send": {"risk": "high_impact", "permission": "confirm", "verification": "email_sent"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
@@ -82,6 +83,12 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
             "external",
             "auto" if confirmed else "confirm",
             "Creating content in an external mailbox requires explicit confirmation.",
+        )
+    if action == "email.draft.send":
+        return PolicyDecision(
+            "high_impact",
+            "auto" if confirmed else "confirm",
+            "Sending an email to an external recipient requires explicit confirmation.",
         )
     return PolicyDecision("high_impact", "deny", "This action is not registered with Alfred Core.")
 
