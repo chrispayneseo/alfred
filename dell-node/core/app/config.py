@@ -26,6 +26,12 @@ class Settings:
     mqtt_username: str = os.getenv("MQTT_USERNAME", "")
     mqtt_password: str = os.getenv("MQTT_PASSWORD", "")
 
+    # A dedicated read-only bind mount is the only local filesystem surface
+    # exposed to Core. The integration remains disabled unless explicitly opted in.
+    files_enabled: bool = _env_bool("ALFRED_FILES_ENABLED", False)
+    files_root: str = os.getenv("ALFRED_FILES_ROOT", "/files") or "/files"
+    files_max_read_bytes: int = int(os.getenv("ALFRED_FILES_MAX_READ_BYTES", "262144"))
+
     # Google Calendar is optional. Credentials stay in the Dell environment and
     # are never exposed by the integration registry or health endpoints.
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
