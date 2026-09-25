@@ -32,6 +32,7 @@ export function Sidebar() {
                     ? "bg-paper text-ink dark:bg-paper-dark dark:text-ink-dark"
                     : "text-ink-faint hover:text-ink-soft dark:text-ink-faint-dark dark:hover:text-ink-soft-dark"
                 }`
+              }
             >
               <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
               {item.label}
