@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import config, db, execution, inbox_api
+from app import config, db, execution, inbox_api, integration_adapters
 
 
 class ExecutionTests(unittest.TestCase):
@@ -142,7 +142,7 @@ class ExecutionTests(unittest.TestCase):
         patched = replace(config.settings, ha_url="http://ha.local:8123", ha_token="test-token")
         with (
             patch.object(config, "settings", patched),
-            patch.object(execution, "home_assistant_state", new=AsyncMock(return_value={
+            patch.object(integration_adapters, "home_assistant_state", new=AsyncMock(return_value={
                 "ok": True,
                 "entity_id": "sensor.study_temperature",
                 "state": "21.4",
@@ -171,7 +171,7 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(first["state"], "approval_required")
             db.resolve_approval(first["approval"]["id"], True)
 
-            with patch.object(execution, "home_assistant", new=AsyncMock(return_value={
+            with patch.object(integration_adapters, "home_assistant", new=AsyncMock(return_value={
                 "ok": True, "service": "light.turn_on", "entity_id": "light.study"
             })):
                 second = asyncio.run(execution.execute_tool(

@@ -3,18 +3,19 @@ import unittest
 from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
-from app import clients, config, integrations
+from app import clients, config, integration_adapters, integrations
 from app.core import TOOLS, tool_registry
 
 
 class IntegrationFrameworkTests(unittest.TestCase):
     def test_tool_registry_exposes_integration_owner(self):
         tools = {item["name"]: item for item in tool_registry()}
+        self.assertEqual(tools["tasks.list"]["integration"], "alfred_tasks")
         self.assertEqual(tools["home_assistant.service"]["integration"], "home_assistant")
         self.assertEqual(tools["calendar.events.list"]["integration"], "google_calendar")
         self.assertEqual(tools["memory.read"]["integration"], "core")
 
-    def test_every_manifest_action_is_registered_with_core_policy(self):
+    def test_every_manifest_action_has_policy_and_exactly_one_adapter(self):
         actions = {
             capability["action"]
             for integration in integrations.integration_registry()
@@ -22,6 +23,15 @@ class IntegrationFrameworkTests(unittest.TestCase):
         }
         self.assertTrue(actions)
         self.assertTrue(actions.issubset(set(TOOLS)))
+        self.assertEqual(actions, integration_adapters.registered_actions())
+        self.assertNotIn("memory.read", integration_adapters.registered_actions())
+
+    def test_unknown_adapter_action_returns_none(self):
+        result = asyncio.run(integration_adapters.invoke(
+            "unknown.integration.action", {}, "req-unknown"
+        ))
+        self.assertIsNone(result)
+        self.assertIsNone(integration_adapters.verify("unknown.integration.action", {}))
 
     def test_calendar_is_read_only_and_not_configured_by_default(self):
         calendar = integrations.get_integration("google_calendar")
@@ -83,6 +93,8 @@ class IntegrationFrameworkTests(unittest.TestCase):
         serialized = str(health)
         self.assertNotIn(secret, serialized)
         self.assertNotIn("entity_id", serialized)
+        tasks = next(item for item in health if item["id"] == "alfred_tasks")
+        self.assertEqual(tasks["state"], "ready")
         home = next(item for item in health if item["id"] == "home_assistant")
         self.assertEqual(home["state"], "ready")
         calendar = next(item for item in health if item["id"] == "google_calendar")
@@ -93,6 +105,7 @@ class IntegrationFrameworkTests(unittest.TestCase):
         self.assertTrue(available)
         self.assertIsNone(reason)
         self.assertNotIn("calendar.events.create", TOOLS)
+        self.assertNotIn("calendar.events.create", integration_adapters.registered_actions())
 
 
 if __name__ == "__main__":

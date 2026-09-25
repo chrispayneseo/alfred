@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import config, db, execution, google_calendar
+from app import config, db, execution, google_calendar, integration_adapters
 
 
 class GoogleCalendarTests(unittest.TestCase):
@@ -79,7 +79,7 @@ class GoogleCalendarTests(unittest.TestCase):
         }
         with (
             patch.object(config, "settings", configured),
-            patch.object(execution, "google_calendar_list_events", new=AsyncMock(return_value=result_payload)),
+            patch.object(integration_adapters, "google_calendar_list_events", new=AsyncMock(return_value=result_payload)),
         ):
             result = asyncio.run(execution.execute_tool(
                 request_id="req-calendar-read",

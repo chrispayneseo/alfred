@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from app import config, db, execution, inbox_api, main
+from app import config, db, execution, inbox_api, integration_adapters, main
 
 
 class LegacyActionTests(unittest.TestCase):
@@ -77,7 +77,7 @@ class LegacyActionTests(unittest.TestCase):
         configured = replace(config.settings, ha_url="http://ha.local:8123", ha_token="test-token")
         with (
             patch.object(config, "settings", configured),
-            patch.object(execution, "home_assistant", new=AsyncMock(return_value={
+            patch.object(integration_adapters, "home_assistant", new=AsyncMock(return_value={
                 "ok": True, "service": "light.turn_on", "entity_id": "light.study"
             })),
         ):

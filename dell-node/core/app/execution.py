@@ -8,12 +8,11 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from .clients import home_assistant, home_assistant_state
 from .core import TOOLS, decide
 from .db import connection, create_approval, record_audit
-from .google_calendar import list_events as google_calendar_list_events
+from .integration_adapters import invoke as invoke_integration, verify as verify_integration
 from .integrations import action_available
-from . import memory_service, task_service
+from . import memory_service
 
 
 @dataclass(frozen=True)
@@ -284,73 +283,9 @@ async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
             request_id=request_id,
         )
 
-    if action == "tasks.list":
-        kind = arguments.get("kind")
-        include_completed = arguments.get("include_completed", False)
-        limit = arguments.get("limit", 50)
-        if kind is not None and not isinstance(kind, str):
-            raise ValueError("Missing or invalid argument: kind")
-        if not isinstance(include_completed, bool):
-            raise ValueError("Missing or invalid argument: include_completed")
-        if not isinstance(limit, int) or isinstance(limit, bool):
-            raise ValueError("Missing or invalid argument: limit")
-        return {"items": task_service.list_items(
-            kind=kind, include_completed=include_completed, limit=limit
-        )}
-
-    if action == "tasks.create":
-        kind = _require(arguments, "kind")
-        title = _require(arguments, "title")
-        due = arguments.get("due")
-        detail = arguments.get("detail", "")
-        if due is not None and not isinstance(due, str):
-            raise ValueError("Missing or invalid argument: due")
-        if not isinstance(detail, str):
-            raise ValueError("Missing or invalid argument: detail")
-        return {"item": task_service.create(kind=kind, title=title, due=due, detail=detail)}
-
-    if action == "tasks.update":
-        source_id = _require(arguments, "source_id")
-        title = _require(arguments, "title")
-        due = arguments.get("due")
-        detail = arguments.get("detail", "")
-        if due is not None and not isinstance(due, str):
-            raise ValueError("Missing or invalid argument: due")
-        if not isinstance(detail, str):
-            raise ValueError("Missing or invalid argument: detail")
-        return {"item": task_service.update(
-            source_id, title=title, due=due, detail=detail
-        )}
-
-    if action == "tasks.complete":
-        source_id = _require(arguments, "source_id")
-        completed = arguments.get("completed")
-        if not isinstance(completed, bool):
-            raise ValueError("Missing or invalid argument: completed")
-        return {"item": task_service.set_completed(source_id, completed)}
-
-    if action == "tasks.delete":
-        source_id = _require(arguments, "source_id")
-        if not task_service.delete(source_id):
-            raise LookupError("Task or reminder not found")
-        return {"source_id": source_id}
-
-    if action == "home_assistant.state":
-        entity_id = _require(arguments, "entity_id")
-        return await home_assistant_state(entity_id)
-
-    if action == "home_assistant.service":
-        service = _require(arguments, "service")
-        entity_id = _require(arguments, "entity_id")
-        return await home_assistant(service, entity_id)
-
-    if action == "calendar.events.list":
-        start = _require(arguments, "start")
-        end = _require(arguments, "end")
-        limit = arguments.get("limit", 20)
-        if not isinstance(limit, int) or isinstance(limit, bool):
-            raise ValueError("Missing or invalid argument: limit")
-        return await google_calendar_list_events(start, end, limit)
+    integration_result = await invoke_integration(action, arguments, request_id)
+    if integration_result is not None:
+        return integration_result
 
     raise ValueError("No execution adapter is registered for this action")
 
@@ -400,68 +335,9 @@ def _verify(action: str, result: dict) -> dict:
             "superseded_memory_id": result.get("superseded_memory_id"),
         }
 
-    if action == "tasks.list":
-        items = result.get("items")
-        ok = isinstance(items, list) and all(
-            isinstance(item, dict)
-            and isinstance(item.get("source_id"), str)
-            and item.get("kind") in {"task", "reminder"}
-            and isinstance(item.get("title"), str)
-            and isinstance(item.get("completed"), bool)
-            for item in items
-        )
-        return {"ok": ok, "method": "task_list", "item_count": len(items) if isinstance(items, list) else 0}
-
-    if action in {"tasks.create", "tasks.update"}:
-        item = result.get("item")
-        source_id = item.get("source_id") if isinstance(item, dict) else None
-        stored = task_service.get(source_id) if isinstance(source_id, str) else None
-        ok = bool(stored) and all(
-            stored.get(key) == item.get(key)
-            for key in ("source_id", "kind", "title", "due", "detail", "completed")
-        )
-        return {"ok": ok, "method": "stored_task", "source_id": source_id}
-
-    if action == "tasks.complete":
-        item = result.get("item")
-        source_id = item.get("source_id") if isinstance(item, dict) else None
-        stored = task_service.get(source_id) if isinstance(source_id, str) else None
-        ok = bool(stored) and stored.get("completed") == item.get("completed")
-        return {"ok": ok, "method": "task_state", "source_id": source_id}
-
-    if action == "tasks.delete":
-        source_id = result.get("source_id")
-        ok = isinstance(source_id, str) and task_service.get(source_id) is None
-        return {"ok": ok, "method": "task_absent", "source_id": source_id}
-
-    if action == "home_assistant.state":
-        ok = (
-            result.get("ok") is True
-            and isinstance(result.get("entity_id"), str)
-            and isinstance(result.get("state"), str)
-            and isinstance(result.get("attributes"), dict)
-        )
-        return {"ok": ok, "method": "device_state", "entity_id": result.get("entity_id")}
-
-    if action == "home_assistant.service":
-        return {"ok": result.get("ok") is True, "method": "service_response"}
-
-    if action == "calendar.events.list":
-        events = result.get("events")
-        window = result.get("window")
-        ok = result.get("ok") is True and isinstance(events, list) and isinstance(window, dict)
-        if ok:
-            for event in events:
-                if not isinstance(event, dict) or not all(
-                    isinstance(event.get(key), str) for key in ("id", "summary", "start", "end", "status")
-                ) or not isinstance(event.get("all_day"), bool):
-                    ok = False
-                    break
-        return {
-            "ok": ok,
-            "method": "calendar_events",
-            "event_count": len(events) if isinstance(events, list) else 0,
-        }
+    integration_verification = verify_integration(action, result)
+    if integration_verification is not None:
+        return integration_verification
 
     return {"ok": False, "method": "unregistered"}
 
