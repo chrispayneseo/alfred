@@ -1,8 +1,8 @@
 """Policy-gated cloud model execution for Alfred Core.
 
-Cloud providers are specialists, not authorities. This module selects/configures
-them deterministically, blocks unapproved personal prompts, and audits only
-metadata/fingerprints rather than raw prompt content.
+Cloud providers are specialists, not authorities. Phase 13 centralises specialist
+selection and context budgets, while this module remains the only provider-call
+boundary and still owns privacy approvals, execution and audit.
 """
 
 from __future__ import annotations
@@ -14,13 +14,8 @@ from .cloud_providers import CloudProviderError, cloud_complete
 from .conversation_store import record_assistant_for_request
 from .db import connection, create_approval, record_audit, resolve_approval
 from .privacy import is_private, needs_web_search
-from .providers import enabled_cloud_providers, get_provider
-
-
-CODING_TERMS = (
-    "code", "coding", "debug", "implement", "refactor", "python", "typescript",
-    "javascript", "repository", "repo", "pull request", "architecture",
-)
+from .providers import get_provider
+from .specialist_orchestration import MAX_CLOUD_PROMPT_CHARS, choose_cloud_provider
 
 
 def _fingerprint(value: dict) -> str:
@@ -29,23 +24,8 @@ def _fingerprint(value: dict) -> str:
 
 
 def choose_provider(message: str) -> str:
-    """Choose a specialist deterministically; availability is checked separately."""
-    lowered = message.casefold()
-    if "use claude" in lowered:
-        return "claude"
-    if "use chatgpt" in lowered or "use openai" in lowered:
-        return "openai"
-    if needs_web_search(message):
-        return "openai"
-
-    enabled = {provider.name for provider in enabled_cloud_providers()}
-    if any(term in lowered for term in CODING_TERMS) and "claude" in enabled:
-        return "claude"
-    if "openai" in enabled:
-        return "openai"
-    if "claude" in enabled:
-        return "claude"
-    return "openai"
+    """Compatibility entrypoint backed by the deterministic Phase 13 broker."""
+    return choose_cloud_provider(message)
 
 
 def _latest_approval(request_id: str, action: str, scope_hash: str) -> dict | None:
@@ -80,10 +60,12 @@ async def execute_cloud_request(
     provider: str | None = None,
     confirmed: bool = False,
 ) -> dict:
-    """Execute a cloud specialist request after privacy/configuration checks."""
+    """Execute one cloud specialist request after privacy/configuration checks."""
     clean = prompt.strip()
     if not clean:
         return {"state": "failed", "error": "Prompt is required"}
+    if len(clean) > MAX_CLOUD_PROMPT_CHARS:
+        return {"state": "failed", "error": "Prompt exceeds Alfred's cloud context budget"}
 
     provider_name = provider or choose_provider(clean)
     provider_meta = get_provider(provider_name)
@@ -108,8 +90,6 @@ async def execute_cloud_request(
         existed = approval is not None
         if approval is None:
             approval = _new_approval(request_id, provider_name, scope_hash)
-        # Confirmation can resolve only the exact pending approval that existed
-        # before this call. A changed prompt gets a new pending scope instead.
         if confirmed and existed and approval.get("state") == "pending":
             resolve_approval(approval["id"], True)
             approval = _latest_approval(request_id, action, scope_hash) or approval
@@ -160,11 +140,7 @@ async def execute_cloud_request(
         request_id,
     )
     try:
-        result = await cloud_complete(
-            provider_name,
-            clean,
-            web_search=web_search,
-        )
+        result = await cloud_complete(provider_name, clean, web_search=web_search)
     except CloudProviderError as exc:
         record_audit(
             "cloud.failed",
@@ -211,8 +187,6 @@ async def execute_cloud_request(
     )
     reply = result.get("reply")
     if isinstance(reply, str) and reply.strip():
-        # The cloud model never receives prior conversation here. Its completed
-        # response is stored only after it returns, for future local continuity.
         record_assistant_for_request(request_id, reply)
     return {
         "state": "completed",

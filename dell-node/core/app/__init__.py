@@ -32,6 +32,8 @@ from . import operations as operations
 from . import phase11_acceptance as phase11_acceptance
 from . import projects as projects
 from . import phase12_acceptance as phase12_acceptance
+from . import specialist_orchestration as specialist_orchestration
+from . import phase13_acceptance as phase13_acceptance
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -48,10 +50,12 @@ for extra_router in (
     authenticated_web.router, phase8_acceptance.router, knowledge.router,
     phase9_acceptance.router, proactive_intelligence.router, phase10_acceptance.router,
     operations.router, phase11_acceptance.router, projects.router, phase12_acceptance.router,
+    specialist_orchestration.router, phase13_acceptance.router,
 ):
     proactive.router.routes.extend(extra_router.routes)
 
-# Phase 12 coordinates existing operations/goals and adds no executor hook.
+# Phase 13 centralises provider planning but provider execution/privacy remains in
+# cloud_execution. It adds no executor hook or second provider-call path.
 goal_hooks.install()
 browser_actions.install()
 authenticated_web.install()
