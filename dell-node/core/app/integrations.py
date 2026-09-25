@@ -73,6 +73,16 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
             Capability("calendar.events.delete", "Delete a Google Calendar event", "write", True, ("calendar_event",), True),
         ),
     ),
+    IntegrationDefinition(
+        id="gmail",
+        name="Gmail",
+        category="email",
+        boundary="cloud",
+        capabilities=(
+            Capability("email.messages.search", "Search Gmail with a bounded query", "read", True, ("email_metadata", "search_query")),
+            Capability("email.message.get", "Read one Gmail message", "read", True, ("email_metadata", "email_body")),
+        ),
+    ),
 )
 
 
@@ -84,6 +94,8 @@ def _configured(integration_id: str) -> bool:
         return bool(settings.ha_url and settings.ha_token)
     if integration_id == "google_calendar":
         return bool(settings.google_client_id and settings.google_client_secret and settings.google_refresh_token and settings.google_calendar_id)
+    if integration_id == "gmail":
+        return bool(settings.gmail_client_id and settings.gmail_client_secret and settings.gmail_refresh_token and settings.gmail_user_id)
     return False
 
 
@@ -155,6 +167,7 @@ def action_available(action: str) -> tuple[bool, str | None]:
 async def integration_health() -> list[dict]:
     """Return health states without returning secrets, entities or user content."""
     from .clients import home_assistant_health
+    from .gmail import health as gmail_health
     from .google_calendar import health as google_calendar_health
 
     results: list[dict] = []
@@ -173,6 +186,8 @@ async def integration_health() -> list[dict]:
             item.update(await home_assistant_health())
         elif integration["id"] == "google_calendar":
             item.update(await google_calendar_health())
+        elif integration["id"] == "gmail":
+            item.update(await gmail_health())
         else:
             item["state"] = integration["state"]
         results.append(item)
