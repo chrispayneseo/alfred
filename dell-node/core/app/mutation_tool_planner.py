@@ -15,6 +15,7 @@ from .integrations import action_owner
 
 
 ENTITY_RE = re.compile(r"\b([a-z_]+\.[A-Za-z0-9_]+)\b")
+EMAIL_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 TASK_RE = re.compile(r"^\s*(?:add|create)\s+(?:a\s+)?task\s*:\s*(.+?)\s*$", re.IGNORECASE)
 REMINDER_RE = re.compile(
     r"^\s*(?:add|create)\s+(?:a\s+)?reminder\s*:\s*(.+?)\s+due\s+(\d{4}-\d{2}-\d{2})\s*$",
@@ -105,7 +106,13 @@ def plan_mutation_tool(message: str) -> MutationToolPlan | None:
         recipient = draft.group(1).strip()
         subject = draft.group(2).strip()
         body = draft.group(3).strip()
-        if not recipient or not subject or not body:
+        if (
+            not EMAIL_ADDRESS_RE.fullmatch(recipient)
+            or not subject
+            or "\r" in subject
+            or "\n" in subject
+            or not body
+        ):
             return None
         return _validated(
             "email.draft.create",
