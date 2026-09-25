@@ -65,6 +65,25 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(result["decision"], "connection_needed")
         self.assertEqual(stored["state"], "connection_needed")
 
+    def test_tool_planning_is_a_valid_nonterminal_state(self):
+        request = {
+            "request_id": "req-tool-plan",
+            "conversation_id": "req-tool-plan",
+            "channel": "api",
+            "message": "What's on my calendar tomorrow?",
+        }
+        lifecycle.begin_request(request)
+        updated = lifecycle.transition_request(
+            "req-tool-plan",
+            "tool_planning",
+            route="tool",
+            provider="integration:google_calendar",
+        )
+        self.assertEqual(updated["state"], "tool_planning")
+        self.assertEqual(updated["route"], "tool")
+        self.assertEqual(updated["provider"], "integration:google_calendar")
+        self.assertNotIn("tool_planning", lifecycle.TERMINAL_STATES)
+
     def test_model_failure_is_recorded_without_error_text(self):
         with patch.object(orchestrator, "ollama_chat", new=AsyncMock(side_effect=RuntimeError("secret failure detail"))):
             with self.assertRaises(RuntimeError):
