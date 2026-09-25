@@ -37,9 +37,11 @@ def install() -> None:
         return result
 
     def recover_with_goals() -> dict:
+        # Keep the established Phase 3 return contract byte-for-byte compatible;
+        # goal reconciliation is durable local follow-up state, not a new recovery
+        # response field.
         result = original_recover()
-        result = dict(result)
-        result["goals"] = goals.recover_after_restart()
+        goals.recover_after_restart()
         return result
 
     execution.execute_plan = execute_plan_with_goal_guard
