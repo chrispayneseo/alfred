@@ -93,6 +93,7 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
             Capability("email.messages.search", "Search Gmail with a bounded query", "read", True, ("email_metadata", "search_query")),
             Capability("email.message.get", "Read one Gmail message", "read", True, ("email_metadata", "email_body")),
             Capability("email.draft.create", "Create one plain-text Gmail draft", "write", True, ("email_recipient", "email_subject", "email_body"), True),
+            Capability("email.draft.send", "Send one unchanged Alfred-created Gmail draft", "action", True, ("email_draft_id",), True),
         ),
     ),
 )
@@ -119,9 +120,12 @@ def _capability_enabled(definition: IntegrationDefinition, capability: Capabilit
         return False
     if definition.id == "google_calendar" and capability.requires_write_enable:
         return bool(config.settings.google_calendar_write_enabled)
-    if definition.id == "gmail" and capability.requires_write_enable:
+    if definition.id == "gmail" and capability.action == "email.draft.create":
         from .gmail_write import enabled as gmail_write_enabled
         return gmail_write_enabled()
+    if definition.id == "gmail" and capability.action == "email.draft.send":
+        from .gmail_write import send_enabled as gmail_send_enabled
+        return gmail_send_enabled()
     return True
 
 
@@ -210,7 +214,7 @@ async def integration_health() -> list[dict]:
             item.update(await google_calendar_health())
         elif integration["id"] == "gmail":
             item.update(await gmail_health())
-            item["draft_write"] = await gmail_write_health()
+            item["write"] = await gmail_write_health()
         else:
             item["state"] = integration["state"]
         results.append(item)
