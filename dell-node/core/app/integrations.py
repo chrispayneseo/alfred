@@ -44,6 +44,13 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
         boundary="local_network",
         capabilities=(
             Capability(
+                action="home_assistant.state",
+                title="Read one Home Assistant entity state",
+                mode="read",
+                sends_off_device=False,
+                data_types=("device_state",),
+            ),
+            Capability(
                 action="home_assistant.service",
                 title="Run a Home Assistant service",
                 mode="action",
