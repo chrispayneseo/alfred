@@ -26,6 +26,11 @@ CALENDAR_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2}))\s*$",
     re.IGNORECASE,
 )
+EMAIL_DRAFT_RE = re.compile(
+    r"^\s*(?:create|make)\s+(?:an?\s+)?email\s+draft\s+to\s+(\S+)\s+"
+    r"subject\s*:\s*(.+?)\s+body\s*:\s*(.+?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
 HA_RE = re.compile(r"^\s*turn\s+(on|off)\s+([a-z_]+\.[A-Za-z0-9_]+)\s*$", re.IGNORECASE)
 
 
@@ -93,6 +98,19 @@ def plan_mutation_tool(message: str) -> MutationToolPlan | None:
             "calendar.events.create",
             {"summary": summary[:500], "start": event.group(2), "end": event.group(3)},
             "Create the explicitly specified Calendar event after owner confirmation.",
+        )
+
+    draft = EMAIL_DRAFT_RE.fullmatch(clean)
+    if draft:
+        recipient = draft.group(1).strip()
+        subject = draft.group(2).strip()
+        body = draft.group(3).strip()
+        if not recipient or not subject or not body:
+            return None
+        return _validated(
+            "email.draft.create",
+            {"to": recipient[:320], "subject": subject[:300], "body": body[:10000]},
+            "Create the explicitly specified Gmail draft after owner confirmation.",
         )
 
     home = HA_RE.fullmatch(clean)
