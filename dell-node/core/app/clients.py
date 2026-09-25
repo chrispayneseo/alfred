@@ -106,3 +106,19 @@ async def home_assistant(service: str, entity_id: str) -> dict:
             headers={"Authorization": f"Bearer {settings.ha_token}"}, json={"entity_id": entity_id})
         response.raise_for_status()
         return {"ok": True, "service": service, "entity_id": entity_id}
+
+
+async def home_assistant_health() -> dict:
+    """Probe Home Assistant without returning credentials or entity data."""
+    if not settings.ha_url or not settings.ha_token:
+        return {"state": "not_configured"}
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(
+                f"{settings.ha_url}/api/",
+                headers={"Authorization": f"Bearer {settings.ha_token}"},
+            )
+            response.raise_for_status()
+        return {"state": "ready"}
+    except Exception as exc:
+        return {"state": "unavailable", "error_type": type(exc).__name__}
