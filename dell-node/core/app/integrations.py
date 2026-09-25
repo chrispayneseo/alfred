@@ -59,16 +59,20 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
             ),
         ),
     ),
-    # Declared now so Calendar can be added without inventing a separate
-    # registration model. No Calendar actions are executable until a later
-    # Phase 3 slice explicitly registers them with Core policy + adapters.
     IntegrationDefinition(
         id="google_calendar",
         name="Google Calendar",
         category="calendar",
         boundary="cloud",
-        capabilities=(),
-        planned=True,
+        capabilities=(
+            Capability(
+                action="calendar.events.list",
+                title="List Google Calendar events in a bounded time window",
+                mode="read",
+                sends_off_device=True,
+                data_types=("calendar_event", "time_window"),
+            ),
+        ),
     ),
 )
 
@@ -77,6 +81,13 @@ def _configured(integration_id: str) -> bool:
     settings = config.settings
     if integration_id == "home_assistant":
         return bool(settings.ha_url and settings.ha_token)
+    if integration_id == "google_calendar":
+        return bool(
+            settings.google_client_id
+            and settings.google_client_secret
+            and settings.google_refresh_token
+            and settings.google_calendar_id
+        )
     return False
 
 
@@ -125,6 +136,7 @@ def action_available(action: str) -> tuple[bool, str | None]:
 async def integration_health() -> list[dict]:
     """Return health states without returning secrets, entities or user content."""
     from .clients import home_assistant_health
+    from .google_calendar import health as google_calendar_health
 
     results: list[dict] = []
     for integration in integration_registry():
@@ -138,6 +150,8 @@ async def integration_health() -> list[dict]:
             item["state"] = "planned"
         elif integration["id"] == "home_assistant":
             item.update(await home_assistant_health())
+        elif integration["id"] == "google_calendar":
+            item.update(await google_calendar_health())
         else:
             item["state"] = integration["state"]
         results.append(item)

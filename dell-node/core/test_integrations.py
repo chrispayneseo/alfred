@@ -11,6 +11,7 @@ class IntegrationFrameworkTests(unittest.TestCase):
     def test_tool_registry_exposes_integration_owner(self):
         tools = {item["name"]: item for item in tool_registry()}
         self.assertEqual(tools["home_assistant.service"]["integration"], "home_assistant")
+        self.assertEqual(tools["calendar.events.list"]["integration"], "google_calendar")
         self.assertEqual(tools["memory.read"]["integration"], "core")
 
     def test_every_manifest_action_is_registered_with_core_policy(self):
@@ -22,12 +23,34 @@ class IntegrationFrameworkTests(unittest.TestCase):
         self.assertTrue(actions)
         self.assertTrue(actions.issubset(set(TOOLS)))
 
-    def test_calendar_is_planned_and_has_no_executable_capabilities(self):
+    def test_calendar_is_read_only_and_not_configured_by_default(self):
         calendar = integrations.get_integration("google_calendar")
         self.assertIsNotNone(calendar)
-        self.assertEqual(calendar["state"], "planned")
+        self.assertEqual(calendar["state"], "not_configured")
         self.assertFalse(calendar["configured"])
-        self.assertEqual(calendar["capabilities"], [])
+        self.assertEqual([item["action"] for item in calendar["capabilities"]], ["calendar.events.list"])
+        self.assertEqual(calendar["capabilities"][0]["mode"], "read")
+        self.assertTrue(calendar["capabilities"][0]["sends_off_device"])
+        self.assertNotIn("calendar.events.create", TOOLS)
+        self.assertNotIn("calendar.events.update", TOOLS)
+        self.assertNotIn("calendar.events.delete", TOOLS)
+
+    def test_calendar_registry_never_exposes_oauth_credentials(self):
+        secrets = ("client-secret-id", "client-secret-value", "refresh-secret-value")
+        patched = replace(
+            config.settings,
+            google_client_id=secrets[0],
+            google_client_secret=secrets[1],
+            google_refresh_token=secrets[2],
+            google_calendar_id="primary",
+        )
+        with patch.object(config, "settings", patched):
+            calendar = integrations.get_integration("google_calendar")
+        self.assertTrue(calendar["configured"])
+        self.assertEqual(calendar["state"], "ready")
+        serialized = str(calendar)
+        for secret in secrets:
+            self.assertNotIn(secret, serialized)
 
     def test_home_assistant_not_configured_fails_availability_check(self):
         patched = replace(config.settings, ha_url="", ha_token="")
@@ -62,12 +85,11 @@ class IntegrationFrameworkTests(unittest.TestCase):
         self.assertNotIn("entity_id", serialized)
         home = next(item for item in health if item["id"] == "home_assistant")
         self.assertEqual(home["state"], "ready")
+        calendar = next(item for item in health if item["id"] == "google_calendar")
+        self.assertEqual(calendar["state"], "not_configured")
 
-    def test_planned_action_is_not_available_even_if_asked_directly(self):
+    def test_unregistered_calendar_write_remains_core_denied(self):
         available, reason = integrations.action_available("calendar.events.create")
-        # The action is not registered as a capability yet, so the integration
-        # framework does not claim ownership; Core itself will deny it because
-        # it is absent from TOOLS.
         self.assertTrue(available)
         self.assertIsNone(reason)
         self.assertNotIn("calendar.events.create", TOOLS)

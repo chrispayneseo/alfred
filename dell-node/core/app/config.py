@@ -18,6 +18,14 @@ class Settings:
     mqtt_username: str = os.getenv("MQTT_USERNAME", "")
     mqtt_password: str = os.getenv("MQTT_PASSWORD", "")
 
+    # Google Calendar is optional. Credentials stay in the Dell environment and
+    # are never exposed by the integration registry or health endpoints.
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    google_refresh_token: str = os.getenv("GOOGLE_REFRESH_TOKEN", "")
+    google_calendar_id: str = os.getenv("GOOGLE_CALENDAR_ID", "primary") or "primary"
+    google_timeout_seconds: float = float(os.getenv("ALFRED_GOOGLE_TIMEOUT_SECONDS", "20"))
+
     # Optional cloud specialists. A missing key disables the provider in Core.
     # These names intentionally match the existing Alfred web/server environment.
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")

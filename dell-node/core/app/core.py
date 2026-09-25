@@ -28,11 +28,15 @@ TOOLS = {
     "memory.candidate.promote": {"risk": "safe_write", "permission": "confirm", "verification": "promoted_memory"},
     "home_assistant.state": {"risk": "read", "permission": "auto", "verification": "device_state"},
     "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
+    "calendar.events.list": {"risk": "read", "permission": "auto", "verification": "calendar_events"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
-    if action in {"memory.read", "memory.candidate.list", "home_assistant.state", "recall.search", "chat.local", "route"}:
+    if action in {
+        "memory.read", "memory.candidate.list", "home_assistant.state",
+        "calendar.events.list", "recall.search", "chat.local", "route",
+    }:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
     if action in {"memory.candidate.propose", "memory.candidate.dismiss"}:
         return PolicyDecision(
