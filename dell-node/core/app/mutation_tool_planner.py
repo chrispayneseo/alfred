@@ -32,6 +32,10 @@ EMAIL_DRAFT_RE = re.compile(
     r"subject\s*:\s*(.+?)\s+body\s*:\s*(.+?)\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+SEND_DRAFT_RE = re.compile(
+    r"^\s*send\s+(?:email\s+)?draft\s+([A-Za-z0-9_-]{1,256})\s*$",
+    re.IGNORECASE,
+)
 HA_RE = re.compile(r"^\s*turn\s+(on|off)\s+([a-z_]+\.[A-Za-z0-9_]+)\s*$", re.IGNORECASE)
 
 
@@ -51,7 +55,9 @@ def _validated(action: str, arguments: dict, reason: str) -> MutationToolPlan | 
     if not definition:
         return None
     policy = decide(action)
-    if policy.decision != "confirm" or policy.level not in {"safe_write", "reversible", "external"}:
+    if policy.decision != "confirm" or policy.level not in {
+        "safe_write", "reversible", "external", "high_impact",
+    }:
         return None
     return MutationToolPlan(
         action=action,
@@ -118,6 +124,14 @@ def plan_mutation_tool(message: str) -> MutationToolPlan | None:
             "email.draft.create",
             {"to": recipient[:320], "subject": subject[:300], "body": body[:10000]},
             "Create the explicitly specified Gmail draft after owner confirmation.",
+        )
+
+    send_draft = SEND_DRAFT_RE.fullmatch(clean)
+    if send_draft:
+        return _validated(
+            "email.draft.send",
+            {"draft_id": send_draft.group(1)},
+            "Send the explicitly identified unchanged Alfred-created Gmail draft after owner confirmation.",
         )
 
     home = HA_RE.fullmatch(clean)
