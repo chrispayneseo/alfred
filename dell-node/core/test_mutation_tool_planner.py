@@ -78,7 +78,10 @@ class MutationToolPlannerTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM approvals WHERE request_id = ? AND state = 'pending'",
                 (result["request_id"],),
             ).fetchone()[0]
-            executions = connection.execute(
+            execution_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_executions'"
+            ).fetchone()
+            executions = 0 if execution_table is None else connection.execute(
                 "SELECT COUNT(*) FROM core_executions WHERE request_id = ?",
                 (result["request_id"],),
             ).fetchone()[0]
