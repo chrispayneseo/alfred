@@ -64,3 +64,4 @@ jobs:
           bash -n ../scripts/phase4-smoke.sh
           bash -n ../scripts/phase4-brief-smoke.sh
           bash -n ../scripts/phase4-schedule-smoke.sh
+          bash -n ../scripts/phase4-settings-smoke.sh

@@ -7,6 +7,7 @@ import { LocalMemorySettings } from "../components/LocalMemorySettings";
 import { ModelCostDashboard } from "../components/ModelCostDashboard";
 import { NewsTopicSettings } from "../components/NewsTopicSettings";
 import { PermissionsTrust } from "../components/PermissionsTrust";
+import { ProactiveSettings } from "../components/ProactiveSettings";
 import { ProjectGroupingSettings } from "../components/ProjectGroupingSettings";
 import { RecurringTaskSettings } from "../components/RecurringTaskSettings";
 import { Screen } from "../components/Screen";
@@ -19,9 +20,7 @@ interface SettingsSection {
 }
 
 // Below `lg`, these five just become section headings in one continuous
-// scroll (unchanged from before this fix — mobile never had a section nav
-// and doesn't get one now). At `lg+`, they back the sticky index sidebar
-// in the render below.
+// scroll. At `lg+`, they back the sticky index sidebar in the render below.
 const SECTIONS: SettingsSection[] = [
   { id: "account-security", label: "Account & Security" },
   { id: "automations", label: "Automations" },
@@ -87,6 +86,10 @@ export function SettingsScreen() {
 
           <section id="automations" className="mb-8 scroll-mt-6">
             <SectionHeading>Automations</SectionHeading>
+            <div className="mb-6">
+              <SubHeading>Proactive assistant</SubHeading>
+              <ProactiveSettings />
+            </div>
             <div className="mb-6">
               <SubHeading>Weekly digest</SubHeading>
               <WeeklyDigestSettings />
