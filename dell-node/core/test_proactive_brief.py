@@ -56,6 +56,12 @@ class ProactiveBriefTests(unittest.IsolatedAsyncioTestCase):
              patch.object(proactive.gmail, "configured", return_value=False):
             await proactive.refresh(now=self.now)
 
+    def test_phase4b_routes_are_registered_on_existing_proactive_router(self):
+        paths = {route.path for route in proactive.router.routes}
+        self.assertIn("/v1/core/proactive/brief", paths)
+        self.assertIn("/v1/core/proactive/interruption", paths)
+        self.assertIn("/v1/core/proactive/items/{item_id}/surface", paths)
+
     async def test_brief_groups_urgent_before_lower_priority(self):
         task_service.create(kind="reminder", title="Renew certificate", due="2026-09-25")
         task_service.create(kind="task", title="Prepare notes", due="2026-09-26")
