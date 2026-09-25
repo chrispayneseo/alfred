@@ -1,7 +1,8 @@
 """Deterministic Phase 4 briefing and interruption policy.
 
-Consumes Alfred's local proactive feed only. No model calls, external service
-calls, or outbound delivery happen here.
+Consumes Alfred's local proactive feed only. Phase 4I adds bounded cross-source
+reasoning before ranking. No model calls, external service calls, or outbound
+delivery happen here.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
+from . import proactive_reasoning
 from .config import settings
 from .db import connection, record_audit
 
@@ -35,13 +37,44 @@ def _last_surface_age_minutes(now: datetime) -> float | None:
     return max(0.0, (now.astimezone(timezone.utc) - surfaced).total_seconds() / 60.0)
 
 
+def _reasoned_feed(*, now: datetime) -> tuple[dict, dict]:
+    from . import proactive
+    data = proactive.feed(limit=100, now=now)
+    reasoning = proactive_reasoning.apply_cross_source_reasoning(data.get("items", []))
+    return data, reasoning
+
+
+def _public_item(item: dict) -> dict:
+    priority = int(item.get("priority", 0))
+    public = {
+        "id": item.get("id"),
+        "source": item.get("source"),
+        "kind": item.get("kind"),
+        "priority": priority,
+        "base_priority": int(item.get("base_priority", priority)),
+        "band": (
+            "urgent" if priority >= URGENT_PRIORITY
+            else "important" if priority >= IMPORTANT_PRIORITY
+            else "later"
+        ),
+        "title": item.get("title"),
+        "summary": item.get("summary"),
+    }
+    boost = int(item.get("reasoning_boost", 0))
+    if boost > 0:
+        public["reasoning_boost"] = boost
+        public["reasoning"] = list(item.get("reasoning") or [])
+        public["correlated_sources"] = list(item.get("correlated_sources") or [])
+    return public
+
+
 def build_brief(*, limit: int = 8, now: datetime | None = None) -> dict:
     from . import proactive
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
         raise ValueError("Brief limit must be between 1 and 20")
     local_now = proactive._aware_now(now)
-    data = proactive.feed(limit=100, now=local_now)
-    items = list(data.get("items", []))
+    data, reasoning = _reasoned_feed(now=local_now)
+    items = list(reasoning.get("items", []))
     urgent = [x for x in items if int(x.get("priority", 0)) >= URGENT_PRIORITY]
     important = [x for x in items if IMPORTANT_PRIORITY <= int(x.get("priority", 0)) < URGENT_PRIORITY]
     later = [x for x in items if int(x.get("priority", 0)) < IMPORTANT_PRIORITY]
@@ -58,15 +91,22 @@ def build_brief(*, limit: int = 8, now: datetime | None = None) -> dict:
         "generated_at": local_now.isoformat(),
         "headline": headline,
         "quiet_hours": bool(data.get("quiet_hours")),
-        "counts": {"total": len(items), "urgent": len(urgent), "important": len(important), "later": len(later)},
-        "items": [{
-            "id": x.get("id"), "source": x.get("source"), "kind": x.get("kind"),
-            "priority": int(x.get("priority", 0)),
-            "band": "urgent" if int(x.get("priority", 0)) >= URGENT_PRIORITY else "important" if int(x.get("priority", 0)) >= IMPORTANT_PRIORITY else "later",
-            "title": x.get("title"), "summary": x.get("summary"),
-        } for x in selected],
+        "counts": {
+            "total": len(items),
+            "urgent": len(urgent),
+            "important": len(important),
+            "later": len(later),
+        },
+        "items": [_public_item(item) for item in selected],
         "delivery": "disabled",
         "synthesis": "deterministic_local",
+        "reasoning": {
+            "mode": reasoning.get("mode"),
+            "cluster_count": int(reasoning.get("cluster_count", 0)),
+            "boosted_items": int(reasoning.get("boosted_items", 0)),
+            "creates_urgent": bool(reasoning.get("creates_urgent", False)),
+            "cloud_models": bool(reasoning.get("cloud_models", False)),
+        },
     }
 
 
@@ -75,8 +115,11 @@ def interruption_decision(*, now: datetime | None = None) -> dict:
     local_now = proactive._aware_now(now)
     if proactive.quiet_hours_active(local_now):
         return {"decision": "hold_quiet_hours", "item": None, "delivery": "disabled"}
-    data = proactive.feed(limit=100, now=local_now)
-    candidates = [x for x in data.get("items", []) if int(x.get("priority", 0)) >= int(settings.proactive_min_priority)]
+    _, reasoning = _reasoned_feed(now=local_now)
+    candidates = [
+        x for x in reasoning.get("items", [])
+        if int(x.get("priority", 0)) >= int(settings.proactive_min_priority)
+    ]
     if not candidates:
         return {"decision": "nothing_to_surface", "item": None, "delivery": "disabled"}
     top = candidates[0]
@@ -90,10 +133,22 @@ def interruption_decision(*, now: datetime | None = None) -> dict:
             "item": None,
             "delivery": "disabled",
         }
+    item = {
+        "id": top.get("id"),
+        "source": top.get("source"),
+        "kind": top.get("kind"),
+        "priority": priority,
+        "base_priority": int(top.get("base_priority", priority)),
+        "title": top.get("title"),
+        "summary": top.get("summary"),
+    }
+    if int(top.get("reasoning_boost", 0)) > 0:
+        item["reasoning_boost"] = int(top.get("reasoning_boost", 0))
+        item["reasoning"] = list(top.get("reasoning") or [])
+        item["correlated_sources"] = list(top.get("correlated_sources") or [])
     return {
         "decision": "surface_candidate",
-        "item": {"id": top.get("id"), "source": top.get("source"), "kind": top.get("kind"), "priority": priority,
-                 "title": top.get("title"), "summary": top.get("summary")},
+        "item": item,
         "delivery": "disabled",
     }
 
@@ -114,7 +169,7 @@ def mark_surfaced(item_id: str, *, now: datetime | None = None) -> bool:
 
 
 def register_routes() -> None:
-    """Attach Phase 4B endpoints to the already-authenticated proactive router."""
+    """Attach briefing endpoints to the already-authenticated proactive router."""
     global _ROUTES_REGISTERED
     if _ROUTES_REGISTERED:
         return
