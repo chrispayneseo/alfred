@@ -19,12 +19,13 @@ from .db import record_audit
 from .execution import execute_tool
 from .lifecycle import begin_request, transition_request
 from .memory_service import retrieve_context
+from .mutation_tool_planner import plan_mutation_tool
 from .privacy import cloud_requested, explicit_cloud, needs_connected_data
 from .read_tool_planner import plan_read_tool, render_result as render_tool_result, sources_for_result
 from .recall_store import recall_intent
 
 Route = Literal[
-    "local", "tool", "tool_failed", "cloud", "cloud_ready", "cloud_failed",
+    "local", "tool", "tool_failed", "denied", "cloud", "cloud_ready", "cloud_failed",
     "approval_required", "connection_needed",
 ]
 
@@ -93,33 +94,87 @@ async def orchestrate(
     clean = request["message"]
 
     begin_request(request)
-    # Read context before adding the current turn so the current message is not
-    # duplicated in the local model history.
     short_term_history = merge_history(recent_turns(conversation_id), history)
     record_turn(conversation_id, "user", clean, request_id=request_id)
 
     transition_request(request_id, "routing")
     record_audit(
         "request.received",
-        {
-            "channel": channel,
-            "operation": "orchestrate",
-            "short_term_turns": len(short_term_history),
-        },
+        {"channel": channel, "operation": "orchestrate", "short_term_turns": len(short_term_history)},
         request_id,
         conversation_id,
     )
 
     try:
-        # Phase 3 read planner runs before the generic connected-data block. It
-        # may only emit registered read+auto tools; the executor still performs
-        # integration availability, policy, execution and verification checks.
+        # Mutations are planned before reads, but only exact deterministic forms
+        # can produce a plan. The first executor pass is deliberately unconfirmed:
+        # it may create an exact-scope approval, but cannot perform the mutation.
+        mutation_plan = plan_mutation_tool(clean)
+        if mutation_plan is not None:
+            provider = f"integration:{mutation_plan.integration}"
+            transition_request(request_id, "tool_planning", route="approval_required", provider=provider)
+            execution = await execute_tool(
+                request_id=request_id,
+                action=mutation_plan.action,
+                arguments=mutation_plan.arguments,
+            )
+            state = execution.get("state")
+            if state == "approval_required":
+                approval = execution.get("approval") if isinstance(execution.get("approval"), dict) else None
+                reply = "I can do that, but this change needs your confirmation first."
+                record_turn(conversation_id, "assistant", reply, request_id=request_id)
+                result = OrchestrationResult(
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    route="approval_required",
+                    reply=reply,
+                    provider=provider,
+                    reason=mutation_plan.reason,
+                    memory_sent=False,
+                    approval=approval,
+                    tool_action=mutation_plan.action,
+                    integration=mutation_plan.integration,
+                )
+                transition_request(request_id, "awaiting_approval", route=result.route, provider=provider)
+                record_audit(
+                    "request.tool_approval_required",
+                    {"action": mutation_plan.action, "integration": mutation_plan.integration,
+                     "approval_id": approval.get("id") if approval else None},
+                    request_id,
+                    conversation_id,
+                )
+                return result.to_dict()
+
+            error = execution.get("error") or "The requested integration change was denied."
+            reply = error
+            record_turn(conversation_id, "assistant", reply, request_id=request_id)
+            result = OrchestrationResult(
+                request_id=request_id,
+                conversation_id=conversation_id,
+                route="denied",
+                reply=reply,
+                provider=provider,
+                reason=error,
+                memory_sent=False,
+                tool_action=mutation_plan.action,
+                integration=mutation_plan.integration,
+            )
+            transition_request(request_id, "denied", route="denied", provider=provider)
+            record_audit(
+                "request.tool_denied",
+                {"action": mutation_plan.action, "integration": mutation_plan.integration},
+                request_id,
+                conversation_id,
+            )
+            return result.to_dict()
+
+        # Phase 3 read planner may only emit registered read+auto tools; the
+        # executor still performs integration availability, policy, execution
+        # and verification checks.
         read_plan = plan_read_tool(clean)
         if read_plan is not None:
             transition_request(
-                request_id,
-                "tool_planning",
-                route="tool",
+                request_id, "tool_planning", route="tool",
                 provider=f"integration:{read_plan.integration}",
             )
             execution = await execute_tool(
@@ -135,25 +190,16 @@ async def orchestrate(
                 provider = f"integration:{read_plan.integration}"
                 record_turn(conversation_id, "assistant", reply, request_id=request_id)
                 result = OrchestrationResult(
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    route="tool",
-                    reply=reply,
-                    provider=provider,
-                    reason=read_plan.reason,
-                    sources=sources,
-                    memory_sent=False,
-                    tool_action=read_plan.action,
+                    request_id=request_id, conversation_id=conversation_id, route="tool",
+                    reply=reply, provider=provider, reason=read_plan.reason, sources=sources,
+                    memory_sent=False, tool_action=read_plan.action,
                     integration=read_plan.integration,
                 )
                 transition_request(request_id, "completed", route=result.route, provider=provider)
                 record_audit(
                     "request.tool_executed",
-                    {
-                        "action": read_plan.action,
-                        "integration": read_plan.integration,
-                        "source_count": len(sources),
-                    },
+                    {"action": read_plan.action, "integration": read_plan.integration,
+                     "source_count": len(sources)},
                     request_id,
                     conversation_id,
                 )
@@ -167,22 +213,11 @@ async def orchestrate(
             else:
                 route = "tool_failed"
                 reply = "The integration could not complete that read safely."
-                transition_request(
-                    request_id,
-                    "failed",
-                    route=route,
-                    error_type="IntegrationReadError",
-                )
+                transition_request(request_id, "failed", route=route, error_type="IntegrationReadError")
             result = OrchestrationResult(
-                request_id=request_id,
-                conversation_id=conversation_id,
-                route=route,
-                reply=reply,
-                provider=f"integration:{read_plan.integration}",
-                reason=error,
-                memory_sent=False,
-                tool_action=read_plan.action,
-                integration=read_plan.integration,
+                request_id=request_id, conversation_id=conversation_id, route=route,
+                reply=reply, provider=f"integration:{read_plan.integration}", reason=error,
+                memory_sent=False, tool_action=read_plan.action, integration=read_plan.integration,
             )
             record_turn(conversation_id, "assistant", reply, request_id=request_id)
             record_audit(
@@ -219,25 +254,16 @@ async def orchestrate(
                 reply = await recall_answerer(clean, sources)
             provider = "ollama.chat" if sources else "deterministic"
             result = OrchestrationResult(
-                request_id=request_id,
-                conversation_id=conversation_id,
-                route="local",
-                reply=reply,
-                provider=provider,
-                memories_used=len(sources),
-                sources=sources,
+                request_id=request_id, conversation_id=conversation_id, route="local",
+                reply=reply, provider=provider, memories_used=len(sources), sources=sources,
             )
             record_turn(conversation_id, "assistant", reply, request_id=request_id)
             candidates = _capture_candidates_safely(clean, request_id, conversation_id)
             transition_request(request_id, "completed", route=result.route, provider=provider)
             record_audit(
                 "request.routed",
-                {
-                    "decision": result.route,
-                    "provider": provider,
-                    "memories_used": len(sources),
-                    "memory_candidates": candidates,
-                },
+                {"decision": result.route, "provider": provider, "memories_used": len(sources),
+                 "memory_candidates": candidates},
                 request_id,
                 conversation_id,
             )
@@ -250,25 +276,16 @@ async def orchestrate(
             suggested_route = "cloud" if wants_cloud else "local"
 
         if wants_cloud or suggested_route == "cloud":
-            # Short-term conversation history is deliberately NOT supplied here.
-            # Off-device execution receives only the current prompt unless a
-            # future explicit policy/approval path says otherwise. Candidate
-            # extraction is also deliberately skipped for cloud-routed prompts.
             cloud = await execute_cloud_request(request_id=request_id, prompt=clean)
             state = cloud.get("state")
             provider = cloud.get("provider")
 
             if state == "approval_required":
                 result = OrchestrationResult(
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    route="approval_required",
-                    provider=provider,
-                    model=cloud.get("model"),
+                    request_id=request_id, conversation_id=conversation_id,
+                    route="approval_required", provider=provider, model=cloud.get("model"),
                     reason="This request may send personal data to a cloud provider.",
-                    memory_sent=False,
-                    cloud_prompt=clean,
-                    approval=cloud.get("approval"),
+                    memory_sent=False, cloud_prompt=clean, approval=cloud.get("approval"),
                 )
                 transition_request(request_id, "awaiting_approval", route=result.route, provider=provider)
                 record_audit(
@@ -281,14 +298,10 @@ async def orchestrate(
 
             if state == "provider_unavailable":
                 result = OrchestrationResult(
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    route="cloud_ready",
-                    provider=provider,
-                    model=cloud.get("model"),
+                    request_id=request_id, conversation_id=conversation_id,
+                    route="cloud_ready", provider=provider, model=cloud.get("model"),
                     reason=cloud.get("reason") or "This request benefits from a cloud specialist.",
-                    memory_sent=False,
-                    cloud_prompt=clean,
+                    memory_sent=False, cloud_prompt=clean,
                 )
                 transition_request(request_id, "cloud_ready", route=result.route, provider=provider)
                 record_audit(
@@ -301,16 +314,10 @@ async def orchestrate(
 
             if state == "completed":
                 result = OrchestrationResult(
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    route="cloud",
-                    reply=cloud.get("reply"),
-                    provider=provider,
-                    model=cloud.get("model"),
-                    usage=cloud.get("usage"),
-                    web_search=bool(cloud.get("web_search")),
-                    reason="Handled by a Core-selected cloud specialist.",
-                    memory_sent=False,
+                    request_id=request_id, conversation_id=conversation_id, route="cloud",
+                    reply=cloud.get("reply"), provider=provider, model=cloud.get("model"),
+                    usage=cloud.get("usage"), web_search=bool(cloud.get("web_search")),
+                    reason="Handled by a Core-selected cloud specialist.", memory_sent=False,
                 )
                 if isinstance(result.reply, str) and result.reply.strip():
                     record_turn(conversation_id, "assistant", result.reply, request_id=request_id)
@@ -324,20 +331,18 @@ async def orchestrate(
                 return result.to_dict()
 
             result = OrchestrationResult(
-                request_id=request_id,
-                conversation_id=conversation_id,
-                route="cloud_failed",
+                request_id=request_id, conversation_id=conversation_id, route="cloud_failed",
                 provider=provider,
                 reason="The selected cloud specialist failed before returning a verified response.",
                 memory_sent=False,
             )
-            transition_request(request_id, "failed", route=result.route, provider=provider,
-                               error_type=cloud.get("error_type") or "CloudProviderError")
+            transition_request(
+                request_id, "failed", route=result.route, provider=provider,
+                error_type=cloud.get("error_type") or "CloudProviderError",
+            )
             record_audit(
-                "request.routed",
-                {"decision": result.route, "provider": provider},
-                request_id,
-                conversation_id,
+                "request.routed", {"decision": result.route, "provider": provider},
+                request_id, conversation_id,
             )
             return result.to_dict()
 
@@ -347,22 +352,14 @@ async def orchestrate(
         record_turn(conversation_id, "assistant", reply, request_id=request_id)
         candidates = _capture_candidates_safely(clean, request_id, conversation_id)
         result = OrchestrationResult(
-            request_id=request_id,
-            conversation_id=conversation_id,
-            route="local",
-            reply=reply,
-            provider="ollama.chat",
-            memories_used=len(context),
+            request_id=request_id, conversation_id=conversation_id, route="local",
+            reply=reply, provider="ollama.chat", memories_used=len(context),
         )
         transition_request(request_id, "completed", route=result.route, provider=result.provider)
         record_audit(
             "request.routed",
-            {
-                "decision": result.route,
-                "provider": result.provider,
-                "memories_used": len(context),
-                "memory_candidates": candidates,
-            },
+            {"decision": result.route, "provider": result.provider,
+             "memories_used": len(context), "memory_candidates": candidates},
             request_id,
             conversation_id,
         )
@@ -370,9 +367,7 @@ async def orchestrate(
     except Exception as exc:
         transition_request(request_id, "failed", error_type=type(exc).__name__)
         record_audit(
-            "request.failed",
-            {"error_type": type(exc).__name__},
-            request_id,
-            conversation_id,
+            "request.failed", {"error_type": type(exc).__name__},
+            request_id, conversation_id,
         )
         raise
