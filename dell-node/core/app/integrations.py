@@ -62,6 +62,17 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
         ),
     ),
     IntegrationDefinition(
+        id="local_files",
+        name="Local Files",
+        category="files",
+        boundary="local",
+        capabilities=(
+            Capability("files.list", "List files in Alfred's sandbox", "read", False, ("file_metadata",)),
+            Capability("files.search", "Search text files in Alfred's sandbox", "read", False, ("file_metadata", "file_content", "search_query")),
+            Capability("files.read", "Read one text file in Alfred's sandbox", "read", False, ("file_metadata", "file_content")),
+        ),
+    ),
+    IntegrationDefinition(
         id="google_calendar",
         name="Google Calendar",
         category="calendar",
@@ -92,6 +103,9 @@ def _configured(integration_id: str) -> bool:
         return True
     if integration_id == "home_assistant":
         return bool(settings.ha_url and settings.ha_token)
+    if integration_id == "local_files":
+        from .local_files import configured as files_configured
+        return files_configured()
     if integration_id == "google_calendar":
         return bool(settings.google_client_id and settings.google_client_secret and settings.google_refresh_token and settings.google_calendar_id)
     if integration_id == "gmail":
@@ -169,6 +183,7 @@ async def integration_health() -> list[dict]:
     from .clients import home_assistant_health
     from .gmail import health as gmail_health
     from .google_calendar import health as google_calendar_health
+    from .local_files import health as local_files_health
 
     results: list[dict] = []
     for integration in integration_registry():
@@ -184,6 +199,8 @@ async def integration_health() -> list[dict]:
             item["state"] = "planned"
         elif integration["id"] == "home_assistant":
             item.update(await home_assistant_health())
+        elif integration["id"] == "local_files":
+            item.update(local_files_health())
         elif integration["id"] == "google_calendar":
             item.update(await google_calendar_health())
         elif integration["id"] == "gmail":
