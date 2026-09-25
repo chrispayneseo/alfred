@@ -18,7 +18,7 @@ from .clients import ollama_chat, ollama_recall
 from .cloud_execution import execute_cloud_request
 from .cloud_providers import provider_health
 from .conversation_store import initialise as initialise_conversation_store
-from . import inbox_api, memory_service
+from . import inbox_api, memory_service, proactive
 from .recall_store import recall_intent, requested_list
 from .core import tool_registry, event_decision
 from .orchestrator import orchestrate
@@ -53,23 +53,29 @@ async def lifespan(_: FastAPI):
     initialise_approval_resume()
     recover_interrupted_work()
     inbox_api.initialise()
+    proactive.initialise()
     initialise_whatsapp_core_bridge()
     triage_task = asyncio.create_task(inbox_api.triage_loop())
     reminder_task = asyncio.create_task(inbox_api.reminder_loop())
+    proactive_task = asyncio.create_task(proactive.background_loop()) if settings.proactive_enabled else None
     try:
         yield
     finally:
-        triage_task.cancel()
-        reminder_task.cancel()
+        tasks = [triage_task, reminder_task]
+        if proactive_task is not None:
+            tasks.append(proactive_task)
+        for task in tasks:
+            task.cancel()
         try:
-            await asyncio.gather(triage_task, reminder_task)
+            await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             pass
 
 
-app = FastAPI(title="Alfred Local Intelligence Node", version="0.9.0", lifespan=lifespan)
+app = FastAPI(title="Alfred Local Intelligence Node", version="0.10.0", lifespan=lifespan)
 app.include_router(inbox_api.router, dependencies=[Depends(authorised)])
 app.include_router(whatsapp_core_router, dependencies=[Depends(authorised)])
+app.include_router(proactive.router, dependencies=[Depends(authorised)])
 web_origins = [origin.strip() for origin in settings.web_origin.split(",") if origin.strip()]
 if web_origins:
     app.add_middleware(
@@ -187,6 +193,7 @@ async def health():
             "provider_runtime": "policy_gated",
             "approval_resume": "exact_scope_idempotent",
             "whatsapp_core_bridge": "reviewed_suggestions_only",
+            "proactive_assistant": "observation_feed" if settings.proactive_enabled else "available_disabled",
             "safe_mode": False,
         },
     }
