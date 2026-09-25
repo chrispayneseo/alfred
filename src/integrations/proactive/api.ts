@@ -53,6 +53,19 @@ export interface MorningBriefStatus {
   delivery: "disabled";
 }
 
+export interface ProactiveSettings {
+  enabled: boolean;
+  poll_seconds: number;
+  quiet_start: string;
+  quiet_end: string;
+  min_priority: number;
+  cooldown_minutes: number;
+  morning_brief_enabled: boolean;
+  morning_brief_time: string;
+  delivery: "disabled";
+  source: "environment_defaults" | "local_override" | string;
+}
+
 export type InterruptionDecision =
   | { decision: "hold_quiet_hours"; item: null; delivery: "disabled" }
   | { decision: "nothing_to_surface"; item: null; delivery: "disabled" }
@@ -74,7 +87,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 
 async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await request(path, init);
-  if (!response.ok) throw new Error(`Could not load Alfred's proactive brief (${response.status})`);
+  if (!response.ok) throw new Error(`Could not load Alfred's proactive service (${response.status})`);
   return await response.json() as T;
 }
 
@@ -95,6 +108,18 @@ export async function fetchLatestMorningBrief(): Promise<MorningBrief | null> {
 
 export async function fetchInterruptionDecision(): Promise<InterruptionDecision> {
   return jsonRequest<InterruptionDecision>("/interruption");
+}
+
+export async function fetchProactiveSettings(): Promise<ProactiveSettings> {
+  return jsonRequest<ProactiveSettings>("/settings");
+}
+
+export async function updateProactiveSettings(settings: Partial<ProactiveSettings>): Promise<ProactiveSettings> {
+  return jsonRequest<ProactiveSettings>("/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
 }
 
 export async function markProactiveSurfaced(itemId: string): Promise<void> {
