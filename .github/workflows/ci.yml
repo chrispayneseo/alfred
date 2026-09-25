@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
@@ -18,21 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-      - name: Install dependencies
-        run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
-      - name: Build
-        run: npm run build
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
 
   dell-core:
     runs-on: ubuntu-latest
@@ -41,64 +34,32 @@ jobs:
       run:
         working-directory: dell-node/core
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: dell-node/core/requirements.txt
-      - name: Install Core dependencies
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
       - name: Run Core tests
         run: python -m unittest discover -p 'test_*.py' -v
-      - name: Check Phase 3 smoke script syntax
-        run: bash -n ../scripts/phase3-smoke.sh
-      - name: Check Google bootstrap and live smoke syntax
+      - name: Check Phase 3-11 smoke/deploy syntax
         run: |
+          bash -n ../scripts/phase3-smoke.sh
           python -m py_compile ../scripts/google-oauth-bootstrap.py
           bash -n ../scripts/google-live-smoke.sh
-      - name: Check Phase 4 smoke script syntax
-        run: |
-          bash -n ../scripts/phase4-smoke.sh
-          bash -n ../scripts/phase4-brief-smoke.sh
-          bash -n ../scripts/phase4-schedule-smoke.sh
-          bash -n ../scripts/phase4-settings-smoke.sh
-          bash -n ../scripts/phase4-delivery-smoke.sh
-          bash -n ../scripts/phase4-morning-delivery-smoke.sh
-          bash -n ../scripts/phase4-relevance-smoke.sh
-          bash -n ../scripts/phase4-reasoning-smoke.sh
-          bash -n ../scripts/phase4-feedback-smoke.sh
-          bash -n ../scripts/phase4-acceptance-smoke.sh
-      - name: Check Phase 5 smoke script syntax
-        run: |
-          bash -n ../scripts/phase5-goals-smoke.sh
-          bash -n ../scripts/phase5-agent-loop-smoke.sh
-          bash -n ../scripts/phase5-workflows-smoke.sh
-          bash -n ../scripts/phase5-approval-engine-smoke.sh
-          bash -n ../scripts/phase5-verification-recovery-smoke.sh
-          bash -n ../scripts/phase5-browser-actions-smoke.sh
-          bash -n ../scripts/phase5-reusable-workflows-smoke.sh
-          bash -n ../scripts/phase5-agent-observability-smoke.sh
-          bash -n ../scripts/phase5-hardening-acceptance-smoke.sh
-      - name: Check Phase 6 smoke script syntax
-        run: bash -n ../scripts/phase6-daily-utility-smoke.sh
-      - name: Check Phase 7 smoke script syntax
-        run: bash -n ../scripts/phase7-personal-agent-smoke.sh
-      - name: Check Phase 8 scripts
-        run: |
+          for f in ../scripts/phase4-*.sh ../scripts/phase5-*.sh; do bash -n "$f"; done
+          bash -n ../scripts/phase6-daily-utility-smoke.sh
+          bash -n ../scripts/phase7-personal-agent-smoke.sh
           bash -n ../scripts/phase8-secure-authenticated-web-smoke.sh
           bash -n ../scripts/deploy-phase8.sh
           python -m py_compile ../scripts/phase8-browser-profile-bootstrap.py
-      - name: Check Phase 9 scripts
-        run: |
           bash -n ../scripts/phase9-deep-memory-smoke.sh
           bash -n ../scripts/deploy-phase9.sh
-      - name: Check Phase 10 scripts
-        run: |
           bash -n ../scripts/phase10-proactive-intelligence-smoke.sh
           bash -n ../scripts/deploy-phase10.sh
+          bash -n ../scripts/phase11-life-work-operations-smoke.sh
+          bash -n ../scripts/deploy-phase11.sh
 
   browser-worker:
     runs-on: ubuntu-latest
@@ -107,21 +68,15 @@ jobs:
       run:
         working-directory: dell-node/browser-worker
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: dell-node/browser-worker/requirements.txt
-      - name: Install worker dependencies
-        run: pip install -r requirements.txt
-      - name: Compile worker
-        run: python -m py_compile app/policy.py app/main.py app/auth_profiles.py app/combined.py
-      - name: Run browser policy tests
-        run: python -m unittest test_policy.py test_auth_profiles.py -v
-      - name: Validate pinned Playwright container version
-        run: |
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app/policy.py app/main.py app/auth_profiles.py app/combined.py
+      - run: python -m unittest test_policy.py test_auth_profiles.py -v
+      - run: |
           grep -q '^playwright==1.63.0$' requirements.txt
           grep -q 'mcr.microsoft.com/playwright/python:v1.63.0-noble' Dockerfile

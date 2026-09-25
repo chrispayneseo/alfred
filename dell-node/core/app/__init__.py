@@ -28,6 +28,8 @@ from . import knowledge as knowledge
 from . import phase9_acceptance as phase9_acceptance
 from . import proactive_intelligence as proactive_intelligence
 from . import phase10_acceptance as phase10_acceptance
+from . import operations as operations
+from . import phase11_acceptance as phase11_acceptance
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -36,8 +38,6 @@ proactive_delivery.register_routes()
 proactive_feedback.register_routes()
 proactive_acceptance.register_routes()
 
-# All later surfaces share the existing authenticated Core router. Phases 9 and
-# 10 are local analytical layers and install no executor, planner or provider hook.
 for extra_router in (
     goals.router, agent_loop.router, workflows.router, approval_engine.router,
     execution_reliability.router, browser_actions.router, reusable_workflows.router,
@@ -45,10 +45,11 @@ for extra_router in (
     phase6_acceptance.router, experience.router, phase7_acceptance.router,
     authenticated_web.router, phase8_acceptance.router, knowledge.router,
     phase9_acceptance.router, proactive_intelligence.router, phase10_acceptance.router,
+    operations.router, phase11_acceptance.router,
 ):
     proactive.router.routes.extend(extra_router.routes)
 
-# Existing execution chain remains authoritative.
+# Phase 11 compiles operations into existing recipes/goals; no new executor hook.
 goal_hooks.install()
 browser_actions.install()
 authenticated_web.install()
