@@ -18,6 +18,7 @@ from . import agent_loop as agent_loop
 from . import approval_engine as approval_engine
 from . import browser_actions as browser_actions
 from . import execution_reliability as execution_reliability
+from . import reusable_workflows as reusable_workflows
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -27,7 +28,7 @@ proactive_feedback.register_routes()
 proactive_acceptance.register_routes()
 
 # main.py already mounts proactive.router behind Alfred owner authentication.
-# Phase 5A-F contribute absolute /v1/core/* routes to that same authenticated
+# Phase 5A-G contribute absolute /v1/core/* routes to that same authenticated
 # route collection without adding a second auth or execution boundary.
 proactive.router.routes.extend(goals.router.routes)
 proactive.router.routes.extend(agent_loop.router.routes)
@@ -35,12 +36,14 @@ proactive.router.routes.extend(workflows.router.routes)
 proactive.router.routes.extend(approval_engine.router.routes)
 proactive.router.routes.extend(execution_reliability.router.routes)
 proactive.router.routes.extend(browser_actions.router.routes)
+proactive.router.routes.extend(reusable_workflows.router.routes)
 
 # Install the goal guard first. 5F adds a browser preflight guard to the base
 # executor, then 5E wraps that guarded executor. 5C remains outermost so verified
 # workflow bindings resolve before 5E computes operation identity and before the
 # 5F guard sees the final browser arguments. 5D still owns approval context and
-# 5B retains approval/restart continuation.
+# 5B retains approval/restart continuation. 5G adds no executor hook: recipes
+# compile into the already-installed 5A-5F path.
 goal_hooks.install()
 browser_actions.install()
 execution_reliability.install()
