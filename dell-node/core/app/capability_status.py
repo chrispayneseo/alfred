@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-
 from .core import TOOLS
 from .db import connection
 from .integrations import action_owner, integration_health, integration_registry
-
-
-router = APIRouter(prefix="/v1/core/capabilities", tags=["core-capabilities"])
 
 
 def _pending_approvals(limit: int = 50) -> list[dict]:
@@ -73,8 +68,3 @@ async def snapshot() -> dict:
             "items": approvals,
         },
     }
-
-
-@router.get("")
-async def capability_status():
-    return await snapshot()
