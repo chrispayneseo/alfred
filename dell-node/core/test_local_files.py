@@ -1,5 +1,4 @@
 import asyncio
-import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -33,6 +32,7 @@ class LocalFilesTests(unittest.TestCase):
         self.outside.write_text("outside sandbox", encoding="utf-8")
         try:
             (self.root / "escape-link").symlink_to(self.outside)
+            (self.root / "notes-link").symlink_to(self.root / "notes", target_is_directory=True)
             self.has_symlink = True
         except OSError:
             self.has_symlink = False
@@ -124,6 +124,7 @@ class LocalFilesTests(unittest.TestCase):
         self.assertNotIn(".hidden.txt", names)
         self.assertNotIn(".private", names)
         self.assertNotIn("escape-link", names)
+        self.assertNotIn("notes-link", names)
 
         self.assertEqual(read["state"], "completed")
         self.assertTrue(read["verification"]["ok"])
@@ -145,7 +146,10 @@ class LocalFilesTests(unittest.TestCase):
             ("binary.bin", "files.read"),
         ]
         if self.has_symlink:
-            attempts.append(("escape-link", "files.read"))
+            attempts.extend([
+                ("escape-link", "files.read"),
+                ("notes-link/plan.md", "files.read"),
+            ])
 
         with patch.object(config, "settings", self.files_settings):
             results = [
@@ -159,6 +163,7 @@ class LocalFilesTests(unittest.TestCase):
         self.assertTrue(all(item["state"] == "failed" for item in results))
         self.assertTrue(all("outside sandbox" not in str(item) for item in results))
         self.assertTrue(all("hidden secret" not in str(item) for item in results))
+        self.assertTrue(all("apricot compass" not in str(item) for item in results[-1:] if self.has_symlink))
 
     def test_read_and_search_limits_are_bounded(self):
         big = self.root / "big.txt"
@@ -169,7 +174,6 @@ class LocalFilesTests(unittest.TestCase):
             search = local_files.search_files("needle-end", ".", 10)
         self.assertLessEqual(len(read["content"]), 500)
         self.assertTrue(read["truncated"])
-        # The search cannot silently scan an unbounded file to find text beyond its cap.
         self.assertEqual(search["results"], [])
         self.assertLessEqual(search["files_scanned"], local_files.MAX_SEARCH_FILES)
 
