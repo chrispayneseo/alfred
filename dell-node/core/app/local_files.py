@@ -60,16 +60,26 @@ def _clean_relative(value: str | None, *, default: str = ".") -> str:
     return str(Path(*parts)) if parts else "."
 
 
+def _reject_symlink_components(root: Path, clean: str) -> None:
+    if clean == ".":
+        return
+    current = root
+    for part in Path(clean).parts:
+        current = current / part
+        # lexists-equivalent behaviour: is_symlink works even for a broken link.
+        if current.is_symlink():
+            raise PermissionError("Symlinks are not available")
+
+
 def _resolve(relative: str | None, *, directory: bool | None = None) -> tuple[Path, Path, str]:
     root = _root()
     clean = _clean_relative(relative)
+    _reject_symlink_components(root, clean)
     candidate = root if clean == "." else root / clean
     try:
         resolved = candidate.resolve(strict=True)
     except FileNotFoundError as exc:
         raise FileNotFoundError("File or folder not found") from exc
-    if candidate.is_symlink() or resolved.is_symlink():
-        raise PermissionError("Symlinks are not available")
     if resolved != root and root not in resolved.parents:
         raise PermissionError("File path escapes the configured root")
     if directory is True and not resolved.is_dir():
@@ -103,17 +113,20 @@ def _read_bytes(path: Path, limit: int) -> tuple[bytes, bool]:
 def _decode_text(data: bytes) -> str:
     if b"\x00" in data:
         raise ValueError("Binary files are not readable through this integration")
-    return data.decode("utf-8", errors="replace")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Only UTF-8 text files are readable through this integration") from exc
 
 
 def list_directory(path: str = ".", limit: int = 50) -> dict:
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > MAX_LIST_ENTRIES:
         raise ValueError(f"File list limit must be between 1 and {MAX_LIST_ENTRIES}")
     root, folder, clean = _resolve(path, directory=True)
+    entries = [entry for entry in folder.iterdir() if _visible_entry(entry)]
+    entries.sort(key=lambda value: (not value.is_dir(), value.name.casefold()))
     items = []
-    for entry in sorted(folder.iterdir(), key=lambda value: (not value.is_dir(), value.name.casefold())):
-        if not _visible_entry(entry):
-            continue
+    for entry in entries:
         kind = "folder" if entry.is_dir() else "file" if entry.is_file() else "other"
         if kind == "other":
             continue
