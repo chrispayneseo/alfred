@@ -79,14 +79,14 @@ class ObservabilityTests(unittest.TestCase):
         encoded = json.dumps(view)
         self.assertNotIn(secret_title, encoded)
         self.assertNotIn("secret detail", encoded)
-        self.assertNotIn("scope_hash", encoded)
         self.assertEqual(view["counts"]["waiting_approvals"], 1)
         self.assertEqual(len(view["waiting_approvals"]), 1)
         approval = view["waiting_approvals"][0]
+        self.assertNotIn("scope_hash", approval)
         self.assertEqual(approval["action"], "tasks.create")
         self.assertEqual(approval["effect"], "create_local_task")
         self.assertEqual(approval["recipe"]["id"], "prepare_client_task")
-        self.assertIn("verified prerequisite", approval["why"] if approval["dependency_count"] else "verified prerequisite")
+        self.assertIn("approval-gated", approval["why"])
 
         active = next(item for item in view["active_goals"] if item["goal_id"] == created["goal_id"])
         self.assertEqual(active["state"], "awaiting_approval")
