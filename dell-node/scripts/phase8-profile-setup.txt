@@ -1,0 +1,5 @@
+Phase 8 authenticated browser profiles are optional and human-created.
+
+After Phase 8 is live, run the profile bootstrap from the Dell desktop session. The visible Chromium window is where the owner enters any password, OTP/2FA value or CAPTCHA response. Alfred Core never receives those values.
+
+The profile directory is /opt/alfred-node/browser-profiles and is mounted read-only into browser-worker.
