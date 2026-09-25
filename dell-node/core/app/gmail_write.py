@@ -176,7 +176,7 @@ def _approved_draft_arguments(draft_id: str) -> dict | None:
             """SELECT arguments, result, verification
                FROM core_executions
                WHERE action = 'email.draft.create' AND state = 'completed'
-               ORDER BY completed_at DESC LIMIT 200"""
+               ORDER BY completed_at DESC"""
         ).fetchall()
     for row in rows:
         try:
@@ -209,7 +209,7 @@ def _already_sent_by_alfred(draft_id: str) -> bool:
         rows = db.execute(
             """SELECT arguments FROM core_executions
                WHERE action = 'email.draft.send' AND state = 'completed'
-               ORDER BY completed_at DESC LIMIT 200"""
+               ORDER BY completed_at DESC"""
         ).fetchall()
     for row in rows:
         try:
