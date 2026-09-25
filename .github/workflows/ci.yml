@@ -72,4 +72,6 @@ jobs:
           bash -n ../scripts/phase4-feedback-smoke.sh
           bash -n ../scripts/phase4-acceptance-smoke.sh
       - name: Check Phase 5 smoke script syntax
-        run: bash -n ../scripts/phase5-goals-smoke.sh
+        run: |
+          bash -n ../scripts/phase5-goals-smoke.sh
+          bash -n ../scripts/phase5-agent-loop-smoke.sh

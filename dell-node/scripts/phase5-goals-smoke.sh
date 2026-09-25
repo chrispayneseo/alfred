@@ -50,16 +50,16 @@ with connection() as db:
     ).fetchall()}
 assert tables == {"agent_goals", "agent_goal_steps", "plans"}
 
-# Hooks must preserve the existing executor/recovery boundaries rather than
-# creating a second execution engine.
+# 5B may add a wrapper around the already-guarded recovery function, but the
+# established return contract and executor guard remain intact.
 assert execution.execute_plan.__name__ == "execute_plan_with_goal_guard"
-assert recovery.recover_interrupted_work.__name__ == "recover_with_goals"
+assert recovery.recover_interrupted_work.__name__ in {"recover_with_goals", "recover_with_run_cleanup"}
 
 print("PASS: Phase 5A durable goal and plan store is active")
 print("PASS: Goal steps have bounded ordered dependencies and registered tools only")
 print("PASS: Cancelled goals are guarded by the existing policy-gated executor")
 print("PASS: Restart recovery reconciles durable goal progress")
-print("PASS: Phase 5A does not automatically execute tools or call cloud models")
+print("PASS: Phase 5A goal creation still does not automatically execute tools or call cloud models")
 print()
 print("Goal state:")
 print(f"  mode: {state.get('mode')}")
