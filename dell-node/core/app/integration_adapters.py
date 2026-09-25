@@ -13,7 +13,7 @@ from typing import Awaitable, Callable
 
 from .clients import home_assistant, home_assistant_state
 from .gmail import get_message as gmail_get_message, search_messages as gmail_search_messages
-from .gmail_write import create_draft as gmail_create_draft
+from .gmail_write import create_draft as gmail_create_draft, send_draft as gmail_send_draft
 from .google_calendar import (
     create_event as google_calendar_create_event,
     delete_event as google_calendar_delete_event,
@@ -183,6 +183,10 @@ async def _gmail_draft_create(arguments: dict, _: str) -> dict:
     )
 
 
+async def _gmail_draft_send(arguments: dict, _: str) -> dict:
+    return await gmail_send_draft(_require(arguments, "draft_id"))
+
+
 def _verify_task_list(result: dict) -> dict:
     items = result.get("items")
     ok = isinstance(items, list) and all(
@@ -345,6 +349,25 @@ def _verify_email_draft(result: dict) -> dict:
     }
 
 
+def _verify_email_sent(result: dict) -> dict:
+    sent = result.get("sent")
+    ok = (
+        result.get("ok") is True
+        and isinstance(sent, dict)
+        and isinstance(sent.get("draft_id"), str)
+        and isinstance(sent.get("message_id"), str)
+        and isinstance(sent.get("to"), str)
+        and isinstance(sent.get("subject"), str)
+        and sent.get("verified_before_send") is True
+    )
+    return {
+        "ok": ok,
+        "method": "email_sent",
+        "draft_id": sent.get("draft_id") if isinstance(sent, dict) else None,
+        "message_id": sent.get("message_id") if isinstance(sent, dict) else None,
+    }
+
+
 ADAPTERS: dict[str, Adapter] = {
     adapter.action: adapter for adapter in (
         Adapter("tasks.list", _tasks_list, _verify_task_list),
@@ -364,6 +387,7 @@ ADAPTERS: dict[str, Adapter] = {
         Adapter("email.messages.search", _gmail_search, _verify_email_search),
         Adapter("email.message.get", _gmail_get, _verify_email_message),
         Adapter("email.draft.create", _gmail_draft_create, _verify_email_draft),
+        Adapter("email.draft.send", _gmail_draft_send, _verify_email_sent),
     )
 }
 
