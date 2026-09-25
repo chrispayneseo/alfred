@@ -61,7 +61,7 @@ def acceptance_status() -> dict:
         "relevance_local": (
             str(relevance.get("mode") or "") == "deterministic_local"
             and bool(relevance.get("cloud_models", False)) is False
-            and bool(relevance.get("raw_gmail_metadata_stored", True)) is False
+            and bool(relevance.get("stores_raw_gmail_metadata", True)) is False
         ),
         "reasoning_bounded": (
             str(reasoning.get("mode") or "") == "deterministic_cross_source_v1"
@@ -86,22 +86,26 @@ def acceptance_status() -> dict:
 
     last_run_state = str((last_run or {}).get("state") or "none")
     unavailable_sources = sorted(
-        name for name, state in source_states.items()
-        if state.get("state") == "unavailable"
+        name for name, source_state in source_states.items()
+        if source_state.get("state") == "unavailable"
     )
-    failed_sources = sorted(
-        name for name, state in source_states.items()
-        if state.get("state") not in {"ready", "not_configured", "unavailable", "unknown"}
+    unexpected_sources = sorted(
+        name for name, source_state in source_states.items()
+        if source_state.get("state") not in {"ready", "not_configured", "unavailable", "unknown"}
     )
 
+    components_unavailable = any(
+        component.get("available") is False
+        for component in (relevance, reasoning, feedback, delivery, schedule, preferences)
+    )
     invariants_pass = all(checks.values())
-    hard_failure = last_run_state == "failed" or bool(failed_sources) or not invariants_pass
+    hard_failure = last_run_state == "failed" or bool(unexpected_sources) or not invariants_pass
     enabled = bool(preferences.get("enabled", observation.get("enabled", False)))
     if hard_failure:
         state = "failed"
     elif not enabled:
         state = "disabled"
-    elif unavailable_sources or last_run_state == "degraded":
+    elif unavailable_sources or last_run_state == "degraded" or components_unavailable:
         state = "degraded"
     else:
         state = "ready"
