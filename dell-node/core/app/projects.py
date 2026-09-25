@@ -91,7 +91,6 @@ def create_project(*, title: str, milestones: list[dict], request_id: str | None
             raise ValueError(f"Milestone {index} needs a title")
         if not isinstance(parameters, dict):
             raise ValueError(f"Milestone {index} parameters must be an object")
-        # Preview is the static, non-mutating validation boundary for Phase 11 operations.
         operations.preview(operation_id, parameters)
         clean.append({"title": milestone_title, "operation_id": operation_id, "parameters": parameters})
 
@@ -182,10 +181,8 @@ def sync_project(project_id: str) -> dict | None:
 
 def get_project(project_id: str, *, include_parameters: bool = False, sync: bool = True) -> dict | None:
     initialise()
-    if sync:
-        synced = sync_project(project_id)
-        if synced is not None:
-            return synced
+    if sync and sync_project(project_id) is None:
+        return None
     with connection() as db:
         project = db.execute("SELECT * FROM agent_projects WHERE id = ?", (project_id,)).fetchone()
         if project is None:
@@ -253,10 +250,12 @@ async def run_project(project_id: str) -> dict:
                    SET goal_id = ?, state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND goal_id IS NULL""",
                 (goal_id, milestone_state, milestone["id"]),
             )
-            db.execute("UPDATE agent_projects SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (milestone_state if milestone_state == "awaiting_approval" else "active", project_id))
+            db.execute(
+                "UPDATE agent_projects SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (milestone_state if milestone_state == "awaiting_approval" else "active", project_id),
+            )
         started += 1
         stop_reason = milestone_state
-        # One new durable goal per invocation keeps project autonomy bounded and observable.
         break
 
     record_audit(
@@ -273,8 +272,17 @@ def cancel_project(project_id: str) -> dict:
         raise ValueError("Project not found")
     with connection() as db:
         db.execute("UPDATE agent_projects SET state = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (project_id,))
-        db.execute("UPDATE agent_project_milestones SET state = CASE WHEN state = 'pending' THEN 'cancelled' ELSE state END, updated_at = CURRENT_TIMESTAMP WHERE project_id = ?", (project_id,))
-    record_audit("project.cancelled", {"project_id": project_id, "active_goals_cancelled": False}, str(project["request_id"]))
+        db.execute(
+            """UPDATE agent_project_milestones
+               SET state = CASE WHEN state = 'pending' THEN 'cancelled' ELSE state END,
+                   updated_at = CURRENT_TIMESTAMP WHERE project_id = ?""",
+            (project_id,),
+        )
+    record_audit(
+        "project.cancelled",
+        {"project_id": project_id, "active_goals_cancelled": False},
+        str(project["request_id"]),
+    )
     return get_project(project_id, sync=False) or {}
 
 
@@ -312,7 +320,11 @@ async def projects_list(limit: int = 50):
 @router.post("/v1/core/projects")
 async def projects_create(request: ProjectCreateRequest):
     try:
-        return create_project(title=request.title, milestones=[item.model_dump() for item in request.milestones], request_id=request.request_id)
+        return create_project(
+            title=request.title,
+            milestones=[item.model_dump() for item in request.milestones],
+            request_id=request.request_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
