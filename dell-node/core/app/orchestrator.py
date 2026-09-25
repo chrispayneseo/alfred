@@ -16,13 +16,15 @@ from .cloud_execution import execute_cloud_request
 from .conversation_store import merge_history, recent_turns, record_turn
 from .core import normalise_request
 from .db import record_audit
+from .execution import execute_tool
 from .lifecycle import begin_request, transition_request
 from .memory_service import retrieve_context
 from .privacy import cloud_requested, explicit_cloud, needs_connected_data
+from .read_tool_planner import plan_read_tool, render_result as render_tool_result, sources_for_result
 from .recall_store import recall_intent
 
 Route = Literal[
-    "local", "cloud", "cloud_ready", "cloud_failed",
+    "local", "tool", "tool_failed", "cloud", "cloud_ready", "cloud_failed",
     "approval_required", "connection_needed",
 ]
 
@@ -43,11 +45,16 @@ class OrchestrationResult:
     usage: dict | None = None
     web_search: bool | None = None
     approval: dict | None = None
+    tool_action: str | None = None
+    integration: str | None = None
 
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["decision"] = payload.pop("route")
-        for key in ("sources", "cloud_prompt", "model", "usage", "web_search", "approval"):
+        for key in (
+            "sources", "cloud_prompt", "model", "usage", "web_search", "approval",
+            "tool_action", "integration",
+        ):
             if payload.get(key) is None:
                 payload.pop(key, None)
         return payload
@@ -104,6 +111,88 @@ async def orchestrate(
     )
 
     try:
+        # Phase 3 read planner runs before the generic connected-data block. It
+        # may only emit registered read+auto tools; the executor still performs
+        # integration availability, policy, execution and verification checks.
+        read_plan = plan_read_tool(clean)
+        if read_plan is not None:
+            transition_request(
+                request_id,
+                "tool_planning",
+                route="tool",
+                provider=f"integration:{read_plan.integration}",
+            )
+            execution = await execute_tool(
+                request_id=request_id,
+                action=read_plan.action,
+                arguments=read_plan.arguments,
+            )
+            state = execution.get("state")
+            if state == "completed" and (execution.get("verification") or {}).get("ok") is True:
+                tool_payload = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+                reply = render_tool_result(read_plan.action, tool_payload)
+                sources = sources_for_result(read_plan.action, tool_payload)
+                provider = f"integration:{read_plan.integration}"
+                record_turn(conversation_id, "assistant", reply, request_id=request_id)
+                result = OrchestrationResult(
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    route="tool",
+                    reply=reply,
+                    provider=provider,
+                    reason=read_plan.reason,
+                    sources=sources,
+                    memory_sent=False,
+                    tool_action=read_plan.action,
+                    integration=read_plan.integration,
+                )
+                transition_request(request_id, "completed", route=result.route, provider=provider)
+                record_audit(
+                    "request.tool_executed",
+                    {
+                        "action": read_plan.action,
+                        "integration": read_plan.integration,
+                        "source_count": len(sources),
+                    },
+                    request_id,
+                    conversation_id,
+                )
+                return result.to_dict()
+
+            error = execution.get("error") or "The selected integration read failed verification."
+            if state == "denied" and "not configured" in error.casefold():
+                route: Route = "connection_needed"
+                reply = error
+                transition_request(request_id, "connection_needed", route=route)
+            else:
+                route = "tool_failed"
+                reply = "The integration could not complete that read safely."
+                transition_request(
+                    request_id,
+                    "failed",
+                    route=route,
+                    error_type="IntegrationReadError",
+                )
+            result = OrchestrationResult(
+                request_id=request_id,
+                conversation_id=conversation_id,
+                route=route,
+                reply=reply,
+                provider=f"integration:{read_plan.integration}",
+                reason=error,
+                memory_sent=False,
+                tool_action=read_plan.action,
+                integration=read_plan.integration,
+            )
+            record_turn(conversation_id, "assistant", reply, request_id=request_id)
+            record_audit(
+                "request.tool_unavailable" if route == "connection_needed" else "request.tool_failed",
+                {"action": read_plan.action, "integration": read_plan.integration},
+                request_id,
+                conversation_id,
+            )
+            return result.to_dict()
+
         if needs_connected_data(clean):
             result = OrchestrationResult(
                 request_id=request_id,
