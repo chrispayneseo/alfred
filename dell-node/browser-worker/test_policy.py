@@ -1,3 +1,4 @@
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -78,7 +79,7 @@ class BrowserSubmissionHardeningTests(unittest.IsolatedAsyncioTestCase):
         main.SESSIONS.clear()
 
     def _session(self, *, url="https://example.com/form"):
-        now = 1000.0
+        now = time.monotonic()
         item = main.Session(
             id="phase5i-session",
             context=None,
