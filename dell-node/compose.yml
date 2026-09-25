@@ -25,6 +25,30 @@ services:
       - "127.0.0.1:8080:8080"
     mem_limit: 512m
 
+  # Phase 5F runs Chromium outside Core. The worker receives no Alfred database,
+  # Gmail/Calendar credentials, local-file mount or cloud-model keys. Compose
+  # interpolates only these explicit browser variables from the host .env.
+  # The worker exposes no host port.
+  browser-worker:
+    build: ./browser-worker
+    profiles: ["browser"]
+    restart: unless-stopped
+    environment:
+      ALFRED_BROWSER_WORKER_TOKEN: ${ALFRED_BROWSER_WORKER_TOKEN:-}
+      ALFRED_BROWSER_MAX_SESSIONS: ${ALFRED_BROWSER_MAX_SESSIONS:-3}
+      ALFRED_BROWSER_SESSION_TTL_SECONDS: ${ALFRED_BROWSER_SESSION_TTL_SECONDS:-1800}
+      ALFRED_BROWSER_NAVIGATION_TIMEOUT_MS: ${ALFRED_BROWSER_NAVIGATION_TIMEOUT_MS:-15000}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,size=768m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    shm_size: "512mb"
+    mem_limit: 1024m
+    pids_limit: 256
+
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
