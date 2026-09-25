@@ -1,11 +1,18 @@
 import unittest
+from datetime import datetime
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
-from app import proactive_reasoning
+from app import proactive, proactive_brief, proactive_reasoning
 
 
 class ProactiveReasoningTests(unittest.TestCase):
-    def test_related_task_and_calendar_receive_bounded_boosts(self):
-        items = [
+    def setUp(self):
+        self.now = datetime(2026, 9, 25, 10, 0, tzinfo=ZoneInfo("Europe/London"))
+
+    @staticmethod
+    def related_items():
+        return [
             {
                 "id": "task-1",
                 "source": "tasks",
@@ -24,7 +31,8 @@ class ProactiveReasoningTests(unittest.TestCase):
             },
         ]
 
-        result = proactive_reasoning.apply_cross_source_reasoning(items)
+    def test_related_task_and_calendar_receive_bounded_boosts(self):
+        result = proactive_reasoning.apply_cross_source_reasoning(self.related_items())
         by_id = {item["id"]: item for item in result["items"]}
 
         self.assertEqual(result["mode"], "deterministic_cross_source_v1")
@@ -139,6 +147,37 @@ class ProactiveReasoningTests(unittest.TestCase):
         self.assertEqual(result["cluster_count"], 0)
         self.assertEqual(result["boosted_items"], 0)
         self.assertEqual([item["priority"] for item in result["items"]], [84, 72])
+
+    def test_brief_uses_effective_priority_and_reports_reasoning(self):
+        feed = {"items": self.related_items(), "quiet_hours": False, "delivery": "disabled"}
+        with patch.object(proactive, "feed", return_value=feed):
+            brief = proactive_brief.build_brief(now=self.now)
+
+        self.assertEqual(brief["reasoning"]["mode"], "deterministic_cross_source_v1")
+        self.assertEqual(brief["reasoning"]["cluster_count"], 1)
+        self.assertEqual(brief["reasoning"]["boosted_items"], 2)
+        self.assertEqual(brief["counts"]["important"], 1)
+        self.assertEqual(brief["items"][0]["id"], "calendar-1")
+        self.assertEqual(brief["items"][0]["priority"], 74)
+        self.assertEqual(brief["items"][0]["base_priority"], 66)
+        self.assertEqual(brief["items"][0]["band"], "important")
+
+    def test_interruption_targets_existing_item_after_reasoning(self):
+        feed = {"items": self.related_items(), "quiet_hours": False, "delivery": "disabled"}
+        with patch.object(proactive, "feed", return_value=feed), \
+             patch.object(proactive_brief, "_last_surface_age_minutes", return_value=None), \
+             patch.object(
+                 proactive_brief,
+                 "settings",
+                 type("Settings", (), {"proactive_min_priority": 70, "proactive_cooldown_minutes": 180})(),
+             ):
+            decision = proactive_brief.interruption_decision(now=self.now)
+
+        self.assertEqual(decision["decision"], "surface_candidate")
+        self.assertEqual(decision["item"]["id"], "calendar-1")
+        self.assertEqual(decision["item"]["priority"], 74)
+        self.assertEqual(decision["item"]["base_priority"], 66)
+        self.assertGreater(decision["item"]["reasoning_boost"], 0)
 
     def test_status_declares_existing_item_only_local_reasoning(self):
         status = proactive_reasoning.reasoning_status()
