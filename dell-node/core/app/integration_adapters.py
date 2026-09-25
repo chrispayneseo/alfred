@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from .clients import home_assistant, home_assistant_state
+from .gmail import get_message as gmail_get_message, search_messages as gmail_search_messages
 from .google_calendar import (
     create_event as google_calendar_create_event,
     delete_event as google_calendar_delete_event,
@@ -127,6 +128,18 @@ async def _calendar_delete(arguments: dict, _: str) -> dict:
     return await google_calendar_delete_event(_require(arguments, "event_id"))
 
 
+async def _gmail_search(arguments: dict, _: str) -> dict:
+    query = _require(arguments, "query")
+    limit = arguments.get("limit", 10)
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("Missing or invalid argument: limit")
+    return await gmail_search_messages(query, limit)
+
+
+async def _gmail_get(arguments: dict, _: str) -> dict:
+    return await gmail_get_message(_require(arguments, "message_id"))
+
+
 def _verify_task_list(result: dict) -> dict:
     items = result.get("items")
     ok = isinstance(items, list) and all(
@@ -196,6 +209,34 @@ def _verify_calendar_deleted(result: dict) -> dict:
     return {"ok": ok, "method": "calendar_event_deleted", "event_id": event_id}
 
 
+def _valid_email_summary(message: object, *, body_required: bool = False) -> bool:
+    if not isinstance(message, dict):
+        return False
+    required = ("id", "thread_id", "from", "to", "subject", "date", "snippet")
+    if not all(isinstance(message.get(key), str) for key in required):
+        return False
+    if not isinstance(message.get("unread"), bool):
+        return False
+    if body_required and not isinstance(message.get("body"), str):
+        return False
+    return True
+
+
+def _verify_email_search(result: dict) -> dict:
+    messages = result.get("messages")
+    count = result.get("count")
+    ok = result.get("ok") is True and isinstance(messages, list) and isinstance(count, int)
+    if ok:
+        ok = count == len(messages) and all(_valid_email_summary(message) for message in messages)
+    return {"ok": ok, "method": "email_search", "message_count": len(messages) if isinstance(messages, list) else 0}
+
+
+def _verify_email_message(result: dict) -> dict:
+    message = result.get("message")
+    ok = result.get("ok") is True and _valid_email_summary(message, body_required=True)
+    return {"ok": ok, "method": "email_message", "message_id": message.get("id") if isinstance(message, dict) else None}
+
+
 ADAPTERS: dict[str, Adapter] = {
     adapter.action: adapter for adapter in (
         Adapter("tasks.list", _tasks_list, _verify_task_list),
@@ -209,6 +250,8 @@ ADAPTERS: dict[str, Adapter] = {
         Adapter("calendar.events.create", _calendar_create, _verify_calendar_event),
         Adapter("calendar.events.update", _calendar_update, _verify_calendar_event),
         Adapter("calendar.events.delete", _calendar_delete, _verify_calendar_deleted),
+        Adapter("email.messages.search", _gmail_search, _verify_email_search),
+        Adapter("email.message.get", _gmail_get, _verify_email_message),
     )
 }
 

@@ -37,13 +37,16 @@ TOOLS = {
     "calendar.events.create": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
     "calendar.events.update": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
     "calendar.events.delete": {"risk": "external", "permission": "confirm", "verification": "calendar_event_deleted"},
+    "email.messages.search": {"risk": "read", "permission": "auto", "verification": "email_search"},
+    "email.message.get": {"risk": "read", "permission": "auto", "verification": "email_message"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
     if action in {
         "memory.read", "memory.candidate.list", "tasks.list", "home_assistant.state",
-        "calendar.events.list", "recall.search", "chat.local", "route",
+        "calendar.events.list", "email.messages.search", "email.message.get",
+        "recall.search", "chat.local", "route",
     }:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
     if action in {"memory.candidate.propose", "memory.candidate.dismiss"}:
