@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from app import db, execution, inbox_api, main
+from app import config, db, execution, inbox_api, main
 
 
 class LegacyActionTests(unittest.TestCase):
@@ -74,9 +74,13 @@ class LegacyActionTests(unittest.TestCase):
         self.assertEqual(row["action"], "memory.delete")
 
     def test_confirmed_home_assistant_action_routes_through_executor(self):
-        with patch.object(execution, "home_assistant", new=AsyncMock(return_value={
-            "ok": True, "service": "light.turn_on", "entity_id": "light.study"
-        })):
+        configured = replace(config.settings, ha_url="http://ha.local:8123", ha_token="test-token")
+        with (
+            patch.object(config, "settings", configured),
+            patch.object(execution, "home_assistant", new=AsyncMock(return_value={
+                "ok": True, "service": "light.turn_on", "entity_id": "light.study"
+            })),
+        ):
             response = asyncio.run(main.device_action(main.DeviceAction(
                 service="light.turn_on", entity_id="light.study", confirmed=True
             )))
