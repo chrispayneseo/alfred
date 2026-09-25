@@ -76,3 +76,4 @@ jobs:
           bash -n ../scripts/phase5-goals-smoke.sh
           bash -n ../scripts/phase5-agent-loop-smoke.sh
           bash -n ../scripts/phase5-workflows-smoke.sh
+          bash -n ../scripts/phase5-approval-engine-smoke.sh
