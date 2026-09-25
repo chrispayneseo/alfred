@@ -14,6 +14,7 @@ class Settings:
     api_key: str = os.getenv("ALFRED_API_KEY", "")
     tailscale_user: str = os.getenv("ALFRED_TAILSCALE_USER", "")
     web_origin: str = os.getenv("ALFRED_WEB_ORIGIN", "")
+    timezone: str = os.getenv("ALFRED_TIMEZONE", "Europe/London") or "Europe/London"
     ollama_url: str = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
     chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:4b")
     router_model: str = os.getenv("OLLAMA_ROUTER_MODEL", "qwen3:1.7b")

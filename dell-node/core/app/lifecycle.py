@@ -19,6 +19,7 @@ VALID_STATES = {
     "received",
     "routing",
     "local_processing",
+    "tool_planning",
     "awaiting_approval",
     "executing",
     "connection_needed",
