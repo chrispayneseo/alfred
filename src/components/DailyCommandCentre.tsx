@@ -47,13 +47,22 @@ export function DailyCommandCentre() {
         <Stat label="Overdue" value={data.counts.overdue} attention />
       </div>
 
+      <div className="mt-3 flex flex-wrap gap-3 text-xs">
+        <Link to="/inbox" className="underline text-ink-soft dark:text-ink-soft-dark">Open Alfred Inbox</Link>
+        <Link to="/search" className="underline text-ink-soft dark:text-ink-soft-dark">Search Alfred</Link>
+        <Link to="/chat" className="underline text-ink-soft dark:text-ink-soft-dark">Ask Alfred</Link>
+      </div>
+
       {data.needs_you.length === 0 ? (
         <p className="mt-3 text-sm text-ink-faint dark:text-ink-faint-dark">Nothing needs your attention.</p>
       ) : (
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between gap-3">
             <h3 className="text-xs font-medium text-ink-soft dark:text-ink-soft-dark">Needs you</h3>
-            {data.counts.pending_intake > 0 && <Link to="/capture" className="text-xs underline text-ink-soft dark:text-ink-soft-dark">Review capture</Link>}
+            <div className="flex gap-3">
+              <Link to="/inbox" className="text-xs underline text-ink-soft dark:text-ink-soft-dark">View all</Link>
+              {data.counts.pending_intake > 0 && <Link to="/capture" className="text-xs underline text-ink-soft dark:text-ink-soft-dark">Review capture</Link>}
+            </div>
           </div>
           <ul className="space-y-2">
             {data.needs_you.slice(0, 6).map((item, index) => <li key={`${item.type}:${item.id ?? index}`} className="rounded-xl bg-paper-raised px-3 py-2 dark:bg-paper-raised-dark">
