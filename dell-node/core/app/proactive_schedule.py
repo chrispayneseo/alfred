@@ -1,9 +1,9 @@
 """Scheduled local observation, durable morning briefs, and gated nudges.
 
-The scheduler refreshes Alfred's local proactive feed and stores at most one
-morning-brief snapshot per local calendar day. Phase 4F may also ask the
-policy-gated delivery layer to send a generic phone nudge. The delivery layer is
-separately opt-in and never receives or transmits brief/item content.
+The scheduler refreshes Alfred's local proactive feed, stores at most one
+morning-brief snapshot per local calendar day, optionally sends one generic
+brief-ready nudge, then evaluates the normal policy-gated interruption nudge.
+Connected-source content is never passed to the outbound delivery layer.
 """
 
 from __future__ import annotations
@@ -189,8 +189,10 @@ async def scheduled_background_loop() -> None:
         if settings.proactive_enabled:
             try:
                 result = await proactive.refresh()
-                await maybe_generate(source_run_id=result.get("run_id"))
-                await proactive_delivery.maybe_deliver()
+                brief_result = await maybe_generate(source_run_id=result.get("run_id"))
+                morning_delivery = await proactive_delivery.maybe_deliver_morning_brief(brief_result.get("brief"))
+                if morning_delivery.get("state") != "delivered":
+                    await proactive_delivery.maybe_deliver()
             except Exception as exc:
                 record_audit("proactive.background_failed", {"error_type": type(exc).__name__})
         await asyncio.sleep(max(60, int(settings.proactive_poll_seconds)))

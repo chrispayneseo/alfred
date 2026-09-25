@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   fetchProactiveDeliveryStatus,
   fetchProactiveSettings,
+  sendProactiveTestNudge,
   updateProactiveSettings,
   type ProactiveDeliveryStatus,
   type ProactiveSettings as ProactiveSettingsState,
@@ -28,8 +29,10 @@ export function ProactiveSettings() {
   const [delivery, setDelivery] = useState<ProactiveDeliveryStatus | null>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  const [testMessage, setTestMessage] = useState<string>();
 
   useEffect(() => {
     Promise.all([
@@ -37,7 +40,11 @@ export function ProactiveSettings() {
       fetchProactiveDeliveryStatus().catch(() => null),
     ])
       .then(([value, deliveryState]) => {
-        const normalised = { ...value, push_enabled: Boolean(value.push_enabled) };
+        const normalised = {
+          ...value,
+          push_enabled: Boolean(value.push_enabled),
+          morning_brief_push_enabled: Boolean(value.morning_brief_push_enabled),
+        };
         setSettings(normalised);
         setDraft(normalised);
         setDelivery(deliveryState);
@@ -63,8 +70,13 @@ export function ProactiveSettings() {
         morning_brief_enabled: draft.morning_brief_enabled,
         morning_brief_time: draft.morning_brief_time,
         push_enabled: draft.push_enabled,
+        morning_brief_push_enabled: draft.morning_brief_push_enabled,
       });
-      const normalised = { ...updated, push_enabled: Boolean(updated.push_enabled) };
+      const normalised = {
+        ...updated,
+        push_enabled: Boolean(updated.push_enabled),
+        morning_brief_push_enabled: Boolean(updated.morning_brief_push_enabled),
+      };
       setSettings(normalised);
       setDraft(normalised);
       setDelivery(await fetchProactiveDeliveryStatus().catch(() => null));
@@ -73,6 +85,20 @@ export function ProactiveSettings() {
       setError(cause instanceof Error ? cause.message : "Could not save proactive settings.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendTest() {
+    setTesting(true);
+    setTestMessage(undefined);
+    setError(undefined);
+    try {
+      await sendProactiveTestNudge();
+      setTestMessage("Test nudge sent. Check your phone.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not send the test nudge.");
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -98,9 +124,11 @@ export function ProactiveSettings() {
     morning_brief_enabled: value.morning_brief_enabled,
     morning_brief_time: value.morning_brief_time,
     push_enabled: value.push_enabled,
+    morning_brief_push_enabled: value.morning_brief_push_enabled,
   });
   const dirty = settings ? JSON.stringify(comparable(settings)) !== JSON.stringify(comparable(draft)) : false;
   const pushUnavailable = delivery === null || delivery === undefined || !delivery.configured;
+  const testUnavailable = pushUnavailable || !settings?.push_enabled;
 
   return (
     <div className="rounded-2xl border border-line p-4 dark:border-line-dark">
@@ -212,13 +240,39 @@ export function ProactiveSettings() {
             aria-label="Enable generic phone nudges"
           />
         </label>
-        <p className="mt-2 text-[11px] text-ink-faint dark:text-ink-faint-dark">
-          {delivery?.configured
-            ? `ntfy channel ready · ${delivery.delivered_count} proactive nudge${delivery.delivered_count === 1 ? "" : "s"} delivered`
-            : delivery === null
-              ? "Delivery status unavailable until the Dell Core is updated."
-              : "No valid ntfy topic is configured on the Dell yet."}
-        </p>
+
+        <label className="mt-3 flex items-center justify-between gap-4 border-t border-line pt-3 text-xs text-ink-soft dark:border-line-dark dark:text-ink-soft-dark">
+          <span>
+            <span className="block">Morning brief ready nudge</span>
+            <span className="mt-0.5 block text-[11px] text-ink-faint dark:text-ink-faint-dark">At most once per day, only when the brief contains something to review.</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={draft.morning_brief_push_enabled}
+            disabled={!draft.push_enabled || !draft.morning_brief_enabled}
+            onChange={(event) => setDraft({ ...draft, morning_brief_push_enabled: event.target.checked })}
+            aria-label="Notify when morning brief is ready"
+          />
+        </label>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={testUnavailable || testing}
+            onClick={() => void sendTest()}
+            className="rounded-full border border-line px-3 py-1.5 text-[11px] text-ink-soft disabled:opacity-40 dark:border-line-dark dark:text-ink-soft-dark"
+          >
+            {testing ? "Sending test…" : "Send test nudge"}
+          </button>
+          <span className="text-[11px] text-ink-faint dark:text-ink-faint-dark">
+            {delivery?.configured
+              ? `ntfy channel ready · ${delivery.delivered_count} proactive nudge${delivery.delivered_count === 1 ? "" : "s"} delivered`
+              : delivery === null
+                ? "Delivery status unavailable until the Dell Core is updated."
+                : "No valid ntfy topic is configured on the Dell yet."}
+          </span>
+        </div>
+        {testMessage && <p className="mt-2 text-[11px] text-ink-soft dark:text-ink-soft-dark">{testMessage}</p>}
       </div>
 
       {error && <p role="alert" className="mt-3 text-xs text-claude">{error}</p>}

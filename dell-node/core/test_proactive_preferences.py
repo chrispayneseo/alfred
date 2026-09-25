@@ -52,12 +52,14 @@ class ProactivePreferenceTests(unittest.TestCase):
             proactive_morning_brief_enabled=True,
             proactive_morning_brief_time="08:00",
             proactive_push_enabled=False,
+            proactive_morning_brief_push_enabled=False,
         )
         current = proactive_preferences.current(defaults)
         self.assertTrue(current["enabled"])
         self.assertEqual(current["poll_seconds"], 900)
         self.assertEqual(current["morning_brief_time"], "08:00")
         self.assertFalse(current["push_enabled"])
+        self.assertFalse(current["morning_brief_push_enabled"])
         self.assertEqual(current["source"], "environment_defaults")
         self.assertEqual(current["delivery"], "disabled")
 
@@ -79,6 +81,7 @@ class ProactivePreferenceTests(unittest.TestCase):
             poll_seconds=600,
             morning_brief_time="07:45",
             push_enabled=True,
+            morning_brief_push_enabled=True,
         ))
         self.assertFalse(config.settings.proactive_enabled)
         self.assertFalse(proactive.settings.proactive_enabled)
@@ -89,17 +92,25 @@ class ProactivePreferenceTests(unittest.TestCase):
         self.assertEqual(proactive_schedule.settings.proactive_morning_brief_time, "07:45")
         self.assertTrue(config.settings.proactive_push_enabled)
         self.assertTrue(proactive_delivery.settings.proactive_push_enabled)
+        self.assertTrue(config.settings.proactive_morning_brief_push_enabled)
+        self.assertTrue(proactive_delivery.settings.proactive_morning_brief_push_enabled)
 
     def test_fresh_process_can_apply_durable_push_override(self):
         with db.connection() as conn:
             conn.execute(
                 "INSERT INTO proactive_preferences(key, value) VALUES ('push_enabled', 'true')"
             )
+            conn.execute(
+                "INSERT INTO proactive_preferences(key, value) VALUES ('morning_brief_push_enabled', 'true')"
+            )
         self.assertFalse(proactive_delivery.settings.proactive_push_enabled)
+        self.assertFalse(proactive_delivery.settings.proactive_morning_brief_push_enabled)
         effective = proactive_preferences.apply_runtime_preferences()
         self.assertTrue(effective["push_enabled"])
+        self.assertTrue(effective["morning_brief_push_enabled"])
         self.assertTrue(config.settings.proactive_push_enabled)
         self.assertTrue(proactive_delivery.settings.proactive_push_enabled)
+        self.assertTrue(proactive_delivery.settings.proactive_morning_brief_push_enabled)
 
     def test_invalid_clock_and_bounds_fail_closed(self):
         with self.assertRaises(ValidationError):
