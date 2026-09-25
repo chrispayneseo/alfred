@@ -7,6 +7,7 @@ sudo docker compose exec -T core python - <<'PY'
 import asyncio
 
 from app import proactive_schedule
+from app.config import settings
 
 status_before = proactive_schedule.due_status()
 first = asyncio.run(proactive_schedule.generate_now())
@@ -37,7 +38,7 @@ print(f"  total: {int(counts.get('total', 0))}")
 print(f"  urgent: {int(counts.get('urgent', 0))}")
 print(f"  important: {int(counts.get('important', 0))}")
 print(f"  later: {int(counts.get('later', 0))}")
-print(f"  background currently enabled: {str(bool(status_before.get('enabled') and False)).lower()}")
+print(f"  background currently enabled: {str(bool(settings.proactive_enabled)).lower()}")
 print()
 print("Phase 4C smoke completed without printing brief content or performing delivery.")
 PY
