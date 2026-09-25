@@ -57,7 +57,7 @@ export function ProactiveBriefPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
-  const surfacedRef = useRef<string>();
+  const surfacedRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     try {
