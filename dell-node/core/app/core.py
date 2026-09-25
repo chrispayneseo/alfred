@@ -34,6 +34,9 @@ TOOLS = {
     "home_assistant.state": {"risk": "read", "permission": "auto", "verification": "device_state"},
     "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
     "calendar.events.list": {"risk": "read", "permission": "auto", "verification": "calendar_events"},
+    "calendar.events.create": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
+    "calendar.events.update": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
+    "calendar.events.delete": {"risk": "external", "permission": "confirm", "verification": "calendar_event_deleted"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
@@ -60,12 +63,16 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
         )
     if action == "home_assistant.service":
         return PolicyDecision("reversible", "auto" if confirmed else "confirm", "Changing a device state requires explicit confirmation.")
+    if action in {"calendar.events.create", "calendar.events.update", "calendar.events.delete"}:
+        return PolicyDecision(
+            "external",
+            "auto" if confirmed else "confirm",
+            "Changing an external calendar requires explicit confirmation.",
+        )
     return PolicyDecision("high_impact", "deny", "This action is not registered with Alfred Core.")
 
 
 def tool_registry() -> list[dict]:
-    # Import lazily so the transport/policy boundary does not depend on an
-    # integration implementation during module initialisation.
     from .integrations import action_owner
     return [{"name": name, "integration": action_owner(name), **definition}
             for name, definition in TOOLS.items()]
