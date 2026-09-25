@@ -1,9 +1,9 @@
-"""Phase 4F policy-gated generic phone nudges.
+"""Policy-gated generic phone nudges for Alfred's proactive assistant.
 
 This module is the only outbound surface for proactive observations. It reuses
-Alfred's existing validated ntfy topic, never sends item titles/summaries/source
-content, and only sends after the deterministic interruption policy returns a
-surface candidate. Delivery is opt-in and disabled by default.
+Alfred's existing validated ntfy topic and never sends connected item content.
+Phase 4G adds an owner-triggered test nudge and an optional once-per-day generic
+morning-brief-ready nudge, both using fixed messages only.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+from fastapi import HTTPException
 
 from . import inbox_api, proactive, proactive_brief
 from .config import settings
@@ -21,6 +22,8 @@ from .db import connection, record_audit
 CHANNEL = "ntfy_generic"
 RETRY_BACKOFF_MINUTES = 30
 GENERIC_MESSAGE = "Alfred has something worth checking. Open Alfred Today to review it."
+MORNING_BRIEF_MESSAGE = "Your Alfred morning brief is ready. Open Alfred Today to review it."
+TEST_MESSAGE = "Alfred test notification. Phone nudges are working."
 GENERIC_TITLE = "Alfred"
 _FALLBACK_TODAY_URL = "https://alfred-five-livid.vercel.app/today"
 _REGISTERED = False
@@ -107,14 +110,44 @@ def _record_success(item_id: str, *, now: datetime) -> None:
             WHERE item_id = ? AND channel = ?""", (_utc_stamp(now), item_id, CHANNEL))
 
 
-async def _send_generic_nudge(topic: str) -> None:
+async def _send_ntfy(topic: str, message: str) -> None:
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.post(
             f"https://ntfy.sh/{topic}",
-            content=GENERIC_MESSAGE,
+            content=message,
             headers={"Title": GENERIC_TITLE, "Click": _today_url()},
         )
         response.raise_for_status()
+
+
+async def _deliver_once(item_id: str, message: str, *, now: datetime) -> dict:
+    existing = _record_for_item(item_id)
+    if existing and existing.get("delivered_at"):
+        return {"state": "already_delivered", "channel": CHANNEL}
+
+    attempted = _parse_stamp(existing.get("attempted_at") if existing else None)
+    utc_now = now.astimezone(timezone.utc)
+    if attempted is not None and utc_now - attempted < timedelta(minutes=RETRY_BACKOFF_MINUTES):
+        return {"state": "retry_backoff", "channel": CHANNEL}
+
+    topic = inbox_api.notification_topic()
+    if topic is None:
+        return {"state": "not_configured", "channel": CHANNEL}
+
+    _record_attempt(item_id, now=now)
+    try:
+        await _send_ntfy(topic, message)
+    except httpx.HTTPError as exc:
+        error_type = type(exc).__name__
+        _record_failure(item_id, error_type)
+        record_audit("proactive.delivery_failed", {
+            "channel": CHANNEL,
+            "error_type": error_type,
+        })
+        return {"state": "failed", "channel": CHANNEL, "error_type": error_type}
+
+    _record_success(item_id, now=now)
+    return {"state": "delivered", "channel": CHANNEL, "content_policy": "generic_only"}
 
 
 def delivery_status() -> dict:
@@ -129,6 +162,7 @@ def delivery_status() -> dict:
     last_state = dict(last) if last else None
     return {
         "enabled": bool(settings.proactive_push_enabled),
+        "morning_brief_enabled": bool(settings.proactive_morning_brief_push_enabled),
         "configured": bool(topic_ready),
         "channel": CHANNEL,
         "content_policy": "generic_only",
@@ -146,10 +180,6 @@ async def maybe_deliver(*, now: datetime | None = None) -> dict:
     if not settings.proactive_push_enabled:
         return {"state": "disabled", "channel": CHANNEL}
 
-    topic = inbox_api.notification_topic()
-    if topic is None:
-        return {"state": "not_configured", "channel": CHANNEL}
-
     decision = proactive_brief.interruption_decision(now=local_now)
     if decision.get("decision") != "surface_candidate" or not decision.get("item"):
         return {"state": str(decision.get("decision") or "held"), "channel": CHANNEL}
@@ -158,34 +188,69 @@ async def maybe_deliver(*, now: datetime | None = None) -> dict:
     if not item_id:
         return {"state": "invalid_candidate", "channel": CHANNEL}
 
-    existing = _record_for_item(item_id)
-    if existing and existing.get("delivered_at"):
-        return {"state": "already_delivered", "channel": CHANNEL}
-
-    attempted = _parse_stamp(existing.get("attempted_at") if existing else None)
-    utc_now = local_now.astimezone(timezone.utc)
-    if attempted is not None and utc_now - attempted < timedelta(minutes=RETRY_BACKOFF_MINUTES):
-        return {"state": "retry_backoff", "channel": CHANNEL}
-
-    _record_attempt(item_id, now=local_now)
-    try:
-        await _send_generic_nudge(topic)
-    except httpx.HTTPError as exc:
-        error_type = type(exc).__name__
-        _record_failure(item_id, error_type)
-        record_audit("proactive.delivery_failed", {
+    result = await _deliver_once(item_id, GENERIC_MESSAGE, now=local_now)
+    if result.get("state") == "delivered":
+        proactive_brief.mark_surfaced(item_id, now=local_now)
+        record_audit("proactive.delivered", {
             "channel": CHANNEL,
-            "error_type": error_type,
+            "purpose": "interruption",
+            "content_policy": "generic_only",
         })
-        return {"state": "failed", "channel": CHANNEL, "error_type": error_type}
+    return result
 
-    _record_success(item_id, now=local_now)
-    proactive_brief.mark_surfaced(item_id, now=local_now)
-    record_audit("proactive.delivered", {
+
+async def maybe_deliver_morning_brief(brief: dict | None, *, now: datetime | None = None) -> dict:
+    """Send one generic brief-ready nudge per local day, never brief content."""
+    initialise()
+    local_now = proactive._aware_now(now)
+    if not settings.proactive_push_enabled or not settings.proactive_morning_brief_push_enabled:
+        return {"state": "disabled", "channel": CHANNEL}
+    if brief is None:
+        return {"state": "no_brief", "channel": CHANNEL}
+    if proactive.quiet_hours_active(local_now):
+        return {"state": "hold_quiet_hours", "channel": CHANNEL}
+
+    counts = brief.get("counts") or {}
+    if int(counts.get("total", 0)) <= 0:
+        return {"state": "nothing_to_surface", "channel": CHANNEL}
+
+    brief_date = str(brief.get("brief_date") or "")
+    if not brief_date:
+        return {"state": "invalid_brief", "channel": CHANNEL}
+
+    result = await _deliver_once(f"morning-brief:{brief_date}", MORNING_BRIEF_MESSAGE, now=local_now)
+    if result.get("state") == "delivered":
+        items = brief.get("items") or []
+        if items and items[0].get("id"):
+            proactive_brief.mark_surfaced(str(items[0]["id"]), now=local_now)
+        record_audit("proactive.morning_brief_delivered", {
+            "channel": CHANNEL,
+            "brief_date": brief_date,
+            "content_policy": "generic_only",
+        })
+    return result
+
+
+async def send_test_nudge() -> dict:
+    """Owner-triggered fixed test message; never source-derived content."""
+    if not settings.proactive_push_enabled:
+        raise HTTPException(status_code=409, detail="Generic phone nudges are disabled")
+    topic = inbox_api.notification_topic()
+    if topic is None:
+        raise HTTPException(status_code=409, detail="ntfy is not configured")
+    try:
+        await _send_ntfy(topic, TEST_MESSAGE)
+    except httpx.HTTPError as exc:
+        record_audit("proactive.test_delivery_failed", {
+            "channel": CHANNEL,
+            "error_type": type(exc).__name__,
+        })
+        raise HTTPException(status_code=502, detail="Test notification delivery failed") from exc
+    record_audit("proactive.test_delivered", {
         "channel": CHANNEL,
-        "content_policy": "generic_only",
+        "content_policy": "fixed_test_only",
     })
-    return {"state": "delivered", "channel": CHANNEL, "content_policy": "generic_only"}
+    return {"state": "delivered", "channel": CHANNEL, "content_policy": "fixed_test_only"}
 
 
 def register_routes() -> None:
@@ -196,5 +261,9 @@ def register_routes() -> None:
     @proactive.router.get("/delivery/status")
     async def proactive_delivery_status():
         return delivery_status()
+
+    @proactive.router.post("/delivery/test")
+    async def proactive_delivery_test():
+        return await send_test_nudge()
 
     _REGISTERED = True
