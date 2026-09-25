@@ -22,6 +22,7 @@ from .lifecycle import begin_request, transition_request
 from .memory_service import retrieve_context
 from .mutation_tool_planner import plan_mutation_tool
 from .privacy import cloud_requested, explicit_cloud, needs_connected_data
+from .read_bundle import execute_read_bundle, plan_read_tools
 from .read_tool_planner import plan_read_tool, render_result as render_tool_result, sources_for_result
 from .recall_store import recall_intent
 
@@ -107,9 +108,6 @@ async def orchestrate(
     )
 
     try:
-        # Mutations are planned before reads, but only exact deterministic forms
-        # can produce a plan. The first executor pass is deliberately unconfirmed:
-        # it may create an exact-scope approval, but cannot perform the mutation.
         mutation_plan = plan_mutation_tool(clean)
         if mutation_plan is not None:
             provider = f"integration:{mutation_plan.integration}"
@@ -186,9 +184,76 @@ async def orchestrate(
             )
             return result.to_dict()
 
-        # Phase 3 read planner may only emit registered read+auto tools; the
-        # executor still performs integration availability, policy, execution
-        # and verification checks.
+        read_plans = plan_read_tools(clean)
+        if read_plans:
+            transition_request(request_id, "tool_planning", route="tool", provider="integration:multi")
+            bundle = await execute_read_bundle(request_id=request_id, plans=read_plans)
+            state = bundle.get("state")
+            if state == "completed":
+                reply = str(bundle.get("reply") or "The requested reads completed.")
+                sources = bundle.get("sources") if isinstance(bundle.get("sources"), list) else []
+                record_turn(conversation_id, "assistant", reply, request_id=request_id)
+                result = OrchestrationResult(
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    route="tool",
+                    reply=reply,
+                    provider="integration:multi",
+                    reason="Executed a deterministic multi-integration read bundle.",
+                    sources=sources,
+                    memory_sent=False,
+                    tool_action="multi_read",
+                    integration="multiple",
+                )
+                transition_request(request_id, "completed", route="tool", provider="integration:multi")
+                record_audit(
+                    "request.tool_bundle_completed",
+                    {
+                        "actions": bundle.get("actions", []),
+                        "integrations": bundle.get("integrations", []),
+                        "step_count": len(bundle.get("steps", [])),
+                        "source_count": len(sources),
+                    },
+                    request_id,
+                    conversation_id,
+                )
+                return result.to_dict()
+
+            error = str(bundle.get("error") or "The requested read bundle could not complete safely.")
+            if state == "unavailable":
+                route: Route = "connection_needed"
+                reply = error
+                transition_request(request_id, "connection_needed", route=route, provider="integration:multi")
+            else:
+                route = "tool_failed"
+                reply = "The combined integration read could not complete safely."
+                transition_request(
+                    request_id, "failed", route=route, provider="integration:multi",
+                    error_type="IntegrationReadBundleError",
+                )
+            record_turn(conversation_id, "assistant", reply, request_id=request_id)
+            record_audit(
+                "request.tool_bundle_unavailable" if route == "connection_needed" else "request.tool_bundle_failed",
+                {
+                    "action": bundle.get("action"),
+                    "integration": bundle.get("integration"),
+                    "step_count": len(bundle.get("steps", [])),
+                },
+                request_id,
+                conversation_id,
+            )
+            return OrchestrationResult(
+                request_id=request_id,
+                conversation_id=conversation_id,
+                route=route,
+                reply=reply,
+                provider="integration:multi",
+                reason=error,
+                memory_sent=False,
+                tool_action="multi_read",
+                integration="multiple",
+            ).to_dict()
+
         read_plan = plan_read_tool(clean)
         if read_plan is not None:
             transition_request(
@@ -225,7 +290,7 @@ async def orchestrate(
 
             error = execution.get("error") or "The selected integration read failed verification."
             if state == "denied" and "not configured" in error.casefold():
-                route: Route = "connection_needed"
+                route = "connection_needed"
                 reply = error
                 transition_request(request_id, "connection_needed", route=route)
             else:
