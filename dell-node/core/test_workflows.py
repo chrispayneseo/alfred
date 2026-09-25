@@ -128,14 +128,19 @@ class WorkflowTests(unittest.TestCase):
 
         waiting = asyncio.run(agent_loop.run_goal(goal["id"]))
         self.assertEqual(waiting["state"], "awaiting_approval")
-        approval = waiting["steps"][-1]["approval"]
+        approval_id = waiting["steps"][-1]["approval"]["id"]
         expected_arguments = {"kind": "task", "title": "Book boiler service"}
+        with db.connection() as connection:
+            approval = connection.execute(
+                "SELECT scope_hash FROM approvals WHERE id = ?", (approval_id,)
+            ).fetchone()
+        self.assertIsNotNone(approval)
         self.assertEqual(
             approval["scope_hash"],
             execution._scope_hash("tasks.create", expected_arguments, goal["plan_id"], 1),
         )
 
-        resumed = asyncio.run(approval_resume.resolve_and_resume(approval["id"], True))
+        resumed = asyncio.run(approval_resume.resolve_and_resume(approval_id, True))
         self.assertTrue(resumed["goal"]["continued"])
         self.assertEqual(resumed["goal"]["state"], "completed")
         items = task_service.list_items(kind="task", include_completed=True, limit=20)
