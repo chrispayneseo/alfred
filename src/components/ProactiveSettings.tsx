@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   fetchProactiveDeliveryStatus,
+  fetchProactiveFeedbackStatus,
   fetchProactiveSettings,
+  resetProactiveFeedback,
   sendProactiveTestNudge,
   updateProactiveSettings,
   type ProactiveDeliveryStatus,
+  type ProactiveFeedbackStatus,
   type ProactiveSettings as ProactiveSettingsState,
 } from "../integrations/proactive/api";
 
@@ -27,9 +30,11 @@ export function ProactiveSettings() {
   const [settings, setSettings] = useState<ProactiveSettingsState>();
   const [draft, setDraft] = useState<ProactiveSettingsState>();
   const [delivery, setDelivery] = useState<ProactiveDeliveryStatus | null>();
+  const [feedback, setFeedback] = useState<ProactiveFeedbackStatus | null>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [resettingFeedback, setResettingFeedback] = useState(false);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [testMessage, setTestMessage] = useState<string>();
@@ -38,8 +43,9 @@ export function ProactiveSettings() {
     Promise.all([
       fetchProactiveSettings(),
       fetchProactiveDeliveryStatus().catch(() => null),
+      fetchProactiveFeedbackStatus().catch(() => null),
     ])
-      .then(([value, deliveryState]) => {
+      .then(([value, deliveryState, feedbackState]) => {
         const normalised = {
           ...value,
           push_enabled: Boolean(value.push_enabled),
@@ -48,6 +54,7 @@ export function ProactiveSettings() {
         setSettings(normalised);
         setDraft(normalised);
         setDelivery(deliveryState);
+        setFeedback(feedbackState);
         setError(undefined);
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load proactive settings."))
@@ -102,6 +109,19 @@ export function ProactiveSettings() {
     }
   }
 
+  async function resetFeedback() {
+    if (!window.confirm("Reset Alfred's learned dismiss and snooze feedback?")) return;
+    setResettingFeedback(true);
+    setError(undefined);
+    try {
+      setFeedback(await resetProactiveFeedback());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not reset learned feedback.");
+    } finally {
+      setResettingFeedback(false);
+    }
+  }
+
   if (loading) {
     return <p className="text-sm text-ink-faint dark:text-ink-faint-dark">Loading Alfred's proactive controls…</p>;
   }
@@ -129,6 +149,7 @@ export function ProactiveSettings() {
   const dirty = settings ? JSON.stringify(comparable(settings)) !== JSON.stringify(comparable(draft)) : false;
   const pushUnavailable = delivery === null || delivery === undefined || !delivery.configured;
   const testUnavailable = pushUnavailable || !settings?.push_enabled;
+  const feedbackEvents = (feedback?.dismissals ?? 0) + (feedback?.snoozes ?? 0);
 
   return (
     <div className="rounded-2xl border border-line p-4 dark:border-line-dark">
@@ -273,6 +294,30 @@ export function ProactiveSettings() {
           </span>
         </div>
         {testMessage && <p className="mt-2 text-[11px] text-ink-soft dark:text-ink-soft-dark">{testMessage}</p>}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-line p-3 dark:border-line-dark">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-ink dark:text-ink-dark">Local relevance learning</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-ink-faint dark:text-ink-faint-dark">
+              Dismissals lower similar source/kind signals for 30 days. One snooze is treated as timing only; repeated snoozes add only a small penalty. Urgent items are never demoted.
+            </p>
+            <p className="mt-2 text-[11px] text-ink-soft dark:text-ink-soft-dark">
+              {feedback
+                ? `${feedback.dismissals} dismissal${feedback.dismissals === 1 ? "" : "s"} · ${feedback.snoozes} snooze${feedback.snoozes === 1 ? "" : "s"} · ${feedback.learned_kinds} learned kind${feedback.learned_kinds === 1 ? "" : "s"}`
+                : "Learning status unavailable until the Dell Core is updated."}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!feedback || feedbackEvents === 0 || resettingFeedback}
+            onClick={() => void resetFeedback()}
+            className="shrink-0 rounded-full border border-line px-3 py-1.5 text-[11px] text-ink-soft disabled:opacity-40 dark:border-line-dark dark:text-ink-soft-dark"
+          >
+            {resettingFeedback ? "Resetting…" : "Reset learned feedback"}
+          </button>
+        </div>
       </div>
 
       {error && <p role="alert" className="mt-3 text-xs text-claude">{error}</p>}
