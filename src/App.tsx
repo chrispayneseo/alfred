@@ -7,6 +7,7 @@ import { TabBar } from "./components/TabBar";
 import { useLockGate } from "./hooks/useLockGate";
 import { getDailyLandingRoute } from "./lib/dailyLanding";
 import { SIDEBAR_OFFSET } from "./lib/layout";
+import { AgentInboxScreen } from "./screens/AgentInboxScreen";
 import { BrowseScreen } from "./screens/BrowseScreen";
 import { CaptureScreen } from "./screens/CaptureScreen";
 import { ChatScreen } from "./screens/ChatScreen";
@@ -15,6 +16,7 @@ import { FeedScreen } from "./screens/FeedScreen";
 import { FreelanceClientScreen } from "./screens/FreelanceClientScreen";
 import { FreelanceScreen } from "./screens/FreelanceScreen";
 import { MealPlanScreen } from "./screens/MealPlanScreen";
+import { SearchAlfredScreen } from "./screens/SearchAlfredScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { TodayScreen } from "./screens/TodayScreen";
 
@@ -35,6 +37,8 @@ export default function App() {
           <Route path="/" element={<DailyLanding />} />
           <Route path="/today" element={<TodayScreen />} />
           <Route path="/chat" element={<ChatScreen />} />
+          <Route path="/inbox" element={<AgentInboxScreen />} />
+          <Route path="/search" element={<SearchAlfredScreen />} />
           <Route path="/capture" element={<CaptureScreen />} />
           <Route path="/share-target" element={<Navigate to="/capture" replace />} />
           <Route path="/browse" element={<BrowseScreen />} />
