@@ -11,7 +11,7 @@ import json
 
 from .conversation_store import record_turn
 from .db import connection, record_audit, resolve_approval
-from .execution import execute_tool, scope_hash
+from .execution import _scope_hash as execution_scope_hash, execute_tool
 from .lifecycle import transition_request
 
 
@@ -87,7 +87,7 @@ def register_proposal(*, approval: dict, request_id: str, conversation_id: str |
     initialise()
     approval_id = approval.get("id")
     approval_scope = approval.get("scope_hash")
-    expected_scope = scope_hash(action, arguments, plan_id, step_index)
+    expected_scope = execution_scope_hash(action, arguments, plan_id, step_index)
     if not isinstance(approval_id, str) or not approval_id:
         raise ValueError("Approval id is required for a resumable proposal")
     if not isinstance(approval_scope, str) or approval_scope != expected_scope:
@@ -148,7 +148,7 @@ def _set_proposal_state(approval_id: str, state: str, execution_id: str | None =
 
 
 def _integrity_error(approval: dict, proposal: dict) -> str | None:
-    expected_scope = scope_hash(
+    expected_scope = execution_scope_hash(
         proposal["action"], proposal["arguments"], proposal["plan_id"], proposal["step_index"]
     )
     if proposal["scope_hash"] != expected_scope:
