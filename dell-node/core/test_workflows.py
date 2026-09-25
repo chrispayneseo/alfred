@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from app import agent_loop, approval_resume, db, execution, goals, inbox_api, proactive, recovery, workflows
+from app import agent_loop, approval_resume, db, execution, goals, proactive, recovery, task_service, workflows
 
 
 class WorkflowTests(unittest.TestCase):
@@ -15,19 +15,16 @@ class WorkflowTests(unittest.TestCase):
         base = Path(self.temp.name)
         self.db_path = str(base / "core.sqlite3")
         self.patch_db_settings = patch.object(db, "settings", replace(db.settings, sqlite_path=self.db_path))
-        self.patch_inbox_path = patch.object(inbox_api, "INBOX_DB", str(base / "inbox.sqlite3"))
         self.patch_db_settings.start()
-        self.patch_inbox_path.start()
         db.initialise()
         execution.initialise_execution_store()
         recovery.initialise_recovery_store()
-        inbox_api.initialise()
+        task_service.initialise()
         goals.initialise()
         agent_loop.initialise()
         workflows.initialise()
 
     def tearDown(self):
-        self.patch_inbox_path.stop()
         self.patch_db_settings.stop()
         self.temp.cleanup()
 
@@ -141,7 +138,7 @@ class WorkflowTests(unittest.TestCase):
         resumed = asyncio.run(approval_resume.resolve_and_resume(approval["id"], True))
         self.assertTrue(resumed["goal"]["continued"])
         self.assertEqual(resumed["goal"]["state"], "completed")
-        items = inbox_api.list_filed(kind="task", include_completed=True, limit=20)
+        items = task_service.list_items(kind="task", include_completed=True, limit=20)
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["title"], "Book boiler service")
 
@@ -174,7 +171,7 @@ class WorkflowTests(unittest.TestCase):
         result = asyncio.run(agent_loop.run_goal(created["goal"]["id"]))
         self.assertEqual(result["state"], "blocked")
         self.assertEqual(result["stop_reason"], "step_failed_or_denied")
-        self.assertEqual(inbox_api.list_filed(kind="task", include_completed=True, limit=20), [])
+        self.assertEqual(task_service.list_items(kind="task", include_completed=True, limit=20), [])
 
     def test_status_is_content_minimised_and_routes_are_authenticated_collection(self):
         secret = "PRIVATE WORKFLOW VALUE"
