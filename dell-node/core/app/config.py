@@ -57,8 +57,8 @@ class Settings:
     gmail_write_user_id: str = os.getenv("GMAIL_WRITE_USER_ID", "me") or "me"
     gmail_write_enabled: bool = _env_bool("GMAIL_WRITE_ENABLED", False)
 
-    # Phase 4 proactive observation is local-first and opt-in. Enabling this only
-    # refreshes Alfred's local feed; outbound delivery remains a separate feature.
+    # Phase 4 proactive observation is local-first and opt-in. Enabling observation
+    # does not enable outbound nudges; the push gate below is separately opt-in.
     proactive_enabled: bool = _env_bool("ALFRED_PROACTIVE_ENABLED", False)
     proactive_poll_seconds: int = int(os.getenv("ALFRED_PROACTIVE_POLL_SECONDS", "900"))
     proactive_quiet_start: str = os.getenv("ALFRED_PROACTIVE_QUIET_START", "22:00") or "22:00"
@@ -70,6 +70,7 @@ class Settings:
     proactive_gmail_query: str = os.getenv(
         "ALFRED_PROACTIVE_GMAIL_QUERY", "is:unread newer_than:2d"
     ) or "is:unread newer_than:2d"
+    proactive_push_enabled: bool = _env_bool("ALFRED_PROACTIVE_PUSH_ENABLED", False)
 
     # Phase 4C stores one local morning-brief snapshot per local day. The morning
     # brief setting is subordinate to ALFRED_PROACTIVE_ENABLED for background runs;
