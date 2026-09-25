@@ -95,6 +95,10 @@ jobs:
         run: |
           bash -n ../scripts/phase9-deep-memory-smoke.sh
           bash -n ../scripts/deploy-phase9.sh
+      - name: Check Phase 10 scripts
+        run: |
+          bash -n ../scripts/phase10-proactive-intelligence-smoke.sh
+          bash -n ../scripts/deploy-phase10.sh
 
   browser-worker:
     runs-on: ubuntu-latest
