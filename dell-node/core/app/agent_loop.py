@@ -376,6 +376,10 @@ def status() -> dict:
 
 async def _continue_after_approval(approval_id: str, approved: bool, base_result: dict) -> dict:
     """Resume only when a resolved approval belongs to a durable agent goal."""
+    # Approval resolution is also used by Phase 3 flows whose isolated stores may
+    # not have touched Phase 5 yet. Ensure the optional goal tables exist before
+    # checking membership; this is schema-only and does not create a goal or run.
+    goals.initialise()
     with connection() as db:
         row = db.execute(
             "SELECT plan_id, request_id FROM approvals WHERE id = ?",
