@@ -1,8 +1,5 @@
 """Alfred Core application package bootstrap."""
 
-# Phase 4 extensions share the existing authenticated proactive router. The
-# preference hooks apply durable overrides during normal Core startup, after the
-# database path is available, and wrap the final schedule-aware background loop.
 from . import proactive as proactive
 from . import proactive_brief as proactive_brief
 from . import proactive_schedule as proactive_schedule
@@ -27,6 +24,8 @@ from . import experience as experience
 from . import phase7_acceptance as phase7_acceptance
 from . import authenticated_web as authenticated_web
 from . import phase8_acceptance as phase8_acceptance
+from . import knowledge as knowledge
+from . import phase9_acceptance as phase9_acceptance
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -36,29 +35,19 @@ proactive_feedback.register_routes()
 proactive_acceptance.register_routes()
 
 # main.py already mounts proactive.router behind Alfred owner authentication.
-# Phase 5A-I and Phases 6-8 contribute absolute /v1/core/* routes to that same
-# authenticated route collection without adding a second owner-auth boundary.
-proactive.router.routes.extend(goals.router.routes)
-proactive.router.routes.extend(agent_loop.router.routes)
-proactive.router.routes.extend(workflows.router.routes)
-proactive.router.routes.extend(approval_engine.router.routes)
-proactive.router.routes.extend(execution_reliability.router.routes)
-proactive.router.routes.extend(browser_actions.router.routes)
-proactive.router.routes.extend(reusable_workflows.router.routes)
-proactive.router.routes.extend(observability.router.routes)
-proactive.router.routes.extend(hardening_acceptance.router.routes)
-proactive.router.routes.extend(daily_operations.router.routes)
-proactive.router.routes.extend(phase6_acceptance.router.routes)
-proactive.router.routes.extend(experience.router.routes)
-proactive.router.routes.extend(phase7_acceptance.router.routes)
-proactive.router.routes.extend(authenticated_web.router.routes)
-proactive.router.routes.extend(phase8_acceptance.router.routes)
+# Phases 5-9 extend that authenticated collection. Phase 9 is a local read-only
+# knowledge surface and installs no executor, planner or provider hook.
+for extra_router in (
+    goals.router, agent_loop.router, workflows.router, approval_engine.router,
+    execution_reliability.router, browser_actions.router, reusable_workflows.router,
+    observability.router, hardening_acceptance.router, daily_operations.router,
+    phase6_acceptance.router, experience.router, phase7_acceptance.router,
+    authenticated_web.router, phase8_acceptance.router, knowledge.router,
+    phase9_acceptance.router,
+):
+    proactive.router.routes.extend(extra_router.routes)
 
-# Install the goal guard first. 5F adds a browser preflight guard to the base
-# executor. Phase 8 extends that same browser/executor boundary with one read-only
-# authenticated-profile open action; it does not create a second executor or a
-# second submit path. Phase 5E then wraps the guarded executor, 5C remains
-# outermost for workflow binding, 5D owns approval context and 5B continuation.
+# Existing execution chain remains authoritative. Phase 9 adds no hook here.
 goal_hooks.install()
 browser_actions.install()
 authenticated_web.install()
