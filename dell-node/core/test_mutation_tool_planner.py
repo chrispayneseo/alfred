@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import config, db, inbox_api, mutation_tool_planner, orchestrator
+from app import config, db, inbox_api, mutation_tool_planner, orchestrator, task_service
 
 
 class MutationToolPlannerTests(unittest.TestCase):
@@ -87,7 +87,7 @@ class MutationToolPlannerTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(approvals, 1)
         self.assertEqual(executions, 0)
-        self.assertEqual(inbox_api.list_filed(kind="task", completed=False), [])
+        self.assertEqual(task_service.list_items(kind="task", include_completed=False), [])
 
     def test_calendar_write_gate_denies_conversational_mutation_before_approval(self):
         configured_read_only = replace(
