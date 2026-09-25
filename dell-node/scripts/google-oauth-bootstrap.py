@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap least-privilege Google OAuth credentials for Alfred on the Dell.
+"""Bootstrap read-only Google OAuth credentials for Alfred on the Dell.
 
 Runs entirely on the Dell. Reads a Google Desktop OAuth client JSON file, uses
 an OAuth loopback callback on 127.0.0.1, exchanges the authorization code for an
@@ -28,7 +28,7 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 SERVICES = {
     "calendar": {
-        "scope": "https://www.googleapis.com/auth/calendar.events.readonly",
+        "scope": "https://www.googleapis.com/auth/calendar.readonly",
         "env": {
             "GOOGLE_CLIENT_ID": "client_id",
             "GOOGLE_CLIENT_SECRET": "client_secret",
@@ -202,7 +202,7 @@ def main() -> None:
         "state": state,
     })
 
-    print(f"Authorizing Alfred {args.service} with one least-privilege scope.")
+    print(f"Authorizing Alfred {args.service} with one read-only scope.")
     print("A browser window should open. If it does not, open this URL on this Dell:")
     print(auth_url)
     try:
