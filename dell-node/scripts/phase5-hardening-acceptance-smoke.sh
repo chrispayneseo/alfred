@@ -97,8 +97,11 @@ sudo docker compose run --rm --no-deps \
 
 echo
 echo "=== BROWSER ADVERSARIAL ACCEPTANCE ==="
-sudo docker compose --profile browser run --rm --no-deps browser-worker \
-  python -m unittest test_policy.py -v
+# Run the current host-side adversarial fixture against the exact deployed worker
+# image. This avoids depending on a test file baked into an older image layer.
+sudo docker compose --profile browser run --rm --no-deps \
+  -v /opt/alfred-node/browser-worker/test_policy.py:/app/test_policy.py:ro \
+  browser-worker python -m unittest test_policy.py -v
 
 echo
 echo "Phase 5I acceptance completed using temporary test stores and policy fixtures."
