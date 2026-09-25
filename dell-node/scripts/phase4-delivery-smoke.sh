@@ -6,6 +6,11 @@ cd /opt/alfred-node
 sudo docker compose exec -T core python - <<'PY'
 from app import proactive_delivery, proactive_preferences
 
+# This smoke runs in a fresh helper Python process rather than the long-running
+# Uvicorn process. Apply durable SQLite overrides first so module-level runtime
+# settings match the owner's effective proactive preferences.
+proactive_preferences.apply_runtime_preferences()
+
 preferences = proactive_preferences.current()
 status = proactive_delivery.delivery_status()
 
