@@ -170,9 +170,10 @@ def _ensure_background_running() -> None:
 
 def update(values: PreferencesUpdate, defaults=settings) -> dict:
     initialise()
+    before = current(defaults)
     changes = values.model_dump(exclude_none=True)
     if not changes:
-        return current(defaults)
+        return before
     with connection() as db:
         for key, value in changes.items():
             if key not in _KEYS:
@@ -187,8 +188,10 @@ def update(values: PreferencesUpdate, defaults=settings) -> dict:
         "delivery": "disabled",
     })
     apply_runtime_preferences()
-    _ensure_background_running()
-    return current(defaults)
+    after = current(defaults)
+    if not bool(before["enabled"]) and bool(after["enabled"]):
+        _ensure_background_running()
+    return after
 
 
 def install_runtime_hooks() -> None:
