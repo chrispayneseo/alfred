@@ -32,6 +32,17 @@ class Settings:
     files_root: str = os.getenv("ALFRED_FILES_ROOT", "/files") or "/files"
     files_max_read_bytes: int = int(os.getenv("ALFRED_FILES_MAX_READ_BYTES", "262144"))
 
+    # Phase 5F controlled browser. The worker is a separate container with no
+    # Alfred data or connected-service credentials. Browser use and submission
+    # are separate explicit gates; exact-scope Core approval is still mandatory.
+    browser_enabled: bool = _env_bool("ALFRED_BROWSER_ENABLED", False)
+    browser_submit_enabled: bool = _env_bool("ALFRED_BROWSER_SUBMIT_ENABLED", False)
+    browser_worker_url: str = os.getenv(
+        "ALFRED_BROWSER_WORKER_URL", "http://browser-worker:8090"
+    ).rstrip("/")
+    browser_worker_token: str = os.getenv("ALFRED_BROWSER_WORKER_TOKEN", "")
+    browser_timeout_seconds: float = float(os.getenv("ALFRED_BROWSER_TIMEOUT_SECONDS", "25"))
+
     # Google Calendar is optional. Credentials stay in the Dell environment and
     # are never exposed by the integration registry or health endpoints.
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
