@@ -10,6 +10,7 @@ remains disabled elsewhere in the Phase 4 boundary.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import time
 import sys
@@ -45,6 +46,9 @@ _ATTRS = {
 
 _BOOL_KEYS = {"enabled", "morning_brief_enabled"}
 _INT_KEYS = {"poll_seconds", "min_priority", "cooldown_minutes"}
+_HOOKS_INSTALLED = False
+_BACKGROUND_ACTIVE = 0
+_RUNTIME_TASK: asyncio.Task | None = None
 
 
 class PreferencesUpdate(BaseModel):
@@ -117,13 +121,11 @@ def current(defaults=settings) -> dict:
 
 
 def apply_runtime_preferences() -> dict:
-    """Apply effective proactive values to already-imported Core modules.
-
-    Settings is a frozen dataclass, so we replace only the proactive fields and
-    update each module's bound settings reference. This makes changes effective
-    immediately while keeping every unrelated secret/config value untouched.
-    """
+    """Apply durable overrides to already-imported Core modules."""
     effective = current(settings)
+    if effective["source"] != "local_override":
+        return effective
+
     runtime = replace(
         settings,
         proactive_enabled=bool(effective["enabled"]),
@@ -151,6 +153,21 @@ def apply_runtime_preferences() -> dict:
     return effective
 
 
+def _ensure_background_running() -> None:
+    global _RUNTIME_TASK
+    effective = current(settings)
+    if not effective["enabled"] or _BACKGROUND_ACTIVE > 0:
+        return
+    if _RUNTIME_TASK is not None and not _RUNTIME_TASK.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    from . import proactive
+    _RUNTIME_TASK = loop.create_task(proactive.background_loop())
+
+
 def update(values: PreferencesUpdate, defaults=settings) -> dict:
     initialise()
     changes = values.model_dump(exclude_none=True)
@@ -170,7 +187,36 @@ def update(values: PreferencesUpdate, defaults=settings) -> dict:
         "delivery": "disabled",
     })
     apply_runtime_preferences()
+    _ensure_background_running()
     return current(defaults)
+
+
+def install_runtime_hooks() -> None:
+    """Apply persisted overrides during normal Core startup and track the loop."""
+    global _HOOKS_INSTALLED
+    if _HOOKS_INSTALLED:
+        return
+    from . import proactive
+
+    original_initialise = proactive.initialise
+    original_background_loop = proactive.background_loop
+
+    def initialise_with_preferences() -> None:
+        original_initialise()
+        initialise()
+        apply_runtime_preferences()
+
+    async def tracked_background_loop() -> None:
+        global _BACKGROUND_ACTIVE
+        _BACKGROUND_ACTIVE += 1
+        try:
+            await original_background_loop()
+        finally:
+            _BACKGROUND_ACTIVE = max(0, _BACKGROUND_ACTIVE - 1)
+
+    proactive.initialise = initialise_with_preferences
+    proactive.background_loop = tracked_background_loop
+    _HOOKS_INSTALLED = True
 
 
 def register_routes() -> None:
