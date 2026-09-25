@@ -19,6 +19,11 @@ from .google_calendar import (
     list_events as google_calendar_list_events,
     update_event as google_calendar_update_event,
 )
+from .local_files import (
+    list_directory as local_files_list_directory,
+    read_file as local_files_read_file,
+    search_files as local_files_search_files,
+)
 from . import task_service
 
 
@@ -100,6 +105,35 @@ async def _ha_service(arguments: dict, _: str) -> dict:
     service = _require(arguments, "service")
     entity_id = _require(arguments, "entity_id")
     return await home_assistant(service, entity_id)
+
+
+async def _files_list(arguments: dict, _: str) -> dict:
+    path = arguments.get("path", ".")
+    limit = arguments.get("limit", 50)
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Missing or invalid argument: path")
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("Missing or invalid argument: limit")
+    return local_files_list_directory(path, limit)
+
+
+async def _files_search(arguments: dict, _: str) -> dict:
+    query = _require(arguments, "query")
+    path = arguments.get("path", ".")
+    limit = arguments.get("limit", 10)
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Missing or invalid argument: path")
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("Missing or invalid argument: limit")
+    return local_files_search_files(query, path, limit)
+
+
+async def _files_read(arguments: dict, _: str) -> dict:
+    path = _require(arguments, "path")
+    max_chars = arguments.get("max_chars", 12000)
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool):
+        raise ValueError("Missing or invalid argument: max_chars")
+    return local_files_read_file(path, max_chars)
 
 
 async def _calendar_list(arguments: dict, _: str) -> dict:
@@ -184,6 +218,52 @@ def _verify_ha_service(result: dict) -> dict:
     return {"ok": result.get("ok") is True, "method": "service_response"}
 
 
+def _verify_file_list(result: dict) -> dict:
+    items = result.get("items")
+    ok = result.get("ok") is True and result.get("read_only") is True and isinstance(items, list)
+    if ok:
+        ok = all(
+            isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("path"), str)
+            and item.get("kind") in {"file", "folder"}
+            and (item.get("size") is None or isinstance(item.get("size"), int))
+            for item in items
+        )
+    return {"ok": ok, "method": "file_list", "item_count": len(items) if isinstance(items, list) else 0}
+
+
+def _verify_file_search(result: dict) -> dict:
+    results = result.get("results")
+    ok = (
+        result.get("ok") is True
+        and result.get("read_only") is True
+        and isinstance(result.get("query"), str)
+        and isinstance(results, list)
+    )
+    if ok:
+        ok = all(
+            isinstance(item, dict)
+            and isinstance(item.get("path"), str)
+            and (item.get("line") is None or isinstance(item.get("line"), int))
+            and isinstance(item.get("excerpt"), str)
+            for item in results
+        )
+    return {"ok": ok, "method": "file_search", "match_count": len(results) if isinstance(results, list) else 0}
+
+
+def _verify_file_content(result: dict) -> dict:
+    ok = (
+        result.get("ok") is True
+        and result.get("read_only") is True
+        and isinstance(result.get("path"), str)
+        and isinstance(result.get("content"), str)
+        and isinstance(result.get("size"), int)
+        and isinstance(result.get("truncated"), bool)
+    )
+    return {"ok": ok, "method": "file_content", "path": result.get("path")}
+
+
 def _valid_event(event: object) -> bool:
     return isinstance(event, dict) and all(isinstance(event.get(key), str) for key in ("id", "summary", "start", "end", "status")) and isinstance(event.get("all_day"), bool)
 
@@ -246,6 +326,9 @@ ADAPTERS: dict[str, Adapter] = {
         Adapter("tasks.delete", _tasks_delete, _verify_task_absent),
         Adapter("home_assistant.state", _ha_state, _verify_ha_state),
         Adapter("home_assistant.service", _ha_service, _verify_ha_service),
+        Adapter("files.list", _files_list, _verify_file_list),
+        Adapter("files.search", _files_search, _verify_file_search),
+        Adapter("files.read", _files_read, _verify_file_content),
         Adapter("calendar.events.list", _calendar_list, _verify_calendar_list),
         Adapter("calendar.events.create", _calendar_create, _verify_calendar_event),
         Adapter("calendar.events.update", _calendar_update, _verify_calendar_event),

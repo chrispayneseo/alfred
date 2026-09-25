@@ -24,6 +24,26 @@ MUTATION_RE = re.compile(
 ENTITY_RE = re.compile(r"\b([a-z_]+\.[A-Za-z0-9_]+)\b")
 EMAIL_RE = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
 MESSAGE_ID_RE = re.compile(r"\b(?:message|email)\s+(?:id\s+)?([A-Za-z0-9_-]{6,256})\b", re.IGNORECASE)
+FILE_READ_RE = re.compile(
+    r"^\s*(?:read|open|show)(?:\s+me)?(?:\s+my)?\s+file\s*:\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+FILE_LIST_RE = re.compile(
+    r"^\s*(?:list|show)(?:\s+me)?(?:\s+my)?\s+files(?:\s+in\s+(.+?))?\s*[?.]*\s*$",
+    re.IGNORECASE,
+)
+FILE_SEARCH_IN_RE = re.compile(
+    r"^\s*search(?:\s+my)?\s+files\s+in\s+(.+?)\s+for\s+(.+?)\s*[?.]*\s*$",
+    re.IGNORECASE,
+)
+FILE_SEARCH_RE = re.compile(
+    r"^\s*search(?:\s+my)?\s+files\s+for\s+(.+?)\s*[?.]*\s*$",
+    re.IGNORECASE,
+)
+FILE_FIND_RE = re.compile(
+    r"^\s*find\s+(.+?)\s+in\s+(?:my\s+)?files\s*[?.]*\s*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -110,6 +130,59 @@ def _validated(action: str, arguments: dict, reason: str) -> ReadToolPlan | None
     )
 
 
+def _file_plan(clean: str) -> ReadToolPlan | None:
+    read_match = FILE_READ_RE.fullmatch(clean)
+    if read_match:
+        path = read_match.group(1).strip(" \t?.")
+        if path:
+            return _validated(
+                "files.read",
+                {"path": path[:500], "max_chars": 12000},
+                "Read one explicitly identified text file inside Alfred's sandbox.",
+            )
+
+    search_in = FILE_SEARCH_IN_RE.fullmatch(clean)
+    if search_in:
+        path = search_in.group(1).strip(" \t?.")
+        query = search_in.group(2).strip(" \t?.")
+        if path and len(query) >= 2:
+            return _validated(
+                "files.search",
+                {"query": query[:200], "path": path[:500], "limit": 10},
+                "Search a bounded folder inside Alfred's file sandbox.",
+            )
+
+    search = FILE_SEARCH_RE.fullmatch(clean)
+    if search:
+        query = search.group(1).strip(" \t?.")
+        if len(query) >= 2:
+            return _validated(
+                "files.search",
+                {"query": query[:200], "path": ".", "limit": 10},
+                "Search text files inside Alfred's file sandbox.",
+            )
+
+    find = FILE_FIND_RE.fullmatch(clean)
+    if find:
+        query = find.group(1).strip(" \t?.")
+        if len(query) >= 2:
+            return _validated(
+                "files.search",
+                {"query": query[:200], "path": ".", "limit": 10},
+                "Search text files inside Alfred's file sandbox.",
+            )
+
+    listing = FILE_LIST_RE.fullmatch(clean)
+    if listing:
+        path = (listing.group(1) or ".").strip(" \t?.") or "."
+        return _validated(
+            "files.list",
+            {"path": path[:500], "limit": 50},
+            "List visible files inside Alfred's file sandbox.",
+        )
+    return None
+
+
 def plan_read_tool(message: str, *, now: datetime | None = None) -> ReadToolPlan | None:
     """Return one conservative read-only plan, or None when intent is ambiguous."""
     if not isinstance(message, str) or not message.strip():
@@ -120,6 +193,10 @@ def plan_read_tool(message: str, *, now: datetime | None = None) -> ReadToolPlan
     # Never reinterpret an apparent mutation request as a read.
     if MUTATION_RE.search(clean):
         return None
+
+    file_plan = _file_plan(clean)
+    if file_plan is not None:
+        return file_plan
 
     if any(term in lowered for term in ("calendar", "my schedule", "appointments", "appointment")):
         start, end = _calendar_window(clean, now)
@@ -180,6 +257,20 @@ def sources_for_result(action: str, result: dict) -> list[dict]:
         return items if isinstance(items, list) else []
     if action == "home_assistant.state":
         return [result] if isinstance(result, dict) else []
+    if action == "files.list":
+        items = result.get("items")
+        return items if isinstance(items, list) else []
+    if action == "files.search":
+        items = result.get("results")
+        return items if isinstance(items, list) else []
+    if action == "files.read":
+        if not isinstance(result, dict):
+            return []
+        return [{
+            "path": result.get("path", ""),
+            "content": str(result.get("content", ""))[:4000],
+            "truncated": bool(result.get("truncated")),
+        }]
     return []
 
 
@@ -219,5 +310,34 @@ def render_result(action: str, result: dict) -> str:
 
     if action == "home_assistant.state":
         return f"{result.get('entity_id', 'The entity')} is {result.get('state', 'unknown')}."
+
+    if action == "files.list":
+        items = result.get("items") if isinstance(result.get("items"), list) else []
+        if not items:
+            return "I found no visible files or folders there."
+        labels = [
+            f"{item.get('name', '(unnamed)')}{'/' if item.get('kind') == 'folder' else ''}"
+            for item in items[:20]
+        ]
+        return f"I found {len(items)} visible item{'s' if len(items) != 1 else ''}: " + "; ".join(labels) + "."
+
+    if action == "files.search":
+        matches = result.get("results") if isinstance(result.get("results"), list) else []
+        if not matches:
+            return "I found no matching text in the file sandbox."
+        labels = []
+        for item in matches[:8]:
+            location = str(item.get("path", ""))
+            if isinstance(item.get("line"), int):
+                location += f":{item['line']}"
+            excerpt = str(item.get("excerpt", ""))[:180]
+            labels.append(f"{location} — {excerpt}" if excerpt else location)
+        return f"I found {len(matches)} file match{'es' if len(matches) != 1 else ''}: " + "; ".join(labels) + "."
+
+    if action == "files.read":
+        path = str(result.get("path", "file"))
+        content = str(result.get("content", ""))[:12000]
+        suffix = "\n\n[File was truncated by the read limit.]" if result.get("truncated") else ""
+        return f"{path}:\n{content}{suffix}"
 
     return "The tool completed successfully."

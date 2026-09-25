@@ -19,6 +19,8 @@ services:
     volumes:
       - alfred_data:/data
       - /opt/alfred-node/whatsapp-ingress/collector-data:/inbox-data
+      # Dedicated read-only filesystem surface for Phase 3 file tools.
+      - /opt/alfred-node/files:/files:ro
     ports:
       - "127.0.0.1:8080:8080"
     mem_limit: 512m

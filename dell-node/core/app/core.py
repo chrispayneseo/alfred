@@ -33,6 +33,9 @@ TOOLS = {
     "tasks.delete": {"risk": "safe_write", "permission": "confirm", "verification": "task_absent"},
     "home_assistant.state": {"risk": "read", "permission": "auto", "verification": "device_state"},
     "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
+    "files.list": {"risk": "read", "permission": "auto", "verification": "file_list"},
+    "files.search": {"risk": "read", "permission": "auto", "verification": "file_search"},
+    "files.read": {"risk": "read", "permission": "auto", "verification": "file_content"},
     "calendar.events.list": {"risk": "read", "permission": "auto", "verification": "calendar_events"},
     "calendar.events.create": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
     "calendar.events.update": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
@@ -45,6 +48,7 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
     if action in {
         "memory.read", "memory.candidate.list", "tasks.list", "home_assistant.state",
+        "files.list", "files.search", "files.read",
         "calendar.events.list", "email.messages.search", "email.message.get",
         "recall.search", "chat.local", "route",
     }:
