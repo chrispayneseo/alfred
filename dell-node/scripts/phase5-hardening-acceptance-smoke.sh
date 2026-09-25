@@ -88,8 +88,12 @@ PY
 
 echo
 echo "=== CORE ADVERSARIAL ACCEPTANCE ==="
-sudo docker compose exec -T core \
-  python -m unittest test_phase5_hardening_acceptance.py -v
+# The production Core image intentionally contains application code only. Mount
+# this one acceptance test read-only into a fresh one-off Core container so the
+# test exercises the exact deployed image without shipping test code in it.
+sudo docker compose run --rm --no-deps \
+  -v /opt/alfred-node/core/test_phase5_hardening_acceptance.py:/app/test_phase5_hardening_acceptance.py:ro \
+  core python -m unittest test_phase5_hardening_acceptance -v
 
 echo
 echo "=== BROWSER ADVERSARIAL ACCEPTANCE ==="
