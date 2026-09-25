@@ -26,6 +26,11 @@ TOOLS = {
     "memory.candidate.propose": {"risk": "safe_write", "permission": "auto", "verification": "candidate_row"},
     "memory.candidate.dismiss": {"risk": "safe_write", "permission": "auto", "verification": "candidate_state"},
     "memory.candidate.promote": {"risk": "safe_write", "permission": "confirm", "verification": "promoted_memory"},
+    "tasks.list": {"risk": "read", "permission": "auto", "verification": "task_list"},
+    "tasks.create": {"risk": "safe_write", "permission": "confirm", "verification": "stored_task"},
+    "tasks.update": {"risk": "safe_write", "permission": "confirm", "verification": "stored_task"},
+    "tasks.complete": {"risk": "safe_write", "permission": "confirm", "verification": "task_state"},
+    "tasks.delete": {"risk": "safe_write", "permission": "confirm", "verification": "task_absent"},
     "home_assistant.state": {"risk": "read", "permission": "auto", "verification": "device_state"},
     "home_assistant.service": {"risk": "reversible", "permission": "confirm", "verification": "service_response"},
     "calendar.events.list": {"risk": "read", "permission": "auto", "verification": "calendar_events"},
@@ -34,7 +39,7 @@ TOOLS = {
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
     """Policy is deterministic application code, never a model judgement."""
     if action in {
-        "memory.read", "memory.candidate.list", "home_assistant.state",
+        "memory.read", "memory.candidate.list", "tasks.list", "home_assistant.state",
         "calendar.events.list", "recall.search", "chat.local", "route",
     }:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
@@ -44,11 +49,14 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
             "auto",
             "Candidate-queue metadata is local working state and does not become durable memory.",
         )
-    if action in {"memory.write", "memory.correct", "memory.delete", "memory.candidate.promote"}:
+    if action in {
+        "memory.write", "memory.correct", "memory.delete", "memory.candidate.promote",
+        "tasks.create", "tasks.update", "tasks.complete", "tasks.delete",
+    }:
         return PolicyDecision(
             "safe_write",
             "auto" if confirmed else "confirm",
-            "The owner must explicitly confirm a durable memory change.",
+            "The owner must explicitly confirm this durable local change.",
         )
     if action == "home_assistant.service":
         return PolicyDecision("reversible", "auto" if confirmed else "confirm", "Changing a device state requires explicit confirmation.")
