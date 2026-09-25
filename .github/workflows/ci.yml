@@ -43,7 +43,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run Core tests
         run: python -m unittest discover -p 'test_*.py' -v
-      - name: Check Phase 3-11 smoke/deploy syntax
+      - name: Check Phase 3-12 smoke/deploy syntax
         run: |
           bash -n ../scripts/phase3-smoke.sh
           python -m py_compile ../scripts/google-oauth-bootstrap.py
@@ -60,6 +60,8 @@ jobs:
           bash -n ../scripts/deploy-phase10.sh
           bash -n ../scripts/phase11-life-work-operations-smoke.sh
           bash -n ../scripts/deploy-phase11.sh
+          bash -n ../scripts/phase12-autonomous-projects-smoke.sh
+          bash -n ../scripts/deploy-phase12.sh
 
   browser-worker:
     runs-on: ubuntu-latest

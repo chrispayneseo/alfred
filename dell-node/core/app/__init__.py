@@ -30,6 +30,8 @@ from . import proactive_intelligence as proactive_intelligence
 from . import phase10_acceptance as phase10_acceptance
 from . import operations as operations
 from . import phase11_acceptance as phase11_acceptance
+from . import projects as projects
+from . import phase12_acceptance as phase12_acceptance
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -45,11 +47,11 @@ for extra_router in (
     phase6_acceptance.router, experience.router, phase7_acceptance.router,
     authenticated_web.router, phase8_acceptance.router, knowledge.router,
     phase9_acceptance.router, proactive_intelligence.router, phase10_acceptance.router,
-    operations.router, phase11_acceptance.router,
+    operations.router, phase11_acceptance.router, projects.router, phase12_acceptance.router,
 ):
     proactive.router.routes.extend(extra_router.routes)
 
-# Phase 11 compiles operations into existing recipes/goals; no new executor hook.
+# Phase 12 coordinates existing operations/goals and adds no executor hook.
 goal_hooks.install()
 browser_actions.install()
 authenticated_web.install()
