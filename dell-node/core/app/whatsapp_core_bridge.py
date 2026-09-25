@@ -8,11 +8,9 @@ mutation proposal, which still requires the normal approval/resume path.
 
 from __future__ import annotations
 
-import sqlite3
-
 from fastapi import APIRouter, HTTPException
 
-from .approval_resume import get_proposal
+from .approval_resume import get_proposal, resolve_and_resume
 from .db import record_audit
 from .inbox_api import inbox_connection, parse_due
 from .lifecycle import get_request
@@ -88,6 +86,23 @@ def _command_from_review(row) -> str:
     return f"Create reminder: {clean_title} due {due}"
 
 
+async def _reject_orphan(approval_id: str, *, message_id: str, request_id: str,
+                         conversation_id: str | None, reason: str) -> None:
+    """Make a proposal unusable if it cannot become the inbox item's canonical link."""
+    resolution = await resolve_and_resume(approval_id, False)
+    record_audit(
+        "whatsapp.core_proposal_orphan_rejected",
+        {
+            "message_id": message_id,
+            "approval_id": approval_id,
+            "reason": reason,
+            "resolution_state": resolution.get("state"),
+        },
+        request_id,
+        conversation_id,
+    )
+
+
 @router.get("/{message_id}")
 async def whatsapp_core_status(message_id: str):
     row = _row(message_id)
@@ -124,38 +139,66 @@ async def propose_whatsapp_action(message_id: str):
     approval = result.get("approval") if isinstance(result.get("approval"), dict) else None
     approval_id = approval.get("id") if approval else None
     request_id = result.get("request_id")
+    conversation_id = result.get("conversation_id")
     if not isinstance(approval_id, str) or not approval_id or not isinstance(request_id, str):
         raise HTTPException(503, "Core did not return a resumable approval")
 
-    # First writer wins. A repeated POST returns the already-linked proposal and
-    # never creates another task/reminder approval for the same forwarded item.
-    with inbox_connection() as db:
-        updated = db.execute(
-            """UPDATE whatsapp_inbox
-               SET core_request_id = ?, core_approval_id = ?, core_proposed_at = CURRENT_TIMESTAMP
-               WHERE id = ? AND core_request_id IS NULL AND core_approval_id IS NULL""",
-            (request_id, approval_id, message_id),
+    # First writer wins. If persistence fails or another request linked the inbox
+    # item first, explicitly reject this proposal so no orphan approval remains
+    # actionable in Core.
+    try:
+        with inbox_connection() as db:
+            updated = db.execute(
+                """UPDATE whatsapp_inbox
+                   SET core_request_id = ?, core_approval_id = ?, core_proposed_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND core_request_id IS NULL AND core_approval_id IS NULL""",
+                (request_id, approval_id, message_id),
+            )
+            db.commit()
+    except Exception:
+        await _reject_orphan(
+            approval_id,
+            message_id=message_id,
+            request_id=request_id,
+            conversation_id=conversation_id,
+            reason="inbox_persistence_failed",
         )
-        db.commit()
+        raise
 
     stored = _row(message_id)
     if stored is None:
+        await _reject_orphan(
+            approval_id,
+            message_id=message_id,
+            request_id=request_id,
+            conversation_id=conversation_id,
+            reason="inbox_row_missing_after_proposal",
+        )
         raise HTTPException(404, "WhatsApp message not found")
+
     if updated.rowcount == 0 and stored["core_approval_id"] != approval_id:
-        # A concurrent request linked a different proposal first. The new one is
-        # left pending but never returned as the canonical WhatsApp linkage; log
-        # the anomaly so it can be reconciled rather than silently duplicated.
+        await _reject_orphan(
+            approval_id,
+            message_id=message_id,
+            request_id=request_id,
+            conversation_id=conversation_id,
+            reason="concurrent_proposal_lost_race",
+        )
         record_audit(
             "whatsapp.core_proposal_race",
-            {"message_id": message_id, "orphan_approval_id": approval_id},
+            {
+                "message_id": message_id,
+                "rejected_approval_id": approval_id,
+                "canonical_approval_id": stored["core_approval_id"],
+            },
             request_id,
-            result.get("conversation_id"),
+            conversation_id,
         )
 
     record_audit(
         "whatsapp.core_proposed",
         {"message_id": message_id, "approval_id": stored["core_approval_id"]},
         stored["core_request_id"],
-        result.get("conversation_id"),
+        conversation_id,
     )
     return _status_payload(stored)
