@@ -8,6 +8,10 @@ export interface ProactiveItem {
   source: string;
   kind: string;
   priority: number;
+  base_priority?: number;
+  reasoning_boost?: number;
+  reasoning?: string[];
+  correlated_sources?: string[];
   band: ProactiveBand;
   title: string;
   summary: string;
@@ -20,6 +24,14 @@ export interface ProactiveCounts {
   later: number;
 }
 
+export interface ProactiveReasoningSummary {
+  mode: "deterministic_cross_source_v1" | string;
+  cluster_count: number;
+  boosted_items: number;
+  creates_urgent: boolean;
+  cloud_models: boolean;
+}
+
 export interface ProactiveBrief {
   generated_at: string;
   headline: string;
@@ -28,6 +40,7 @@ export interface ProactiveBrief {
   items: ProactiveItem[];
   delivery: "disabled";
   synthesis: "deterministic_local";
+  reasoning?: ProactiveReasoningSummary;
 }
 
 export interface MorningBrief {
