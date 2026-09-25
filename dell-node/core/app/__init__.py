@@ -21,6 +21,8 @@ from . import execution_reliability as execution_reliability
 from . import reusable_workflows as reusable_workflows
 from . import observability as observability
 from . import hardening_acceptance as hardening_acceptance
+from . import daily_operations as daily_operations
+from . import phase6_acceptance as phase6_acceptance
 
 proactive_preferences.register_routes()
 proactive_brief.register_routes()
@@ -30,8 +32,8 @@ proactive_feedback.register_routes()
 proactive_acceptance.register_routes()
 
 # main.py already mounts proactive.router behind Alfred owner authentication.
-# Phase 5A-I contribute absolute /v1/core/* routes to that same authenticated
-# route collection without adding a second auth or execution boundary.
+# Phase 5A-I and Phase 6 contribute absolute /v1/core/* routes to that same
+# authenticated route collection without adding a second auth boundary.
 proactive.router.routes.extend(goals.router.routes)
 proactive.router.routes.extend(agent_loop.router.routes)
 proactive.router.routes.extend(workflows.router.routes)
@@ -41,14 +43,16 @@ proactive.router.routes.extend(browser_actions.router.routes)
 proactive.router.routes.extend(reusable_workflows.router.routes)
 proactive.router.routes.extend(observability.router.routes)
 proactive.router.routes.extend(hardening_acceptance.router.routes)
+proactive.router.routes.extend(daily_operations.router.routes)
+proactive.router.routes.extend(phase6_acceptance.router.routes)
 
 # Install the goal guard first. 5F adds a browser preflight guard to the base
 # executor, then 5E wraps that guarded executor. 5C remains outermost so verified
 # workflow bindings resolve before 5E computes operation identity and before the
 # 5F guard sees the final browser arguments. 5D still owns approval context and
 # 5B retains approval/restart continuation. 5G adds no executor hook: recipes
-# compile into the already-installed 5A-5F path. 5H and 5I are read-only and add
-# no execution hooks.
+# compile into the already-installed 5A-5F path. 5H, 5I and Phase 6 are additive
+# control/observability surfaces and install no execution hooks.
 goal_hooks.install()
 browser_actions.install()
 execution_reliability.install()
