@@ -1,9 +1,9 @@
-"""Phase 4C scheduled local observation and durable morning briefs.
+"""Scheduled local observation, durable morning briefs, and gated nudges.
 
-This module extends the existing proactive engine. It stores at most one
-morning-brief snapshot per local calendar day and can replace the Phase 4A
-background loop with a scheduler-aware equivalent. It never performs outbound
-delivery and never calls a cloud or local language model.
+The scheduler refreshes Alfred's local proactive feed and stores at most one
+morning-brief snapshot per local calendar day. Phase 4F may also ask the
+policy-gated delivery layer to send a generic phone nudge. The delivery layer is
+separately opt-in and never receives or transmits brief/item content.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from . import proactive, proactive_brief
+from . import proactive, proactive_brief, proactive_delivery
 from .config import settings
 from .db import connection, record_audit
 
@@ -184,12 +184,13 @@ async def maybe_generate(*, now: datetime | None = None, source_run_id: str | No
 
 
 async def scheduled_background_loop() -> None:
-    """Phase 4A polling plus Phase 4C once-per-day local brief generation."""
+    """Refresh, store any due brief, then evaluate generic push delivery."""
     while True:
         if settings.proactive_enabled:
             try:
                 result = await proactive.refresh()
                 await maybe_generate(source_run_id=result.get("run_id"))
+                await proactive_delivery.maybe_deliver()
             except Exception as exc:
                 record_audit("proactive.background_failed", {"error_type": type(exc).__name__})
         await asyncio.sleep(max(60, int(settings.proactive_poll_seconds)))
