@@ -4,6 +4,10 @@ Raw forwarded WhatsApp text remains untrusted inbox data. This bridge never send
 that text to the orchestrator as an instruction. Only the locally normalised
 review suggestion (task or dated reminder) can be converted into an exact Core
 mutation proposal, which still requires the normal approval/resume path.
+
+The router is also the already-authenticated Phase 3 Core surface, so the
+content-minimised capability snapshot is mounted here without broad main-app
+changes. Existing WhatsApp endpoint URLs remain unchanged.
 """
 
 from __future__ import annotations
@@ -11,13 +15,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from .approval_resume import get_proposal, resolve_and_resume
+from .capability_status import snapshot as capability_snapshot
 from .db import record_audit
 from .inbox_api import inbox_connection, parse_due
 from .lifecycle import get_request
 from .orchestrator import orchestrate
 
 
-router = APIRouter(prefix="/v1/core/whatsapp", tags=["whatsapp-core"])
+router = APIRouter(prefix="/v1/core", tags=["phase3-core"])
 
 
 def initialise() -> None:
@@ -103,7 +108,12 @@ async def _reject_orphan(approval_id: str, *, message_id: str, request_id: str,
     )
 
 
-@router.get("/{message_id}")
+@router.get("/capabilities")
+async def core_capability_status():
+    return await capability_snapshot()
+
+
+@router.get("/whatsapp/{message_id}")
 async def whatsapp_core_status(message_id: str):
     row = _row(message_id)
     if row is None:
@@ -111,7 +121,7 @@ async def whatsapp_core_status(message_id: str):
     return _status_payload(row)
 
 
-@router.post("/{message_id}/propose")
+@router.post("/whatsapp/{message_id}/propose")
 async def propose_whatsapp_action(message_id: str):
     """Create at most one exact-scope Core approval for a reviewed suggestion."""
     row = _row(message_id)
@@ -143,9 +153,6 @@ async def propose_whatsapp_action(message_id: str):
     if not isinstance(approval_id, str) or not approval_id or not isinstance(request_id, str):
         raise HTTPException(503, "Core did not return a resumable approval")
 
-    # First writer wins. If persistence fails or another request linked the inbox
-    # item first, explicitly reject this proposal so no orphan approval remains
-    # actionable in Core.
     try:
         with inbox_connection() as db:
             updated = db.execute(
