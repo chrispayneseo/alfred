@@ -71,6 +71,14 @@ class Settings:
         "ALFRED_PROACTIVE_GMAIL_QUERY", "is:unread newer_than:2d"
     ) or "is:unread newer_than:2d"
 
+    # Phase 4C stores one local morning-brief snapshot per local day. The morning
+    # brief setting is subordinate to ALFRED_PROACTIVE_ENABLED for background runs;
+    # authenticated manual generation remains available for validation.
+    proactive_morning_brief_enabled: bool = _env_bool("ALFRED_PROACTIVE_MORNING_BRIEF_ENABLED", True)
+    proactive_morning_brief_time: str = os.getenv("ALFRED_PROACTIVE_MORNING_BRIEF_TIME", "08:00") or "08:00"
+    proactive_morning_brief_max_items: int = int(os.getenv("ALFRED_PROACTIVE_MORNING_BRIEF_MAX_ITEMS", "8"))
+    proactive_brief_retention_days: int = int(os.getenv("ALFRED_PROACTIVE_BRIEF_RETENTION_DAYS", "14"))
+
     # Optional cloud specialists. A missing key disables the provider in Core.
     # These names intentionally match the existing Alfred web/server environment.
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
