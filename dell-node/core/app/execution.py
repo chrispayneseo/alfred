@@ -13,7 +13,7 @@ from .core import TOOLS, decide
 from .db import connection, create_approval, record_audit
 from .google_calendar import list_events as google_calendar_list_events
 from .integrations import action_available
-from . import memory_service
+from . import memory_service, task_service
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,16 @@ def _approval_summary(action: str, arguments: dict) -> str:
         if supersede is not None:
             return f"Promote memory candidate {candidate_id} and supersede memory {supersede}."
         return f"Promote memory candidate {candidate_id} to durable memory."
+    if action == "tasks.create":
+        kind = arguments.get("kind", "task")
+        return f"Create a new {kind}."
+    if action == "tasks.update":
+        return f"Edit task or reminder {arguments.get('source_id', 'unknown')}."
+    if action == "tasks.complete":
+        state = "complete" if arguments.get("completed") is True else "open"
+        return f"Mark task or reminder {arguments.get('source_id', 'unknown')} as {state}."
+    if action == "tasks.delete":
+        return f"Delete task or reminder {arguments.get('source_id', 'unknown')}."
     if action == "home_assistant.service":
         service = arguments.get("service", "unknown service")
         entity = arguments.get("entity_id", "unknown entity")
@@ -274,6 +284,57 @@ async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
             request_id=request_id,
         )
 
+    if action == "tasks.list":
+        kind = arguments.get("kind")
+        include_completed = arguments.get("include_completed", False)
+        limit = arguments.get("limit", 50)
+        if kind is not None and not isinstance(kind, str):
+            raise ValueError("Missing or invalid argument: kind")
+        if not isinstance(include_completed, bool):
+            raise ValueError("Missing or invalid argument: include_completed")
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise ValueError("Missing or invalid argument: limit")
+        return {"items": task_service.list_items(
+            kind=kind, include_completed=include_completed, limit=limit
+        )}
+
+    if action == "tasks.create":
+        kind = _require(arguments, "kind")
+        title = _require(arguments, "title")
+        due = arguments.get("due")
+        detail = arguments.get("detail", "")
+        if due is not None and not isinstance(due, str):
+            raise ValueError("Missing or invalid argument: due")
+        if not isinstance(detail, str):
+            raise ValueError("Missing or invalid argument: detail")
+        return {"item": task_service.create(kind=kind, title=title, due=due, detail=detail)}
+
+    if action == "tasks.update":
+        source_id = _require(arguments, "source_id")
+        title = _require(arguments, "title")
+        due = arguments.get("due")
+        detail = arguments.get("detail", "")
+        if due is not None and not isinstance(due, str):
+            raise ValueError("Missing or invalid argument: due")
+        if not isinstance(detail, str):
+            raise ValueError("Missing or invalid argument: detail")
+        return {"item": task_service.update(
+            source_id, title=title, due=due, detail=detail
+        )}
+
+    if action == "tasks.complete":
+        source_id = _require(arguments, "source_id")
+        completed = arguments.get("completed")
+        if not isinstance(completed, bool):
+            raise ValueError("Missing or invalid argument: completed")
+        return {"item": task_service.set_completed(source_id, completed)}
+
+    if action == "tasks.delete":
+        source_id = _require(arguments, "source_id")
+        if not task_service.delete(source_id):
+            raise LookupError("Task or reminder not found")
+        return {"source_id": source_id}
+
     if action == "home_assistant.state":
         entity_id = _require(arguments, "entity_id")
         return await home_assistant_state(entity_id)
@@ -338,6 +399,40 @@ def _verify(action: str, result: dict) -> dict:
             "memory_id": memory_id,
             "superseded_memory_id": result.get("superseded_memory_id"),
         }
+
+    if action == "tasks.list":
+        items = result.get("items")
+        ok = isinstance(items, list) and all(
+            isinstance(item, dict)
+            and isinstance(item.get("source_id"), str)
+            and item.get("kind") in {"task", "reminder"}
+            and isinstance(item.get("title"), str)
+            and isinstance(item.get("completed"), bool)
+            for item in items
+        )
+        return {"ok": ok, "method": "task_list", "item_count": len(items) if isinstance(items, list) else 0}
+
+    if action in {"tasks.create", "tasks.update"}:
+        item = result.get("item")
+        source_id = item.get("source_id") if isinstance(item, dict) else None
+        stored = task_service.get(source_id) if isinstance(source_id, str) else None
+        ok = bool(stored) and all(
+            stored.get(key) == item.get(key)
+            for key in ("source_id", "kind", "title", "due", "detail", "completed")
+        )
+        return {"ok": ok, "method": "stored_task", "source_id": source_id}
+
+    if action == "tasks.complete":
+        item = result.get("item")
+        source_id = item.get("source_id") if isinstance(item, dict) else None
+        stored = task_service.get(source_id) if isinstance(source_id, str) else None
+        ok = bool(stored) and stored.get("completed") == item.get("completed")
+        return {"ok": ok, "method": "task_state", "source_id": source_id}
+
+    if action == "tasks.delete":
+        source_id = result.get("source_id")
+        ok = isinstance(source_id, str) and task_service.get(source_id) is None
+        return {"ok": ok, "method": "task_absent", "source_id": source_id}
 
     if action == "home_assistant.state":
         ok = (
