@@ -43,6 +43,12 @@ TOOLS = {
     "email.messages.search": {"risk": "read", "permission": "auto", "verification": "email_search"},
     "email.message.get": {"risk": "read", "permission": "auto", "verification": "email_message"},
     "email.draft.create": {"risk": "external", "permission": "confirm", "verification": "email_draft"},
+    "browser.session.open": {"risk": "read", "permission": "auto", "verification": "browser_page_state"},
+    "browser.navigate": {"risk": "read", "permission": "auto", "verification": "browser_page_state"},
+    "browser.page.inspect": {"risk": "read", "permission": "auto", "verification": "browser_page_state"},
+    "browser.form.prepare": {"risk": "reversible", "permission": "auto", "verification": "browser_offline_form_state"},
+    "browser.submit": {"risk": "high_impact", "permission": "confirm", "verification": "browser_submission_dispatch"},
+    "browser.session.close": {"risk": "reversible", "permission": "auto", "verification": "browser_session_closed"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
@@ -51,6 +57,7 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
         "memory.read", "memory.candidate.list", "tasks.list", "home_assistant.state",
         "files.list", "files.search", "files.read",
         "calendar.events.list", "email.messages.search", "email.message.get",
+        "browser.session.open", "browser.navigate", "browser.page.inspect",
         "recall.search", "chat.local", "route",
     }:
         return PolicyDecision("read", "auto", "Read-only Core operation.")
@@ -71,6 +78,12 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
         )
     if action == "home_assistant.service":
         return PolicyDecision("reversible", "auto" if confirmed else "confirm", "Changing a device state requires explicit confirmation.")
+    if action in {"browser.form.prepare", "browser.session.close"}:
+        return PolicyDecision(
+            "reversible",
+            "auto",
+            "This changes only the ephemeral browser session and cannot submit external data.",
+        )
     if action in {"calendar.events.create", "calendar.events.update", "calendar.events.delete"}:
         return PolicyDecision(
             "external",
@@ -82,6 +95,12 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
             "external",
             "auto" if confirmed else "confirm",
             "Creating content in an external mailbox requires explicit confirmation.",
+        )
+    if action == "browser.submit":
+        return PolicyDecision(
+            "high_impact",
+            "auto" if confirmed else "confirm",
+            "Submitting a browser action can create an external effect and always requires exact-scope owner approval.",
         )
     return PolicyDecision("high_impact", "deny", "This action is not registered with Alfred Core.")
 
