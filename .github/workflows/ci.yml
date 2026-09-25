@@ -78,3 +78,30 @@ jobs:
           bash -n ../scripts/phase5-workflows-smoke.sh
           bash -n ../scripts/phase5-approval-engine-smoke.sh
           bash -n ../scripts/phase5-verification-recovery-smoke.sh
+          bash -n ../scripts/phase5-browser-actions-smoke.sh
+
+  browser-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dell-node/browser-worker
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: dell-node/browser-worker/requirements.txt
+      - name: Install worker dependencies
+        run: pip install -r requirements.txt
+      - name: Compile worker
+        run: python -m py_compile app/policy.py app/main.py
+      - name: Run browser policy tests
+        run: python -m unittest test_policy.py -v
+      - name: Validate pinned Playwright container version
+        run: |
+          grep -q '^playwright==1.63.0$' requirements.txt
+          grep -q 'mcr.microsoft.com/playwright/python:v1.63.0-noble' Dockerfile
