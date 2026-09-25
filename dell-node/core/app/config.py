@@ -2,6 +2,13 @@ from dataclasses import dataclass
 import os
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().casefold() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     api_key: str = os.getenv("ALFRED_API_KEY", "")
@@ -24,6 +31,7 @@ class Settings:
     google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     google_refresh_token: str = os.getenv("GOOGLE_REFRESH_TOKEN", "")
     google_calendar_id: str = os.getenv("GOOGLE_CALENDAR_ID", "primary") or "primary"
+    google_calendar_write_enabled: bool = _env_bool("GOOGLE_CALENDAR_WRITE_ENABLED", False)
     google_timeout_seconds: float = float(os.getenv("ALFRED_GOOGLE_TIMEOUT_SECONDS", "20"))
 
     # Optional cloud specialists. A missing key disables the provider in Core.
