@@ -91,6 +91,10 @@ jobs:
           bash -n ../scripts/phase8-secure-authenticated-web-smoke.sh
           bash -n ../scripts/deploy-phase8.sh
           python -m py_compile ../scripts/phase8-browser-profile-bootstrap.py
+      - name: Check Phase 9 scripts
+        run: |
+          bash -n ../scripts/phase9-deep-memory-smoke.sh
+          bash -n ../scripts/deploy-phase9.sh
 
   browser-worker:
     runs-on: ubuntu-latest
