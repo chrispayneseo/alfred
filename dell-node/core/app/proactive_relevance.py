@@ -13,7 +13,7 @@ import re
 from typing import Iterable
 
 
-GMAIL_RELEVANCE_MODE = "deterministic_metadata_v1"
+GMAIL_RELEVANCE_MODE = "deterministic_metadata_v2"
 
 
 @dataclass(frozen=True)
@@ -24,11 +24,13 @@ class GmailCategory:
     title_plural: str
     summary_singular: str
     summary_plural: str
-    phrases: tuple[str, ...]
+    strong_phrases: tuple[str, ...]
+    keywords: tuple[str, ...]
+    sender_terms: tuple[str, ...] = ()
 
 
-# Deliberately conservative. No Gmail category reaches the urgent >=90 band,
-# so metadata classification alone cannot bypass the normal interruption cooldown.
+# Gmail metadata can make an item important, but never urgent. Keeping every
+# category below 90 means metadata matching alone cannot bypass cooldown.
 _GMAIL_CATEGORIES: tuple[GmailCategory, ...] = (
     GmailCategory(
         key="security",
@@ -37,13 +39,19 @@ _GMAIL_CATEGORIES: tuple[GmailCategory, ...] = (
         title_plural="Account or security emails",
         summary_singular="1 unread message looks related to account access or security.",
         summary_plural="{count} unread messages look related to account access or security.",
-        phrases=(
+        strong_phrases=(
             "security alert", "unusual sign-in", "unusual sign in", "new sign-in",
-            "new sign in", "suspicious activity", "verify your identity",
+            "new sign in", "new login", "suspicious activity", "verify your identity",
             "verification code", "one-time code", "one time code", "password reset",
             "account locked", "account access", "fraud alert", "2-step verification",
-            "two-step verification",
+            "two-step verification", "two factor authentication", "login attempt",
+            "sign-in attempt", "sign in attempt",
         ),
+        keywords=(
+            "security", "sign-in", "signin", "login", "password", "verification",
+            "authenticate", "authentication", "suspicious", "fraud", "2fa", "otp",
+        ),
+        sender_terms=("security", "identity", "account"),
     ),
     GmailCategory(
         key="action",
@@ -52,11 +60,18 @@ _GMAIL_CATEGORIES: tuple[GmailCategory, ...] = (
         title_plural="Action-needed emails",
         summary_singular="1 unread message appears to need an action or response.",
         summary_plural="{count} unread messages appear to need an action or response.",
-        phrases=(
+        strong_phrases=(
             "action required", "response required", "please respond", "please reply",
             "approval required", "needs your attention", "complete by", "due by",
-            "deadline", "overdue", "final reminder", "urgent action",
+            "final reminder", "urgent action", "please review", "please sign",
+            "signature required", "confirm your details", "confirm your information",
+            "update required", "verify your details",
         ),
+        keywords=(
+            "deadline", "overdue", "approval", "approve", "respond", "reply",
+            "complete", "signature", "sign", "review", "required",
+        ),
+        sender_terms=("support", "admin"),
     ),
     GmailCategory(
         key="finance",
@@ -65,11 +80,18 @@ _GMAIL_CATEGORIES: tuple[GmailCategory, ...] = (
         title_plural="Money or payment emails",
         summary_singular="1 unread message looks related to a payment or money matter.",
         summary_plural="{count} unread messages look related to payments or money matters.",
-        phrases=(
+        strong_phrases=(
             "payment failed", "payment due", "card declined", "invoice due",
-            "direct debit", "refund", "renewal payment", "payment method",
-            "failed payment", "balance due",
+            "direct debit", "renewal payment", "payment method", "failed payment",
+            "balance due", "payment received", "payment successful", "payment confirmed",
+            "refund issued", "refund processed", "billing update", "amount due",
         ),
+        keywords=(
+            "payment", "invoice", "billing", "bill", "refund", "charged", "charge",
+            "receipt", "subscription", "renewal", "instalment", "installment", "balance",
+            "card", "credit", "debit",
+        ),
+        sender_terms=("billing", "payments", "accounts", "finance"),
     ),
     GmailCategory(
         key="booking",
@@ -78,11 +100,17 @@ _GMAIL_CATEGORIES: tuple[GmailCategory, ...] = (
         title_plural="Booking or travel emails",
         summary_singular="1 unread message looks related to a booking, appointment or journey.",
         summary_plural="{count} unread messages look related to bookings, appointments or journeys.",
-        phrases=(
+        strong_phrases=(
             "booking confirmed", "booking confirmation", "reservation confirmed",
             "appointment confirmed", "appointment reminder", "check-in", "check in",
-            "boarding pass", "flight", "train ticket", "event ticket", "hotel booking",
+            "boarding pass", "train ticket", "event ticket", "hotel booking",
+            "booking details", "reservation details", "travel details", "journey details",
         ),
+        keywords=(
+            "booking", "reservation", "appointment", "flight", "hotel", "ticket",
+            "boarding", "travel", "journey", "train", "event",
+        ),
+        sender_terms=("booking", "reservations", "travel", "tickets"),
     ),
     GmailCategory(
         key="delivery",
@@ -91,10 +119,16 @@ _GMAIL_CATEGORIES: tuple[GmailCategory, ...] = (
         title_plural="Delivery emails",
         summary_singular="1 unread message looks related to a parcel or delivery.",
         summary_plural="{count} unread messages look related to parcels or deliveries.",
-        phrases=(
-            "out for delivery", "parcel", "delivery update", "delivery today",
-            "has been dispatched", "has been shipped", "tracking update", "ready to collect",
+        strong_phrases=(
+            "out for delivery", "delivery update", "delivery today", "has been dispatched",
+            "has been shipped", "tracking update", "ready to collect", "on its way",
+            "your parcel", "your package", "delivery attempt", "delivered today",
         ),
+        keywords=(
+            "delivery", "parcel", "package", "dispatch", "dispatched", "shipped",
+            "shipping", "tracking", "courier", "delivered", "collection",
+        ),
+        sender_terms=("delivery", "tracking", "courier", "dispatch"),
     ),
 )
 
@@ -105,18 +139,55 @@ def _normalise(value: object) -> str:
     return re.sub(r"\s+", " ", value).strip().casefold()
 
 
+def _contains_term(text: str, term: str) -> bool:
+    """Match phrases or token-like terms without leaking source text."""
+    clean = term.casefold().strip()
+    if not clean:
+        return False
+    if any(char in clean for char in (" ", "-")):
+        return clean in text
+    return re.search(rf"(?<![a-z0-9]){re.escape(clean)}(?![a-z0-9])", text) is not None
+
+
+def _category_score(category: GmailCategory, *, subject: str, snippet: str, sender: str) -> int:
+    body = f"{subject} {snippet}".strip()
+    score = 0
+
+    # Exact multi-word signals carry the most weight.
+    if any(phrase in body for phrase in category.strong_phrases):
+        score += 4
+
+    # A category keyword in the subject is stronger than the same word in a
+    # snippet because subjects are normally the sender's explicit intent label.
+    if any(_contains_term(subject, term) for term in category.keywords):
+        score += 3
+    elif any(_contains_term(snippet, term) for term in category.keywords):
+        score += 2
+
+    # Sender metadata is only a supporting signal and never enough by itself.
+    if any(_contains_term(sender, term) for term in category.sender_terms):
+        score += 1
+
+    return score
+
+
 def gmail_category(message: dict) -> str | None:
     """Classify one metadata-only Gmail result without returning its content."""
-    haystack = " ".join((
-        _normalise(message.get("subject")),
-        _normalise(message.get("snippet")),
-    ))
-    if not haystack.strip():
+    subject = _normalise(message.get("subject"))
+    snippet = _normalise(message.get("snippet"))
+    sender = _normalise(message.get("from"))
+    if not (subject or snippet or sender):
         return None
-    for category in _GMAIL_CATEGORIES:
-        if any(phrase in haystack for phrase in category.phrases):
-            return category.key
-    return None
+
+    scored = [
+        (_category_score(category, subject=subject, snippet=snippet, sender=sender), category)
+        for category in _GMAIL_CATEGORIES
+    ]
+    best_score, best = max(scored, key=lambda pair: (pair[0], pair[1].priority))
+
+    # Two points means a meaningful snippet keyword; three points means a
+    # subject keyword. A sender/domain hint alone scores only one and is ignored.
+    return best.key if best_score >= 2 else None
 
 
 def gmail_relevance(messages: Iterable[dict]) -> dict:

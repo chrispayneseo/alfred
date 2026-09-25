@@ -36,7 +36,7 @@ class ProactiveRelevanceTests(unittest.IsolatedAsyncioTestCase):
         result = proactive_relevance.gmail_relevance(messages)
         encoded = json.dumps(result)
 
-        self.assertEqual(result["mode"], "deterministic_metadata_v1")
+        self.assertEqual(result["mode"], "deterministic_metadata_v2")
         self.assertEqual(result["total"], 3)
         self.assertEqual(result["classified"], 2)
         self.assertEqual(result["other"], 1)
@@ -49,6 +49,26 @@ class ProactiveRelevanceTests(unittest.IsolatedAsyncioTestCase):
             "private account", "ending 1234", "Private newsletter",
         ):
             self.assertNotIn(private_value, encoded)
+
+    def test_v2_classifies_common_real_world_wording(self):
+        cases = [
+            ({"subject": "New login detected", "snippet": "Check this login attempt"}, "security"),
+            ({"subject": "Please review and sign", "snippet": "Document awaiting signature"}, "action"),
+            ({"subject": "Your payment was received", "snippet": "Receipt available"}, "finance"),
+            ({"subject": "Your booking details", "snippet": "Travel information enclosed"}, "booking"),
+            ({"subject": "Your order is on its way", "snippet": "Track your parcel"}, "delivery"),
+        ]
+        for message, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(proactive_relevance.gmail_category(message), expected)
+
+    def test_sender_hint_alone_does_not_classify(self):
+        message = {
+            "from": "Security Team <security@example.com>",
+            "subject": "Monthly newsletter",
+            "snippet": "General news only",
+        }
+        self.assertIsNone(proactive_relevance.gmail_category(message))
 
     def test_gmail_classification_alone_never_reaches_urgent_band(self):
         messages = [
@@ -104,7 +124,7 @@ class ProactiveRelevanceTests(unittest.IsolatedAsyncioTestCase):
              patch.object(proactive.gmail, "search_messages", new=AsyncMock(return_value=payload)):
             signals, state = await proactive._gmail_signals(self.now)
 
-        self.assertEqual(state["relevance_mode"], "deterministic_metadata_v1")
+        self.assertEqual(state["relevance_mode"], "deterministic_metadata_v2")
         self.assertEqual(state["classified"], 1)
         self.assertEqual(state["other"], 1)
         self.assertEqual(state["categories"], {"security": 1})
@@ -119,6 +139,7 @@ class ProactiveRelevanceTests(unittest.IsolatedAsyncioTestCase):
     def test_status_declares_local_content_minimised_relevance(self):
         status = proactive_relevance.relevance_status()
         self.assertEqual(status["mode"], "deterministic_local")
+        self.assertEqual(status["gmail"], "deterministic_metadata_v2")
         self.assertFalse(status["stores_raw_gmail_metadata"])
         self.assertFalse(status["cloud_models"])
 
