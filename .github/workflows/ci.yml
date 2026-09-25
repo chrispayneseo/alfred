@@ -55,3 +55,7 @@ jobs:
         run: python -m unittest discover -p 'test_*.py' -v
       - name: Check Phase 3 smoke script syntax
         run: bash -n ../scripts/phase3-smoke.sh
+      - name: Check Google bootstrap and live smoke syntax
+        run: |
+          python -m py_compile ../scripts/google-oauth-bootstrap.py
+          bash -n ../scripts/google-live-smoke.sh
