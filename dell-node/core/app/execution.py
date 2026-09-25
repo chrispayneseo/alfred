@@ -11,6 +11,7 @@ from uuid import uuid4
 from .clients import home_assistant, home_assistant_state
 from .core import TOOLS, decide
 from .db import connection, create_approval, record_audit
+from .google_calendar import list_events as google_calendar_list_events
 from .integrations import action_available
 from . import memory_service
 
@@ -282,6 +283,14 @@ async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
         entity_id = _require(arguments, "entity_id")
         return await home_assistant(service, entity_id)
 
+    if action == "calendar.events.list":
+        start = _require(arguments, "start")
+        end = _require(arguments, "end")
+        limit = arguments.get("limit", 20)
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise ValueError("Missing or invalid argument: limit")
+        return await google_calendar_list_events(start, end, limit)
+
     raise ValueError("No execution adapter is registered for this action")
 
 
@@ -341,6 +350,23 @@ def _verify(action: str, result: dict) -> dict:
 
     if action == "home_assistant.service":
         return {"ok": result.get("ok") is True, "method": "service_response"}
+
+    if action == "calendar.events.list":
+        events = result.get("events")
+        window = result.get("window")
+        ok = result.get("ok") is True and isinstance(events, list) and isinstance(window, dict)
+        if ok:
+            for event in events:
+                if not isinstance(event, dict) or not all(
+                    isinstance(event.get(key), str) for key in ("id", "summary", "start", "end", "status")
+                ) or not isinstance(event.get("all_day"), bool):
+                    ok = False
+                    break
+        return {
+            "ok": ok,
+            "method": "calendar_events",
+            "event_count": len(events) if isinstance(events, list) else 0,
+        }
 
     return {"ok": False, "method": "unregistered"}
 
