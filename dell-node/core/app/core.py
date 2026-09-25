@@ -51,7 +51,11 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
 
 
 def tool_registry() -> list[dict]:
-    return [{"name": name, **definition} for name, definition in TOOLS.items()]
+    # Import lazily so the transport/policy boundary does not depend on an
+    # integration implementation during module initialisation.
+    from .integrations import action_owner
+    return [{"name": name, "integration": action_owner(name), **definition}
+            for name, definition in TOOLS.items()]
 
 
 def event_decision(event_type: str) -> str:
