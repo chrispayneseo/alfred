@@ -1,9 +1,10 @@
-"""Minimal read-only Google Calendar adapter for Alfred Core.
+"""Minimal Google Calendar adapter for Alfred Core.
 
 OAuth refresh credentials remain in the Dell environment. Event responses are
 intentionally data-minimised before they cross the integration boundary into
 Core: descriptions, attendees, conferencing data and arbitrary properties are
-not returned.
+not returned. Calendar writes require an explicit Core-side feature gate and
+exact-scope approval before this adapter is invoked.
 """
 
 from __future__ import annotations
@@ -32,6 +33,10 @@ def configured() -> bool:
     )
 
 
+def write_enabled() -> bool:
+    return configured() and bool(config.settings.google_calendar_write_enabled)
+
+
 def _parse_aware(value: str, name: str) -> datetime:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be an RFC3339 datetime")
@@ -52,6 +57,16 @@ def validate_window(start: str, end: str) -> tuple[datetime, datetime]:
         raise ValueError("Calendar end must be after start")
     if end_dt - start_dt > timedelta(days=MAX_WINDOW_DAYS):
         raise ValueError(f"Calendar read window cannot exceed {MAX_WINDOW_DAYS} days")
+    return start_dt, end_dt
+
+
+def validate_event_window(start: str, end: str) -> tuple[datetime, datetime]:
+    start_dt = _parse_aware(start, "start")
+    end_dt = _parse_aware(end, "end")
+    if end_dt <= start_dt:
+        raise ValueError("Calendar event end must be after start")
+    if end_dt - start_dt > timedelta(days=7):
+        raise ValueError("Calendar event duration cannot exceed 7 days")
     return start_dt, end_dt
 
 
@@ -115,6 +130,25 @@ def _sanitise_event(raw: object) -> dict | None:
     }
 
 
+def _event_payload(summary: str, start: str, end: str) -> dict:
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("Calendar event summary is required")
+    if len(summary.strip()) > 500:
+        raise ValueError("Calendar event summary cannot exceed 500 characters")
+    start_dt, end_dt = validate_event_window(start, end)
+    return {
+        "summary": summary.strip(),
+        "start": {"dateTime": start_dt.isoformat()},
+        "end": {"dateTime": end_dt.isoformat()},
+    }
+
+
+def _event_id(value: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 512:
+        raise ValueError("Invalid Calendar event id")
+    return value.strip()
+
+
 async def list_events(start: str, end: str, limit: int = 20) -> dict:
     start_dt, end_dt = validate_window(start, end)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > MAX_RESULTS:
@@ -154,6 +188,66 @@ async def list_events(start: str, end: str, limit: int = 20) -> dict:
     }
 
 
+async def create_event(summary: str, start: str, end: str) -> dict:
+    if not write_enabled():
+        raise RuntimeError("Google Calendar writes are disabled")
+    payload = _event_payload(summary, start, end)
+    token = await _access_token()
+    settings = config.settings
+    calendar_id = quote(settings.google_calendar_id, safe="")
+    async with httpx.AsyncClient(timeout=settings.google_timeout_seconds) as client:
+        response = await client.post(
+            f"{CALENDAR_API}/calendars/{calendar_id}/events",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        raw = response.json()
+    event = _sanitise_event(raw)
+    if event is None:
+        raise RuntimeError("Google Calendar returned an invalid event")
+    return {"ok": True, "event": event}
+
+
+async def update_event(event_id: str, summary: str, start: str, end: str) -> dict:
+    if not write_enabled():
+        raise RuntimeError("Google Calendar writes are disabled")
+    payload = _event_payload(summary, start, end)
+    token = await _access_token()
+    settings = config.settings
+    calendar_id = quote(settings.google_calendar_id, safe="")
+    safe_event_id = quote(_event_id(event_id), safe="")
+    async with httpx.AsyncClient(timeout=settings.google_timeout_seconds) as client:
+        response = await client.patch(
+            f"{CALENDAR_API}/calendars/{calendar_id}/events/{safe_event_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        raw = response.json()
+    event = _sanitise_event(raw)
+    if event is None or event["id"] != event_id:
+        raise RuntimeError("Google Calendar returned an invalid updated event")
+    return {"ok": True, "event": event}
+
+
+async def delete_event(event_id: str) -> dict:
+    if not write_enabled():
+        raise RuntimeError("Google Calendar writes are disabled")
+    token = await _access_token()
+    settings = config.settings
+    calendar_id = quote(settings.google_calendar_id, safe="")
+    clean_event_id = _event_id(event_id)
+    safe_event_id = quote(clean_event_id, safe="")
+    async with httpx.AsyncClient(timeout=settings.google_timeout_seconds) as client:
+        response = await client.delete(
+            f"{CALENDAR_API}/calendars/{calendar_id}/events/{safe_event_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+    return {"ok": True, "event_id": clean_event_id, "deleted": True}
+
+
 async def health() -> dict:
     """Validate credentials with no event content in the returned health data."""
     if not configured():
@@ -168,6 +262,6 @@ async def health() -> dict:
                 headers={"Authorization": f"Bearer {token}"},
             )
             response.raise_for_status()
-        return {"state": "ready"}
+        return {"state": "ready", "write_enabled": bool(settings.google_calendar_write_enabled)}
     except Exception as exc:
-        return {"state": "unavailable", "error_type": type(exc).__name__}
+        return {"state": "unavailable", "error_type": type(exc).__name__, "write_enabled": False}
