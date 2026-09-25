@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AgentActivity } from "./AgentActivity";
+import { DailyCommandCentre } from "./DailyCommandCentre";
 import { ProactiveBriefPanel } from "./ProactiveBriefPanel";
 import { completeLocalItem, editLocalItem, forgetLocalItem, listFiledWhatsApp, type FiledInboxItem } from "../integrations/local/api";
 
@@ -92,6 +93,7 @@ export function LocalActions() {
   const today = `${part("year")}-${part("month")}-${part("day")}`;
 
   return <>
+    <DailyCommandCentre />
     <AgentActivity />
     <ProactiveBriefPanel />
     <section className="mb-8 rounded-2xl border border-line p-4 dark:border-line-dark">
