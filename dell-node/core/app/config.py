@@ -49,13 +49,14 @@ class Settings:
     gmail_timeout_seconds: float = float(os.getenv("ALFRED_GMAIL_TIMEOUT_SECONDS", "20"))
 
     # Gmail mutation credentials are deliberately separate from read credentials.
-    # The first write capability is draft creation only and remains disabled until
-    # both a write-capable token and the explicit feature gate are present.
+    # Draft creation and sending each have their own explicit feature gate. Sending
+    # is additionally restricted to unchanged drafts Alfred previously verified.
     gmail_write_client_id: str = os.getenv("GMAIL_WRITE_CLIENT_ID", "")
     gmail_write_client_secret: str = os.getenv("GMAIL_WRITE_CLIENT_SECRET", "")
     gmail_write_refresh_token: str = os.getenv("GMAIL_WRITE_REFRESH_TOKEN", "")
     gmail_write_user_id: str = os.getenv("GMAIL_WRITE_USER_ID", "me") or "me"
     gmail_write_enabled: bool = _env_bool("GMAIL_WRITE_ENABLED", False)
+    gmail_send_enabled: bool = _env_bool("GMAIL_SEND_ENABLED", False)
 
     # Optional cloud specialists. A missing key disables the provider in Core.
     # These names intentionally match the existing Alfred web/server environment.
