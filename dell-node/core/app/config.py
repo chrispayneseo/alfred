@@ -57,6 +57,20 @@ class Settings:
     gmail_write_user_id: str = os.getenv("GMAIL_WRITE_USER_ID", "me") or "me"
     gmail_write_enabled: bool = _env_bool("GMAIL_WRITE_ENABLED", False)
 
+    # Phase 4 proactive observation is local-first and opt-in. Enabling this only
+    # refreshes Alfred's local feed; outbound delivery remains a separate feature.
+    proactive_enabled: bool = _env_bool("ALFRED_PROACTIVE_ENABLED", False)
+    proactive_poll_seconds: int = int(os.getenv("ALFRED_PROACTIVE_POLL_SECONDS", "900"))
+    proactive_quiet_start: str = os.getenv("ALFRED_PROACTIVE_QUIET_START", "22:00") or "22:00"
+    proactive_quiet_end: str = os.getenv("ALFRED_PROACTIVE_QUIET_END", "07:00") or "07:00"
+    proactive_min_priority: int = int(os.getenv("ALFRED_PROACTIVE_MIN_PRIORITY", "60"))
+    proactive_cooldown_minutes: int = int(os.getenv("ALFRED_PROACTIVE_COOLDOWN_MINUTES", "180"))
+    proactive_task_horizon_days: int = int(os.getenv("ALFRED_PROACTIVE_TASK_HORIZON_DAYS", "2"))
+    proactive_calendar_hours: int = int(os.getenv("ALFRED_PROACTIVE_CALENDAR_HOURS", "24"))
+    proactive_gmail_query: str = os.getenv(
+        "ALFRED_PROACTIVE_GMAIL_QUERY", "is:unread newer_than:2d"
+    ) or "is:unread newer_than:2d"
+
     # Optional cloud specialists. A missing key disables the provider in Core.
     # These names intentionally match the existing Alfred web/server environment.
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
