@@ -80,6 +80,7 @@ jobs:
           bash -n ../scripts/phase5-verification-recovery-smoke.sh
           bash -n ../scripts/phase5-browser-actions-smoke.sh
           bash -n ../scripts/phase5-reusable-workflows-smoke.sh
+          bash -n ../scripts/phase5-agent-observability-smoke.sh
 
   browser-worker:
     runs-on: ubuntu-latest
