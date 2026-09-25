@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
+
 from .config import settings
 from .db import connection, record_audit
 
 URGENT_PRIORITY = 90
 IMPORTANT_PRIORITY = 70
+_ROUTES_REGISTERED = False
 
 
 def _last_surface_age_minutes(now: datetime) -> float | None:
@@ -108,3 +111,30 @@ def mark_surfaced(item_id: str, *, now: datetime | None = None) -> bool:
     if result.rowcount:
         record_audit("proactive.surfaced", {"item_id": item_id, "delivery": "disabled"})
     return bool(result.rowcount)
+
+
+def register_routes() -> None:
+    """Attach Phase 4B endpoints to the already-authenticated proactive router."""
+    global _ROUTES_REGISTERED
+    if _ROUTES_REGISTERED:
+        return
+    from . import proactive
+
+    @proactive.router.get("/brief")
+    async def get_brief(limit: int = 8):
+        try:
+            return build_brief(limit=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @proactive.router.get("/interruption")
+    async def get_interruption_decision():
+        return interruption_decision()
+
+    @proactive.router.post("/items/{item_id}/surface")
+    async def surface_item(item_id: str):
+        if not mark_surfaced(item_id):
+            raise HTTPException(status_code=404, detail="Proactive item not found")
+        return {"surfaced": True, "delivery": "disabled"}
+
+    _ROUTES_REGISTERED = True
