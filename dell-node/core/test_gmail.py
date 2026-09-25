@@ -35,30 +35,39 @@ class GmailIntegrationTests(unittest.TestCase):
             gmail_user_id="me",
         )
 
-    def test_gmail_reads_stay_read_only_and_draft_is_separately_gated(self):
+    def test_gmail_reads_stay_read_only_and_mutations_are_separately_gated(self):
         configured = self._configured()
         with patch.object(config, "settings", configured):
             integration = integrations.get_integration("gmail")
-            draft_available, reason = integrations.action_available("email.draft.create")
+            draft_available, draft_reason = integrations.action_available("email.draft.create")
+            send_available, send_reason = integrations.action_available("email.draft.send")
         self.assertTrue(integration["configured"])
         self.assertEqual(integration["state"], "ready")
         capabilities = {item["action"]: item for item in integration["capabilities"]}
         self.assertEqual(
             set(capabilities),
-            {"email.messages.search", "email.message.get", "email.draft.create"},
+            {"email.messages.search", "email.message.get", "email.draft.create", "email.draft.send"},
         )
         self.assertEqual(capabilities["email.messages.search"]["mode"], "read")
         self.assertEqual(capabilities["email.message.get"]["mode"], "read")
         self.assertTrue(capabilities["email.messages.search"]["enabled"])
         self.assertTrue(capabilities["email.message.get"]["enabled"])
         self.assertEqual(capabilities["email.draft.create"]["mode"], "write")
+        self.assertEqual(capabilities["email.draft.send"]["mode"], "action")
         self.assertFalse(capabilities["email.draft.create"]["enabled"])
+        self.assertFalse(capabilities["email.draft.send"]["enabled"])
         self.assertFalse(draft_available)
-        self.assertIn("write capability is disabled", reason)
+        self.assertFalse(send_available)
+        self.assertIn("write capability is disabled", draft_reason)
+        self.assertIn("write capability is disabled", send_reason)
         self.assertEqual(decide("email.draft.create").decision, "confirm")
         self.assertEqual(decide("email.draft.create").level, "external")
+        self.assertEqual(decide("email.draft.send").decision, "confirm")
+        self.assertEqual(decide("email.draft.send").level, "high_impact")
         self.assertIn("email.draft.create", TOOLS)
+        self.assertIn("email.draft.send", TOOLS)
         self.assertIn("email.draft.create", integration_adapters.registered_actions())
+        self.assertIn("email.draft.send", integration_adapters.registered_actions())
         for action in ("email.send", "email.archive", "email.delete", "email.labels.modify"):
             self.assertNotIn(action, TOOLS)
             self.assertNotIn(action, integration_adapters.registered_actions())
@@ -70,6 +79,7 @@ class GmailIntegrationTests(unittest.TestCase):
             gmail_write_client_secret="gmail-write-client-secret",
             gmail_write_refresh_token="gmail-write-refresh-token",
             gmail_write_enabled=True,
+            gmail_send_enabled=True,
         )
         with patch.object(config, "settings", configured):
             registry = integrations.integration_registry()
