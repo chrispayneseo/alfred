@@ -86,6 +86,11 @@ jobs:
         run: bash -n ../scripts/phase6-daily-utility-smoke.sh
       - name: Check Phase 7 smoke script syntax
         run: bash -n ../scripts/phase7-personal-agent-smoke.sh
+      - name: Check Phase 8 scripts
+        run: |
+          bash -n ../scripts/phase8-secure-authenticated-web-smoke.sh
+          bash -n ../scripts/deploy-phase8.sh
+          python -m py_compile ../scripts/phase8-browser-profile-bootstrap.py
 
   browser-worker:
     runs-on: ubuntu-latest
@@ -105,9 +110,9 @@ jobs:
       - name: Install worker dependencies
         run: pip install -r requirements.txt
       - name: Compile worker
-        run: python -m py_compile app/policy.py app/main.py
+        run: python -m py_compile app/policy.py app/main.py app/auth_profiles.py app/combined.py
       - name: Run browser policy tests
-        run: python -m unittest test_policy.py -v
+        run: python -m unittest test_policy.py test_auth_profiles.py -v
       - name: Validate pinned Playwright container version
         run: |
           grep -q '^playwright==1.63.0$' requirements.txt

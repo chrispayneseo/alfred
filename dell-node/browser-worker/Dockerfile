@@ -10,4 +10,4 @@ COPY test_policy.py ./test_policy.py
 RUN chown -R pwuser:pwuser /app
 USER pwuser
 EXPOSE 8090
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8090"]
+CMD ["uvicorn", "app.combined:app", "--host", "0.0.0.0", "--port", "8090"]

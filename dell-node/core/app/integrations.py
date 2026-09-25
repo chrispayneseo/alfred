@@ -102,6 +102,7 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
         boundary="cloud",
         capabilities=(
             Capability("browser.session.open", "Open one isolated public web session", "read", True, ("web_page", "url")),
+            Capability("browser.authenticated.session.open", "Open one human-authenticated profile session", "read", True, ("web_page", "url", "browser_profile_id")),
             Capability("browser.navigate", "Navigate an isolated session to a public HTTP(S) URL", "read", True, ("web_page", "url")),
             Capability("browser.page.inspect", "Inspect bounded text and form metadata from the current page", "read", False, ("web_page", "form_metadata")),
             Capability("browser.form.prepare", "Prepare non-sensitive form fields without network submission", "action", False, ("form_state",)),

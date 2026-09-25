@@ -1,0 +1,1 @@
+Phase 8 boundary: human-authenticated profile bootstrap only; no Alfred password/OTP/card/CAPTCHA entry; authenticated open is read-only; consequential submit remains browser.submit with existing exact-scope owner approval and browser-submit kill switch.

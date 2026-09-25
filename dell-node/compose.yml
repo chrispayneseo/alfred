@@ -25,10 +25,10 @@ services:
       - "127.0.0.1:8080:8080"
     mem_limit: 512m
 
-  # Phase 5F runs Chromium outside Core. The worker receives no Alfred database,
-  # Gmail/Calendar credentials, local-file mount or cloud-model keys. Compose
-  # interpolates only these explicit browser variables from the host .env.
-  # The worker exposes no host port.
+  # Phase 5F runs Chromium outside Core. Phase 8 adds a read-only mount containing
+  # human-bootstrapped Playwright storage-state files. The worker still receives
+  # no Alfred database, Gmail/Calendar credentials, local-file mount or cloud-model
+  # keys, and it exposes no host port.
   browser-worker:
     build: ./browser-worker
     profiles: ["browser"]
@@ -38,6 +38,9 @@ services:
       ALFRED_BROWSER_MAX_SESSIONS: ${ALFRED_BROWSER_MAX_SESSIONS:-3}
       ALFRED_BROWSER_SESSION_TTL_SECONDS: ${ALFRED_BROWSER_SESSION_TTL_SECONDS:-1800}
       ALFRED_BROWSER_NAVIGATION_TIMEOUT_MS: ${ALFRED_BROWSER_NAVIGATION_TIMEOUT_MS:-15000}
+      ALFRED_BROWSER_PROFILE_ROOT: /profiles
+    volumes:
+      - /opt/alfred-node/browser-profiles:/profiles:ro
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,size=768m,mode=1777
