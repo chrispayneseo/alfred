@@ -53,3 +53,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run Core tests
         run: python -m unittest discover -p 'test_*.py' -v
+      - name: Check Phase 3 smoke script syntax
+        run: bash -n ../scripts/phase3-smoke.sh
