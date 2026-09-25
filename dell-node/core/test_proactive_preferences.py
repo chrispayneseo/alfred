@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from app import db, proactive, proactive_brief, proactive_preferences, proactive_schedule
+from app import config, db, proactive, proactive_brief, proactive_preferences, proactive_schedule
 
 
 class ProactivePreferenceTests(unittest.TestCase):
@@ -15,10 +15,18 @@ class ProactivePreferenceTests(unittest.TestCase):
         self.db_path = str(Path(self.temp.name) / "core.sqlite3")
         self.db_patch = patch.object(db, "settings", replace(db.settings, sqlite_path=self.db_path))
         self.db_patch.start()
+        self.original_config = config.settings
+        self.original_proactive = proactive.settings
+        self.original_brief = proactive_brief.settings
+        self.original_schedule = proactive_schedule.settings
         db.initialise()
         proactive_preferences.initialise()
 
     def tearDown(self):
+        config.settings = self.original_config
+        proactive.settings = self.original_proactive
+        proactive_brief.settings = self.original_brief
+        proactive_schedule.settings = self.original_schedule
         self.db_patch.stop()
         self.temp.cleanup()
 
@@ -59,7 +67,6 @@ class ProactivePreferenceTests(unittest.TestCase):
             poll_seconds=600,
             morning_brief_time="07:45",
         ))
-        proactive_preferences.apply_runtime_preferences()
         self.assertFalse(proactive.settings.proactive_enabled)
         self.assertFalse(proactive_brief.settings.proactive_enabled)
         self.assertFalse(proactive_schedule.settings.proactive_enabled)
