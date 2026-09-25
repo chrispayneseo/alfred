@@ -4,8 +4,8 @@ Environment variables remain the safe defaults. This module stores only explicit
 local overrides in Alfred's SQLite database so the owner can change proactive
 behaviour from the private PWA without editing .env or restarting Core.
 
-These preferences affect local observation and briefing only. Outbound delivery
-remains disabled elsewhere in the Phase 4 boundary.
+Phase 4F adds a separate opt-in for generic ntfy nudges. The preference never
+contains the ntfy topic and cannot weaken the deterministic interruption policy.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ _KEYS = (
     "cooldown_minutes",
     "morning_brief_enabled",
     "morning_brief_time",
+    "push_enabled",
 )
 
 _ATTRS = {
@@ -42,9 +43,10 @@ _ATTRS = {
     "cooldown_minutes": "proactive_cooldown_minutes",
     "morning_brief_enabled": "proactive_morning_brief_enabled",
     "morning_brief_time": "proactive_morning_brief_time",
+    "push_enabled": "proactive_push_enabled",
 }
 
-_BOOL_KEYS = {"enabled", "morning_brief_enabled"}
+_BOOL_KEYS = {"enabled", "morning_brief_enabled", "push_enabled"}
 _INT_KEYS = {"poll_seconds", "min_priority", "cooldown_minutes"}
 _HOOKS_INSTALLED = False
 _BACKGROUND_ACTIVE = 0
@@ -60,6 +62,7 @@ class PreferencesUpdate(BaseModel):
     cooldown_minutes: int | None = Field(default=None, ge=0, le=1440)
     morning_brief_enabled: bool | None = None
     morning_brief_time: str | None = None
+    push_enabled: bool | None = None
 
     @field_validator("quiet_start", "quiet_end", "morning_brief_time")
     @classmethod
@@ -115,7 +118,7 @@ def current(defaults=settings) -> dict:
             result[key] = default if decoded is None else decoded
         else:
             result[key] = default
-    result["delivery"] = "disabled"
+    result["delivery"] = "generic_ntfy" if bool(result["push_enabled"]) else "disabled"
     result["source"] = "local_override" if overrides else "environment_defaults"
     return result
 
@@ -136,6 +139,7 @@ def apply_runtime_preferences() -> dict:
         proactive_cooldown_minutes=int(effective["cooldown_minutes"]),
         proactive_morning_brief_enabled=bool(effective["morning_brief_enabled"]),
         proactive_morning_brief_time=str(effective["morning_brief_time"]),
+        proactive_push_enabled=bool(effective["push_enabled"]),
     )
 
     from . import config
@@ -145,6 +149,7 @@ def apply_runtime_preferences() -> dict:
         "app.proactive",
         "app.proactive_brief",
         "app.proactive_schedule",
+        "app.proactive_delivery",
         "app.main",
     ):
         module = sys.modules.get(module_name)
@@ -185,7 +190,7 @@ def update(values: PreferencesUpdate, defaults=settings) -> dict:
                     updated_at = CURRENT_TIMESTAMP""", (key, _encode(key, value)))
     record_audit("proactive.preferences_updated", {
         "keys": sorted(changes),
-        "delivery": "disabled",
+        "push_enabled": bool(changes.get("push_enabled")) if "push_enabled" in changes else None,
     })
     apply_runtime_preferences()
     after = current(defaults)
