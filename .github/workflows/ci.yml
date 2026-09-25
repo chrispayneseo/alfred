@@ -82,6 +82,8 @@ jobs:
           bash -n ../scripts/phase5-reusable-workflows-smoke.sh
           bash -n ../scripts/phase5-agent-observability-smoke.sh
           bash -n ../scripts/phase5-hardening-acceptance-smoke.sh
+      - name: Check Phase 6 smoke script syntax
+        run: bash -n ../scripts/phase6-daily-utility-smoke.sh
 
   browser-worker:
     runs-on: ubuntu-latest
