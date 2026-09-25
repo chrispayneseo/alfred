@@ -1,9 +1,9 @@
 """Separately scoped Gmail mutation adapter for Alfred Core.
 
-This module intentionally starts with draft creation only. It does not expose
-send, reply, forward, archive, label, attachment or delete operations. Write
-credentials are distinct from the read-only Gmail credentials and require an
-explicit feature gate before Core can expose the capability.
+Draft creation and sending are intentionally narrow. Sending is allowed only for
+an unchanged draft that Alfred previously created through a completed, verified
+Core execution. There are no arbitrary compose-and-send, reply, forward, archive,
+label, attachment or delete operations.
 """
 
 from __future__ import annotations
@@ -12,16 +12,19 @@ import base64
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
+import json
 import re
 
 import httpx
 
 from . import config
+from .db import connection
 
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 EMAIL_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+DRAFT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 MAX_SUBJECT_CHARS = 300
 MAX_BODY_CHARS = 10000
 
@@ -38,6 +41,10 @@ def configured() -> bool:
 
 def enabled() -> bool:
     return bool(config.settings.gmail_write_enabled and configured())
+
+
+def send_enabled() -> bool:
+    return bool(config.settings.gmail_send_enabled and enabled())
 
 
 async def _access_token() -> str:
@@ -89,6 +96,12 @@ def _body(value: str) -> str:
     return clean
 
 
+def _draft_id(value: str) -> str:
+    if not isinstance(value, str) or not DRAFT_ID_RE.fullmatch(value.strip()):
+        raise ValueError("Invalid Gmail draft id")
+    return value.strip()
+
+
 def _raw_message(to: str, subject: str, body: str) -> str:
     message = EmailMessage()
     message["To"] = to
@@ -137,13 +150,75 @@ def _verified_draft(raw: object, *, expected_to: str, expected_subject: str,
     if not verified:
         raise RuntimeError("Gmail draft read-back did not match the approved content")
     return {
-        "id": draft_id[:256],
+        "id": _draft_id(draft_id),
         "message_id": message_id[:256],
         "to": expected_to,
         "subject": expected_subject,
         "body_chars": len(expected_body),
         "verified": True,
     }
+
+
+def _execution_table_exists() -> bool:
+    with connection() as db:
+        return db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_executions'"
+        ).fetchone() is not None
+
+
+def _approved_draft_arguments(draft_id: str) -> dict | None:
+    """Return the exact approved content for a verified Alfred-created draft."""
+    clean_id = _draft_id(draft_id)
+    if not _execution_table_exists():
+        return None
+    with connection() as db:
+        rows = db.execute(
+            """SELECT arguments, result, verification
+               FROM core_executions
+               WHERE action = 'email.draft.create' AND state = 'completed'
+               ORDER BY completed_at DESC LIMIT 200"""
+        ).fetchall()
+    for row in rows:
+        try:
+            result = json.loads(row["result"] or "{}")
+            verification = json.loads(row["verification"] or "{}")
+            arguments = json.loads(row["arguments"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        draft = result.get("draft") if isinstance(result, dict) else None
+        if not isinstance(draft, dict) or draft.get("id") != clean_id:
+            continue
+        if verification.get("ok") is not True or draft.get("verified") is not True:
+            continue
+        try:
+            return {
+                "to": _recipient(arguments.get("to")),
+                "subject": _subject(arguments.get("subject")),
+                "body": _body(arguments.get("body")),
+            }
+        except ValueError:
+            return None
+    return None
+
+
+def _already_sent_by_alfred(draft_id: str) -> bool:
+    clean_id = _draft_id(draft_id)
+    if not _execution_table_exists():
+        return False
+    with connection() as db:
+        rows = db.execute(
+            """SELECT arguments FROM core_executions
+               WHERE action = 'email.draft.send' AND state = 'completed'
+               ORDER BY completed_at DESC LIMIT 200"""
+        ).fetchall()
+    for row in rows:
+        try:
+            arguments = json.loads(row["arguments"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if arguments.get("draft_id") == clean_id:
+            return True
+    return False
 
 
 async def create_draft(to: str, subject: str, body: str) -> dict:
@@ -180,18 +255,83 @@ async def create_draft(to: str, subject: str, body: str) -> dict:
     return {"ok": True, "draft": verified}
 
 
+async def send_draft(draft_id: str) -> dict:
+    clean_id = _draft_id(draft_id)
+    if not send_enabled():
+        raise RuntimeError("Gmail sending is not enabled")
+    if _already_sent_by_alfred(clean_id):
+        raise PermissionError("This Gmail draft has already been sent by Alfred")
+    approved = _approved_draft_arguments(clean_id)
+    if approved is None:
+        raise PermissionError("Only an unchanged, verified Alfred-created draft can be sent")
+
+    token = await _access_token()
+    settings = config.settings
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=settings.gmail_timeout_seconds) as client:
+        draft_response = await client.get(
+            f"{GMAIL_API}/users/{settings.gmail_write_user_id}/drafts/{clean_id}",
+            headers=headers,
+            params={"format": "raw"},
+        )
+        draft_response.raise_for_status()
+        verified = _verified_draft(
+            draft_response.json(),
+            expected_to=approved["to"],
+            expected_subject=approved["subject"],
+            expected_body=approved["body"],
+            draft_id=clean_id,
+        )
+        send_response = await client.post(
+            f"{GMAIL_API}/users/{settings.gmail_write_user_id}/drafts/send",
+            headers=headers,
+            json={"id": clean_id},
+        )
+        send_response.raise_for_status()
+        sent = send_response.json()
+    sent_message_id = sent.get("id") if isinstance(sent, dict) else None
+    if not isinstance(sent_message_id, str) or not sent_message_id:
+        raise RuntimeError("Gmail returned no sent message id")
+    return {
+        "ok": True,
+        "sent": {
+            "draft_id": clean_id,
+            "message_id": sent_message_id[:256],
+            "to": verified["to"],
+            "subject": verified["subject"],
+            "verified_before_send": True,
+        },
+    }
+
+
 async def health() -> dict:
     if not configured():
-        return {"state": "not_configured", "mode": "draft_only", "enabled": False}
+        return {
+            "state": "not_configured",
+            "mode": "draft_and_reviewed_send",
+            "draft_enabled": False,
+            "send_enabled": False,
+        }
     if not config.settings.gmail_write_enabled:
-        return {"state": "disabled", "mode": "draft_only", "enabled": False}
+        return {
+            "state": "disabled",
+            "mode": "draft_and_reviewed_send",
+            "draft_enabled": False,
+            "send_enabled": False,
+        }
     try:
         await _access_token()
-        return {"state": "ready", "mode": "draft_only", "enabled": True}
+        return {
+            "state": "ready",
+            "mode": "draft_and_reviewed_send",
+            "draft_enabled": True,
+            "send_enabled": bool(config.settings.gmail_send_enabled),
+        }
     except Exception as exc:
         return {
             "state": "unavailable",
-            "mode": "draft_only",
-            "enabled": True,
+            "mode": "draft_and_reviewed_send",
+            "draft_enabled": True,
+            "send_enabled": bool(config.settings.gmail_send_enabled),
             "error_type": type(exc).__name__,
         }
