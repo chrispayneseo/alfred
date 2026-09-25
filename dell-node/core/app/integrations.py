@@ -95,6 +95,20 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
             Capability("email.draft.create", "Create one plain-text Gmail draft", "write", True, ("email_recipient", "email_subject", "email_body"), True),
         ),
     ),
+    IntegrationDefinition(
+        id="controlled_browser",
+        name="Controlled Browser",
+        category="web",
+        boundary="cloud",
+        capabilities=(
+            Capability("browser.session.open", "Open one isolated public web session", "read", True, ("web_page", "url")),
+            Capability("browser.navigate", "Navigate an isolated session to a public HTTP(S) URL", "read", True, ("web_page", "url")),
+            Capability("browser.page.inspect", "Inspect bounded text and form metadata from the current page", "read", False, ("web_page", "form_metadata")),
+            Capability("browser.form.prepare", "Prepare non-sensitive form fields without network submission", "action", False, ("form_state",)),
+            Capability("browser.submit", "Submit the exact prepared browser state", "action", True, ("external_action",), True),
+            Capability("browser.session.close", "Close an isolated browser session", "action", False, ("browser_session",)),
+        ),
+    ),
 )
 
 
@@ -111,6 +125,8 @@ def _configured(integration_id: str) -> bool:
         return bool(settings.google_client_id and settings.google_client_secret and settings.google_refresh_token and settings.google_calendar_id)
     if integration_id == "gmail":
         return bool(settings.gmail_client_id and settings.gmail_client_secret and settings.gmail_refresh_token and settings.gmail_user_id)
+    if integration_id == "controlled_browser":
+        return bool(settings.browser_enabled and settings.browser_worker_url and settings.browser_worker_token)
     return False
 
 
@@ -122,6 +138,8 @@ def _capability_enabled(definition: IntegrationDefinition, capability: Capabilit
     if definition.id == "gmail" and capability.requires_write_enable:
         from .gmail_write import enabled as gmail_write_enabled
         return gmail_write_enabled()
+    if definition.id == "controlled_browser" and capability.requires_write_enable:
+        return bool(config.settings.browser_submit_enabled)
     return True
 
 
@@ -184,6 +202,7 @@ def action_available(action: str) -> tuple[bool, str | None]:
 
 async def integration_health() -> list[dict]:
     """Return health states without returning secrets, entities or user content."""
+    from .browser_client import health as browser_health
     from .clients import home_assistant_health
     from .gmail import health as gmail_health
     from .gmail_write import health as gmail_write_health
@@ -211,6 +230,9 @@ async def integration_health() -> list[dict]:
         elif integration["id"] == "gmail":
             item.update(await gmail_health())
             item["draft_write"] = await gmail_write_health()
+        elif integration["id"] == "controlled_browser":
+            item.update(await browser_health())
+            item["submission_enabled"] = bool(config.settings.browser_submit_enabled)
         else:
             item["state"] = integration["state"]
         results.append(item)
