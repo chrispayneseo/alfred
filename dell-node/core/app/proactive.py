@@ -1,9 +1,10 @@
 """Local-first proactive observation engine for Alfred Phase 4.
 
 The engine only reads already-authorised Alfred sources (tasks/reminders,
-Calendar and Gmail), applies deterministic urgency rules, and stores a local
-feed. It never calls a language model and never performs an external mutation.
-Outbound delivery is intentionally not implemented in this phase-4 foundation.
+Calendar and Gmail), applies deterministic urgency and relevance rules, and
+stores a local feed. It never calls a language model and never performs an
+external mutation. Gmail metadata inspected for Phase 4H relevance is reduced
+to generic categories before anything is stored.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import gmail, google_calendar, task_service
+from . import gmail, google_calendar, proactive_relevance, task_service
 from .config import settings
 from .db import connection, record_audit
 
@@ -131,17 +132,18 @@ def _task_signals(now: datetime) -> list[dict]:
             continue
         delta = (due - today).days
         kind = str(item.get("kind") or "task")
+        priority = proactive_relevance.task_priority(kind=kind, days_until_due=delta)
         if delta < 0:
-            priority, signal_kind = 95, "overdue"
+            signal_kind = "overdue"
             timing = f"Overdue since {due.isoformat()}."
         elif delta == 0:
-            priority, signal_kind = (90 if kind == "reminder" else 82), "due_today"
+            signal_kind = "due_today"
             timing = "Due today."
         elif delta == 1:
-            priority, signal_kind = 70, "due_soon"
+            signal_kind = "due_soon"
             timing = "Due tomorrow."
         else:
-            priority, signal_kind = 55, "due_soon"
+            signal_kind = "due_soon"
             timing = f"Due {due.isoformat()}."
         source_id = str(item.get("source_id") or "")
         title = str(item.get("title") or "Task")
@@ -192,17 +194,16 @@ async def _calendar_signals(now: datetime) -> tuple[list[dict], dict]:
         if start is None:
             continue
         hours = (start - now).total_seconds() / 3600
+        priority = proactive_relevance.calendar_priority(
+            hours_until_start=hours,
+            all_day=all_day,
+            same_local_day=start.date() == now.date(),
+        )
         if all_day:
-            priority = 64
             timing = "All-day calendar event."
-        elif hours <= 2:
-            priority = 90
-            timing = f"Starts at {start.strftime('%H:%M')}."
-        elif hours <= 6:
-            priority = 80
+        elif hours <= 12:
             timing = f"Starts at {start.strftime('%H:%M')}."
         else:
-            priority = 65
             timing = f"Starts {start.strftime('%a %H:%M')}."
         event_id = str(event.get("id") or "")
         title = str(event.get("summary") or "Calendar event")
@@ -226,20 +227,65 @@ async def _gmail_signals(now: datetime) -> tuple[list[dict], dict]:
     except Exception as exc:
         return [], {"state": "unavailable", "error_type": type(exc).__name__}
     messages = payload.get("messages", []) if isinstance(payload, dict) else []
-    count = len(messages) if isinstance(messages, list) else 0
+    safe_messages = messages if isinstance(messages, list) else []
+    relevance = proactive_relevance.gmail_relevance(safe_messages)
+    count = int(relevance["total"])
     if count == 0:
-        return [], {"state": "ready", "count": 0}
-    priority = 70 if count >= 10 else 58
-    signal = _signal(
-        kind="unread_email",
-        source="gmail",
-        priority=priority,
-        title="Unread email" if count == 1 else "Unread emails",
-        summary=f"{count} recent unread email{' is' if count == 1 else 's are'} waiting.",
-        source_ref=None,
-        identity=(now.date().isoformat(),),
-    )
-    return [signal], {"state": "ready", "count": count}
+        return [], {
+            "state": "ready",
+            "count": 0,
+            "relevance_mode": relevance["mode"],
+            "classified": 0,
+            "other": 0,
+            "categories": {},
+        }
+
+    signals: list[dict] = []
+    category_counts: dict[str, int] = {}
+    for category in relevance["categories"]:
+        key = str(category["key"])
+        category_counts[key] = int(category["count"])
+        signals.append(_signal(
+            kind=f"gmail_{key}",
+            source="gmail",
+            priority=int(category["priority"]),
+            title=str(category["title"]),
+            summary=str(category["summary"]),
+            source_ref=None,
+            identity=(now.date().isoformat(), key),
+        ))
+
+    other = int(relevance["other"])
+    if other > 0:
+        all_other = int(relevance["classified"]) == 0
+        title = (
+            "Unread email" if other == 1 else "Unread emails"
+        ) if all_other else (
+            "Other unread email" if other == 1 else "Other unread emails"
+        )
+        summary = (
+            f"{other} recent unread email{' is' if other == 1 else 's are'} waiting."
+            if all_other
+            else f"{other} other recent unread email{' is' if other == 1 else 's are'} waiting."
+        )
+        signals.append(_signal(
+            kind="unread_email",
+            source="gmail",
+            priority=58 if other >= 5 else 52,
+            title=title,
+            summary=summary,
+            source_ref=None,
+            identity=(now.date().isoformat(), "other"),
+        ))
+
+    return signals, {
+        "state": "ready",
+        "count": count,
+        "relevance_mode": relevance["mode"],
+        "classified": int(relevance["classified"]),
+        "other": other,
+        "categories": category_counts,
+    }
 
 
 def _store(signals: list[dict], successful_sources: set[str]) -> None:
@@ -331,6 +377,7 @@ def status(*, now: datetime | None = None) -> dict:
         "enabled": bool(settings.proactive_enabled),
         "mode": "observation_feed",
         "delivery": "disabled",
+        "relevance": proactive_relevance.relevance_status(),
         "quiet_hours": {
             "start": settings.proactive_quiet_start,
             "end": settings.proactive_quiet_end,
