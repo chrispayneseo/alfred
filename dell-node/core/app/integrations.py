@@ -92,6 +92,7 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
         capabilities=(
             Capability("email.messages.search", "Search Gmail with a bounded query", "read", True, ("email_metadata", "search_query")),
             Capability("email.message.get", "Read one Gmail message", "read", True, ("email_metadata", "email_body")),
+            Capability("email.draft.create", "Create one plain-text Gmail draft", "write", True, ("email_recipient", "email_subject", "email_body"), True),
         ),
     ),
 )
@@ -118,6 +119,9 @@ def _capability_enabled(definition: IntegrationDefinition, capability: Capabilit
         return False
     if definition.id == "google_calendar" and capability.requires_write_enable:
         return bool(config.settings.google_calendar_write_enabled)
+    if definition.id == "gmail" and capability.requires_write_enable:
+        from .gmail_write import enabled as gmail_write_enabled
+        return gmail_write_enabled()
     return True
 
 
@@ -182,6 +186,7 @@ async def integration_health() -> list[dict]:
     """Return health states without returning secrets, entities or user content."""
     from .clients import home_assistant_health
     from .gmail import health as gmail_health
+    from .gmail_write import health as gmail_write_health
     from .google_calendar import health as google_calendar_health
     from .local_files import health as local_files_health
 
@@ -205,6 +210,7 @@ async def integration_health() -> list[dict]:
             item.update(await google_calendar_health())
         elif integration["id"] == "gmail":
             item.update(await gmail_health())
+            item["draft_write"] = await gmail_write_health()
         else:
             item["state"] = integration["state"]
         results.append(item)

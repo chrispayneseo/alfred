@@ -13,6 +13,7 @@ from typing import Awaitable, Callable
 
 from .clients import home_assistant, home_assistant_state
 from .gmail import get_message as gmail_get_message, search_messages as gmail_search_messages
+from .gmail_write import create_draft as gmail_create_draft
 from .google_calendar import (
     create_event as google_calendar_create_event,
     delete_event as google_calendar_delete_event,
@@ -174,6 +175,14 @@ async def _gmail_get(arguments: dict, _: str) -> dict:
     return await gmail_get_message(_require(arguments, "message_id"))
 
 
+async def _gmail_draft_create(arguments: dict, _: str) -> dict:
+    return await gmail_create_draft(
+        _require(arguments, "to"),
+        _require(arguments, "subject"),
+        _require(arguments, "body"),
+    )
+
+
 def _verify_task_list(result: dict) -> dict:
     items = result.get("items")
     ok = isinstance(items, list) and all(
@@ -317,6 +326,25 @@ def _verify_email_message(result: dict) -> dict:
     return {"ok": ok, "method": "email_message", "message_id": message.get("id") if isinstance(message, dict) else None}
 
 
+def _verify_email_draft(result: dict) -> dict:
+    draft = result.get("draft")
+    ok = (
+        result.get("ok") is True
+        and isinstance(draft, dict)
+        and isinstance(draft.get("id"), str)
+        and isinstance(draft.get("message_id"), str)
+        and isinstance(draft.get("to"), str)
+        and isinstance(draft.get("subject"), str)
+        and isinstance(draft.get("body_chars"), int)
+        and draft.get("verified") is True
+    )
+    return {
+        "ok": ok,
+        "method": "email_draft",
+        "draft_id": draft.get("id") if isinstance(draft, dict) else None,
+    }
+
+
 ADAPTERS: dict[str, Adapter] = {
     adapter.action: adapter for adapter in (
         Adapter("tasks.list", _tasks_list, _verify_task_list),
@@ -335,6 +363,7 @@ ADAPTERS: dict[str, Adapter] = {
         Adapter("calendar.events.delete", _calendar_delete, _verify_calendar_deleted),
         Adapter("email.messages.search", _gmail_search, _verify_email_search),
         Adapter("email.message.get", _gmail_get, _verify_email_message),
+        Adapter("email.draft.create", _gmail_draft_create, _verify_email_draft),
     )
 }
 

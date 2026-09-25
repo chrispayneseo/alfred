@@ -41,13 +41,21 @@ class Settings:
     google_calendar_write_enabled: bool = _env_bool("GOOGLE_CALENDAR_WRITE_ENABLED", False)
     google_timeout_seconds: float = float(os.getenv("ALFRED_GOOGLE_TIMEOUT_SECONDS", "20"))
 
-    # Gmail is separately scoped from Calendar. A read-only Gmail refresh token
-    # cannot accidentally inherit Calendar write capability (or vice versa).
+    # Gmail reads use their own minimum-scope credentials.
     gmail_client_id: str = os.getenv("GMAIL_CLIENT_ID", "")
     gmail_client_secret: str = os.getenv("GMAIL_CLIENT_SECRET", "")
     gmail_refresh_token: str = os.getenv("GMAIL_REFRESH_TOKEN", "")
     gmail_user_id: str = os.getenv("GMAIL_USER_ID", "me") or "me"
     gmail_timeout_seconds: float = float(os.getenv("ALFRED_GMAIL_TIMEOUT_SECONDS", "20"))
+
+    # Gmail mutation credentials are deliberately separate from read credentials.
+    # The first write capability is draft creation only and remains disabled until
+    # both a write-capable token and the explicit feature gate are present.
+    gmail_write_client_id: str = os.getenv("GMAIL_WRITE_CLIENT_ID", "")
+    gmail_write_client_secret: str = os.getenv("GMAIL_WRITE_CLIENT_SECRET", "")
+    gmail_write_refresh_token: str = os.getenv("GMAIL_WRITE_REFRESH_TOKEN", "")
+    gmail_write_user_id: str = os.getenv("GMAIL_WRITE_USER_ID", "me") or "me"
+    gmail_write_enabled: bool = _env_bool("GMAIL_WRITE_ENABLED", False)
 
     # Optional cloud specialists. A missing key disables the provider in Core.
     # These names intentionally match the existing Alfred web/server environment.
