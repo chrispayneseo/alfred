@@ -5,6 +5,7 @@ import {
   fetchLatestMorningBrief,
   fetchMorningBriefStatus,
   fetchProactiveBrief,
+  fetchProactiveDeliveryStatus,
   markProactiveSurfaced,
   snoozeProactiveItem,
   type InterruptionDecision,
@@ -12,6 +13,7 @@ import {
   type MorningBriefStatus,
   type ProactiveBand,
   type ProactiveBrief,
+  type ProactiveDeliveryStatus,
   type ProactiveItem,
 } from "../integrations/proactive/api";
 
@@ -54,6 +56,7 @@ export function ProactiveBriefPanel() {
   const [morning, setMorning] = useState<MorningBrief | null>();
   const [morningStatus, setMorningStatus] = useState<MorningBriefStatus>();
   const [decision, setDecision] = useState<InterruptionDecision>();
+  const [delivery, setDelivery] = useState<ProactiveDeliveryStatus | null>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
@@ -61,16 +64,18 @@ export function ProactiveBriefPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const [nextBrief, nextMorning, nextStatus, nextDecision] = await Promise.all([
+      const [nextBrief, nextMorning, nextStatus, nextDecision, nextDelivery] = await Promise.all([
         fetchProactiveBrief(8),
         fetchLatestMorningBrief(),
         fetchMorningBriefStatus(),
         fetchInterruptionDecision(),
+        fetchProactiveDeliveryStatus().catch(() => null),
       ]);
       setBrief(nextBrief);
       setMorning(nextMorning);
       setMorningStatus(nextStatus);
       setDecision(nextDecision);
+      setDelivery(nextDelivery);
       setError(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load Alfred's brief.");
@@ -213,7 +218,9 @@ export function ProactiveBriefPanel() {
 
       {error && <p role="alert" className="mt-3 text-xs text-claude">{error}</p>}
       <p className="mt-4 text-[10px] text-ink-faint dark:text-ink-faint-dark">
-        Observed locally every 15 minutes · no outbound delivery
+        {delivery?.enabled && delivery.configured
+          ? "Observed locally · generic phone nudges policy-gated · item content stays on the Dell"
+          : "Observed locally · phone nudges off"}
       </p>
     </section>
   );
