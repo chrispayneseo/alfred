@@ -97,6 +97,34 @@ async def ollama_route(message: str) -> str:
         return "cloud" if value.get("route") == "cloud" else "local"
 
 
+async def home_assistant_state(entity_id: str) -> dict:
+    """Read a single entity and expose only a small safe attribute allowlist."""
+    if not settings.ha_url or not settings.ha_token:
+        raise RuntimeError("Home Assistant is not configured")
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(
+            f"{settings.ha_url}/api/states/{entity_id}",
+            headers={"Authorization": f"Bearer {settings.ha_token}"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    attributes = payload.get("attributes") if isinstance(payload, dict) else {}
+    if not isinstance(attributes, dict):
+        attributes = {}
+    selected_attributes = {
+        key: attributes[key]
+        for key in ("friendly_name", "unit_of_measurement", "device_class")
+        if key in attributes and isinstance(attributes[key], (str, int, float, bool))
+    }
+    return {
+        "ok": True,
+        "entity_id": str(payload.get("entity_id") or entity_id),
+        "state": str(payload.get("state") or "unknown")[:200],
+        "attributes": selected_attributes,
+        "last_changed": payload.get("last_changed") if isinstance(payload.get("last_changed"), str) else None,
+    }
+
+
 async def home_assistant(service: str, entity_id: str) -> dict:
     if not settings.ha_url or not settings.ha_token:
         raise RuntimeError("Home Assistant is not configured")

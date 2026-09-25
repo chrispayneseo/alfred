@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import db, execution, inbox_api
+from app import config, db, execution, inbox_api
 
 
 class ExecutionTests(unittest.TestCase):
@@ -116,20 +116,67 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(result["state"], "denied")
         self.assertIn("not registered", result["error"])
 
+    def test_unconfigured_integration_is_denied_before_execution(self):
+        patched = replace(config.settings, ha_url="", ha_token="")
+        with patch.object(config, "settings", patched):
+            result = asyncio.run(execution.execute_tool(
+                request_id="req-ha-unconfigured",
+                action="home_assistant.state",
+                arguments={"entity_id": "sensor.study_temperature"},
+            ))
+        self.assertEqual(result["state"], "denied")
+        self.assertIn("not configured", result["error"])
+        with db.connection() as connection:
+            approvals = connection.execute(
+                "SELECT COUNT(*) FROM approvals WHERE request_id = ?",
+                ("req-ha-unconfigured",),
+            ).fetchone()[0]
+            executions = connection.execute(
+                "SELECT COUNT(*) FROM core_executions WHERE request_id = ?",
+                ("req-ha-unconfigured",),
+            ).fetchone()[0]
+        self.assertEqual(approvals, 0)
+        self.assertEqual(executions, 0)
+
+    def test_home_assistant_state_is_read_only_and_verified(self):
+        patched = replace(config.settings, ha_url="http://ha.local:8123", ha_token="test-token")
+        with (
+            patch.object(config, "settings", patched),
+            patch.object(execution, "home_assistant_state", new=AsyncMock(return_value={
+                "ok": True,
+                "entity_id": "sensor.study_temperature",
+                "state": "21.4",
+                "attributes": {"unit_of_measurement": "°C"},
+                "last_changed": "2026-09-25T07:00:00+00:00",
+            })),
+        ):
+            result = asyncio.run(execution.execute_tool(
+                request_id="req-ha-read",
+                action="home_assistant.state",
+                arguments={"entity_id": "sensor.study_temperature"},
+            ))
+        self.assertEqual(result["state"], "completed")
+        self.assertIsNone(result["approval"])
+        self.assertEqual(result["result"]["state"], "21.4")
+        self.assertTrue(result["verification"]["ok"])
+        self.assertEqual(result["verification"]["method"], "device_state")
+
     def test_home_assistant_requires_approval_and_verifies_response(self):
         arguments = {"service": "light.turn_on", "entity_id": "light.study"}
-        first = asyncio.run(execution.execute_tool(
-            request_id="req-ha", action="home_assistant.service", arguments=arguments,
-        ))
-        self.assertEqual(first["state"], "approval_required")
-        db.resolve_approval(first["approval"]["id"], True)
-
-        with patch.object(execution, "home_assistant", new=AsyncMock(return_value={
-            "ok": True, "service": "light.turn_on", "entity_id": "light.study"
-        })):
-            second = asyncio.run(execution.execute_tool(
+        patched = replace(config.settings, ha_url="http://ha.local:8123", ha_token="test-token")
+        with patch.object(config, "settings", patched):
+            first = asyncio.run(execution.execute_tool(
                 request_id="req-ha", action="home_assistant.service", arguments=arguments,
             ))
+            self.assertEqual(first["state"], "approval_required")
+            db.resolve_approval(first["approval"]["id"], True)
+
+            with patch.object(execution, "home_assistant", new=AsyncMock(return_value={
+                "ok": True, "service": "light.turn_on", "entity_id": "light.study"
+            })):
+                second = asyncio.run(execution.execute_tool(
+                    request_id="req-ha", action="home_assistant.service", arguments=arguments,
+                ))
         self.assertEqual(second["state"], "completed")
         self.assertTrue(second["verification"]["ok"])
         self.assertEqual(second["verification"]["method"], "service_response")

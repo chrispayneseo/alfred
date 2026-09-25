@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from .clients import home_assistant
+from .clients import home_assistant, home_assistant_state
 from .core import TOOLS, decide
 from .db import connection, create_approval, record_audit
+from .integrations import action_available
 from . import memory_service
 
 
@@ -272,6 +273,10 @@ async def _invoke(action: str, arguments: dict, request_id: str) -> dict:
             request_id=request_id,
         )
 
+    if action == "home_assistant.state":
+        entity_id = _require(arguments, "entity_id")
+        return await home_assistant_state(entity_id)
+
     if action == "home_assistant.service":
         service = _require(arguments, "service")
         entity_id = _require(arguments, "entity_id")
@@ -325,6 +330,15 @@ def _verify(action: str, result: dict) -> dict:
             "superseded_memory_id": result.get("superseded_memory_id"),
         }
 
+    if action == "home_assistant.state":
+        ok = (
+            result.get("ok") is True
+            and isinstance(result.get("entity_id"), str)
+            and isinstance(result.get("state"), str)
+            and isinstance(result.get("attributes"), dict)
+        )
+        return {"ok": ok, "method": "device_state", "entity_id": result.get("entity_id")}
+
     if action == "home_assistant.service":
         return {"ok": result.get("ok") is True, "method": "service_response"}
 
@@ -340,6 +354,18 @@ async def execute_tool(*, request_id: str, action: str, arguments: dict,
         return ExecutionResult(
             id=str(uuid4()), request_id=request_id, plan_id=plan_id, step_index=step_index,
             action=action, state="denied", error=policy.reason,
+        ).to_dict()
+
+    available, unavailable_reason = action_available(action)
+    if not available:
+        record_audit(
+            "execution.unavailable",
+            {"action": action, "reason": unavailable_reason},
+            request_id,
+        )
+        return ExecutionResult(
+            id=str(uuid4()), request_id=request_id, plan_id=plan_id, step_index=step_index,
+            action=action, state="denied", error=unavailable_reason,
         ).to_dict()
 
     prior = _existing_step(plan_id, step_index)
