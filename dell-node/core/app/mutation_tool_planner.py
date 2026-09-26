@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass
 
 from .core import TOOLS, decide
 from .integrations import action_owner
+from .read_tool_planner import _calendar_window
+from . import google_calendar
 
 
 ENTITY_RE = re.compile(r"\b([a-z_]+\.[A-Za-z0-9_]+)\b")
@@ -60,6 +62,64 @@ def _validated(action: str, arguments: dict, reason: str) -> MutationToolPlan | 
         reason=reason,
     )
 
+
+
+CALENDAR_DELETE_RE = re.compile(
+    r"^\s*(?:delete|remove|cancel)\s+(?:the\s+)?(.+?)"
+    r"(?:\s+event)?\s+from\s+(?:my\s+)?calendar(?:\s+(today|tomorrow))?\s*[?.]*$",
+    re.IGNORECASE,
+)
+
+
+async def resolve_calendar_mutation(message: str) -> MutationToolPlan | None:
+    """Resolve a natural-language Calendar mutation to one exact existing event.
+
+    Resolution is deliberately fail-closed: zero or multiple exact title matches
+    produce no mutation plan. The returned mutation still passes through Core's
+    normal approval, execution and verification path.
+    """
+    if not isinstance(message, str) or not message.strip():
+        return None
+
+    clean = message.strip()[:4000]
+    match = CALENDAR_DELETE_RE.fullmatch(clean)
+    if not match:
+        return None
+
+    requested_title = match.group(1).strip()
+    day_hint = match.group(2)
+
+    # Avoid treating a trailing "event" as part of the title.
+    requested_title = re.sub(r"\s+event$", "", requested_title, flags=re.IGNORECASE).strip()
+    if not requested_title:
+        return None
+
+    window_message = day_hint or clean
+    start, end = _calendar_window(window_message)
+    result = await google_calendar.list_events(start, end, 20)
+    events = result.get("events") if isinstance(result, dict) else None
+    if not isinstance(events, list):
+        return None
+
+    wanted = requested_title.casefold()
+    matches = [
+        event for event in events
+        if isinstance(event, dict)
+        and isinstance(event.get("summary"), str)
+        and event["summary"].strip().casefold() == wanted
+        and isinstance(event.get("id"), str)
+        and event["id"]
+    ]
+
+    if len(matches) != 1:
+        return None
+
+    event = matches[0]
+    return _validated(
+        "calendar.events.delete",
+        {"event_id": event["id"]},
+        f"Delete the uniquely resolved Calendar event '{event['summary']}' after owner confirmation.",
+    )
 
 def plan_mutation_tool(message: str) -> MutationToolPlan | None:
     """Return one exact mutation proposal or None when required data is absent."""
