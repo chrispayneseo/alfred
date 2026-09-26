@@ -1,37 +1,15 @@
 import { NavLink } from "react-router-dom";
+import { AppIcon } from "./AppIcon";
 
 const tabs = [
-  { to: "/today", label: "Today" },
-  { to: "/chat", label: "Ask" },
-  { to: "/inbox", label: "Inbox" },
-  { to: "/search", label: "Search" },
-  { to: "/capture", label: "Capture" },
-] as const;
+  { to: "/today", label: "Home", icon: "home" as const },
+  { to: "/chat", label: "Alfred", icon: "spark" as const },
+  { to: "/activity", label: "Activity", icon: "activity" as const },
+  { to: "/library", label: "Library", icon: "library" as const },
+];
 
 export function TabBar() {
-  return (
-    <nav
-      className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper-raised/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur lg:hidden dark:border-line-dark dark:bg-paper-raised-dark/95"
-      aria-label="Primary"
-    >
-      <ul className="mx-auto flex max-w-lg justify-around px-1 pt-2">
-        {tabs.map((tab) => (
-          <li key={tab.to}>
-            <NavLink
-              to={tab.to}
-              className={({ isActive }) =>
-                `flex flex-col items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${
-                  isActive
-                    ? "text-ink dark:text-ink-dark"
-                    : "text-ink-faint dark:text-ink-faint-dark"
-                }`
-              }
-            >
-              {tab.label}
-            </NavLink>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
+  return <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line/70 bg-paper-raised/90 pb-[max(0.45rem,env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden dark:border-line-dark dark:bg-paper-raised-dark/90" aria-label="Primary">
+    <ul className="mx-auto grid max-w-lg grid-cols-4 px-2 pt-1.5">{tabs.map(tab => <li key={tab.to}><NavLink to={tab.to} className={({isActive}) => `flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-medium transition-colors ${isActive ? "text-ink dark:text-ink-dark" : "text-ink-faint dark:text-ink-faint-dark"}`}><AppIcon name={tab.icon} size={19}/>{tab.label}</NavLink></li>)}</ul>
+  </nav>;
 }

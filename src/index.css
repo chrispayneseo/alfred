@@ -2,80 +2,21 @@
 
 @theme {
   --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-
-  --color-paper: #f4f2ee;
-  --color-paper-raised: #fbfaf7;
-  --color-ink: #2f2b26;
-  --color-ink-soft: #6b665e;
-  --color-ink-faint: #a39d92;
-  --color-line: #e4e0d8;
-  --color-accent: #8a7f6b;
-
-  --color-paper-dark: #17161a;
-  --color-paper-raised-dark: #1f1e22;
-  --color-ink-dark: #e8e5df;
-  --color-ink-soft-dark: #a3a099;
-  --color-ink-faint-dark: #6b6862;
-  --color-line-dark: #2b2a2e;
-  --color-accent-dark: #b3a88f;
-
-  --color-claude: #b5673c;
-  --color-chatgpt: #3c7e6b;
-
-  /* Google account attribution (Step 8) — muted, distinct from the
-     claude/chatgpt tags above since those mean something different. */
-  --color-account-a: #5b7a9d;
-  --color-account-b: #9d6b8f;
+  --color-paper: #f4f2ee; --color-paper-raised: #fbfaf7; --color-ink: #2f2b26;
+  --color-ink-soft: #6b665e; --color-ink-faint: #9b9488; --color-line: #e4e0d8; --color-accent: #8a7f6b;
+  --color-paper-dark: #151418; --color-paper-raised-dark: #1e1d21; --color-ink-dark: #eeeae3;
+  --color-ink-soft-dark: #aaa69e; --color-ink-faint-dark: #716d66; --color-line-dark: #2d2b30; --color-accent-dark: #b3a88f;
+  --color-claude: #b5673c; --color-chatgpt: #3c7e6b; --color-account-a: #5b7a9d; --color-account-b: #9d6b8f;
 }
-
-html {
-  color-scheme: light dark;
-}
-
-body {
-  background-color: var(--color-paper);
-  color: var(--color-ink);
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    background-color: var(--color-paper-dark);
-    color: var(--color-ink-dark);
-  }
-}
-
-* {
-  -webkit-tap-highlight-color: transparent;
-}
-
-body {
-  font-family: var(--font-sans);
-  line-height: 1.6;
-}
-
-/* Every clickable control in the app is a raw <button> with its own
-   Tailwind classes — there's no shared Button component, so cursor and
-   hover feedback are handled once here rather than patched onto ~30
-   call sites individually (and forgotten on the next new one). Native
-   <button> defaults to `cursor: default`, not `pointer`, which reads as
-   "not clickable" to a mouse user; `<a>`/NavLink already get `pointer`
-   from the browser, so this only needs to cover buttons. */
-button:not(:disabled) {
-  cursor: pointer;
-}
-
-button:disabled {
-  cursor: not-allowed;
-}
-
-/* A subtle, theme-agnostic hover tint. `color-mix(..., currentColor ...)`
-   picks up whatever the button's existing text color is (paper-cream text
-   on a solid ink button, ink text on a ghost/outline button, etc.), so the
-   tint direction is automatically correct in both themes and for every
-   button style without per-component tuning. It's layered on as a
-   box-shadow rather than a background-color so it composites on top of an
-   existing bg-* class instead of replacing it, and stays clipped to the
-   button's own border-radius. */
-button:not(:disabled):hover {
-  box-shadow: inset 0 0 0 999px color-mix(in srgb, currentColor 8%, transparent);
-}
+html { color-scheme: light dark; background: var(--color-paper); }
+body { margin: 0; background-color: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); line-height: 1.55; letter-spacing: -0.006em; }
+@media (prefers-color-scheme: dark) { html, body { background-color: var(--color-paper-dark); color: var(--color-ink-dark); } }
+* { -webkit-tap-highlight-color: transparent; }
+::selection { background: color-mix(in srgb, var(--color-accent) 25%, transparent); }
+button:not(:disabled) { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+button:not(:disabled):hover { box-shadow: inset 0 0 0 999px color-mix(in srgb, currentColor 6%, transparent); }
+button, a, input, textarea { -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+@media (max-width: 1023px) { input, textarea, select { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

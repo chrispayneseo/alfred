@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ModelTag } from "../components/ModelTag";
+import { AppIcon } from "../components/AppIcon";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
 import { askLocalGateway, resolveToolApproval, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
@@ -286,7 +287,7 @@ export function ChatScreen() {
 
   return (
     <div className={`mx-auto flex h-dvh ${CONTENT_MAX_WIDTH} flex-col ${CONTENT_PADDING_X} pb-24 pt-[max(2rem,env(safe-area-inset-top))]`}>
-      <h1 className="mb-4 text-xl font-medium tracking-tight text-ink dark:text-ink-dark">Chat</h1>
+      <div className="mb-5 flex items-center justify-between"><div><p className="text-[10px] font-medium uppercase tracking-[.16em] text-accent">Personal assistant</p><h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-ink dark:text-ink-dark">Alfred</h1></div><span className="hidden rounded-full border border-line px-2.5 py-1 text-[10px] text-ink-faint lg:block dark:border-line-dark dark:text-ink-faint-dark">⌘K commands</span></div>
 
       <div className="flex-1 space-y-5 overflow-y-auto pb-4">
         {messages.map((message) => (
@@ -302,13 +303,7 @@ export function ChatScreen() {
               </div>
             )}
             <p
-              className={`inline-block max-w-[85%] lg:max-w-xl rounded-2xl px-4 py-2.5 text-left text-sm ${
-                message.role === "user"
-                  ? "bg-ink text-paper dark:bg-ink-dark dark:text-paper-dark"
-                  : message.isError
-                    ? "bg-paper-raised text-ink-soft dark:bg-paper-raised-dark dark:text-ink-soft-dark"
-                    : "bg-paper-raised text-ink dark:bg-paper-raised-dark dark:text-ink-dark"
-              }`}
+              className={`inline-block whitespace-pre-wrap text-left text-sm leading-6 ${message.role === "user" ? "max-w-[85%] rounded-2xl bg-ink px-4 py-2.5 text-paper dark:bg-ink-dark dark:text-paper-dark" : message.isError ? "max-w-2xl rounded-2xl bg-paper-raised px-4 py-3 text-ink-soft dark:bg-paper-raised-dark dark:text-ink-soft-dark" : "max-w-2xl px-0 py-1 text-ink dark:text-ink-dark"}`}
             >
               {message.text}
             </p>
@@ -525,24 +520,17 @@ export function ChatScreen() {
           </div>
         ))}
         {isThinking && (
-          <p className="text-xs text-ink-faint dark:text-ink-faint-dark">thinking…</p>
+          <div className="flex items-center gap-2 text-xs text-ink-faint dark:text-ink-faint-dark"><span className="h-2 w-2 animate-pulse rounded-full bg-accent" />Alfred is working…</div>
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-line pt-3 dark:border-line-dark">
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask Alfred anything…"
-          className="flex-1 rounded-full border border-line bg-paper-raised px-4 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-ink-faint dark:border-line-dark dark:bg-paper-raised-dark dark:text-ink-dark dark:placeholder:text-ink-faint-dark"
-        />
-        <button
-          type="submit"
-          disabled={!draft.trim() || isThinking}
-          className="rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"
-        >
-          Send
-        </button>
+      <form onSubmit={handleSubmit} className="rounded-2xl border border-line bg-paper-raised p-2 shadow-[0_8px_30px_rgba(47,43,38,.06)] dark:border-line-dark dark:bg-paper-raised-dark">
+        <div className="flex items-end gap-2">
+          <Link to="/capture" aria-label="Capture or attach" className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-ink-soft hover:bg-paper dark:text-ink-soft-dark dark:hover:bg-paper-dark"><AppIcon name="plus" /></Link>
+          <textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Ask Alfred anything…" className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-6 text-ink outline-none placeholder:text-ink-faint dark:text-ink-dark dark:placeholder:text-ink-faint-dark" />
+          <button type="submit" aria-label="Send" disabled={!draft.trim() || isThinking} className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ink text-paper disabled:opacity-30 dark:bg-ink-dark dark:text-paper-dark"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 7-7 7 7M12 19V5"/></svg></button>
+        </div>
+        <div className="hidden px-12 pb-1 text-[10px] text-ink-faint lg:block dark:text-ink-faint-dark">Enter to send · Shift + Enter for a new line</div>
       </form>
     </div>
   );
