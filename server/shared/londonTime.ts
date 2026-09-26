@@ -2,6 +2,18 @@
  * time, to the correct UTC instant — tries both the BST (+1) and GMT (+0)
  * offsets and keeps whichever one round-trips back to the requested local
  * time. Avoids needing a DST calendar or a new dependency. */
+export function londonDateFor(date: Date): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date).map((part) => [part.type, part.value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 export function londonTimeToUtc(dateStr: string, timeStr: string): Date {
   for (const offsetHours of [1, 0]) {
     const guess = new Date(`${dateStr}T${timeStr}:00.000Z`);

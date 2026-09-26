@@ -3,6 +3,7 @@ import type { Env } from "../db.js";
 import { createAuthenticatedClient } from "./client.js";
 import { markAccountNeedsReconnect, markAccountOk, type GoogleAccountEnv } from "./accounts.js";
 import { GoogleNotConnectedError, GoogleReconnectRequiredError, isGoogleAuthError } from "./errors.js";
+import { londonDateFor, londonTimeToUtc } from "../shared/londonTime.js";
 
 export interface CalendarEventRecord {
   id: string;
@@ -19,31 +20,41 @@ export interface CalendarEventRecord {
 export interface DateRange {
   start: Date;
   end: Date;
+  /** Calendar-date boundaries in Europe/London.  These are deliberately
+   * separate from the instant boundaries above: Google represents all-day
+   * events as a date span, with an exclusive end date. */
+  startDate: string;
+  endDate: string;
 }
 
-function startOfDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+function addCalendarDays(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
-function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
+/** Builds a London calendar-date range.  The Date values are API query
+ * instants; startDate/endDate remain date-only values for all-day events. */
+export function getCalendarDateRange(startDate: string, endDate: string): DateRange {
+  return {
+    start: londonTimeToUtc(startDate, "00:00"),
+    end: londonTimeToUtc(endDate, "00:00"),
+    startDate,
+    endDate,
+  };
 }
 
-export function getTodayRange(): DateRange {
-  const start = startOfDay(new Date());
-  return { start, end: addDays(start, 1) };
+export function getTodayRange(now = new Date()): DateRange {
+  const startDate = londonDateFor(now);
+  return getCalendarDateRange(startDate, addCalendarDays(startDate, 1));
 }
 
-export function getTomorrowRange(): DateRange {
-  const start = addDays(startOfDay(new Date()), 1);
-  return { start, end: addDays(start, 1) };
+export function getTomorrowRange(now = new Date()): DateRange {
+  const startDate = addCalendarDays(londonDateFor(now), 1);
+  return getCalendarDateRange(startDate, addCalendarDays(startDate, 1));
 }
 
-function mapEvent(event: calendar_v3.Schema$Event, accountEmail: string): CalendarEventRecord | undefined {
+export function mapCalendarEvent(event: calendar_v3.Schema$Event, accountEmail: string): CalendarEventRecord | undefined {
   if (!event.id || event.status === "cancelled") return undefined;
   const start = event.start?.dateTime ?? event.start?.date;
   const end = event.end?.dateTime ?? event.end?.date;
@@ -58,6 +69,15 @@ function mapEvent(event: calendar_v3.Schema$Event, accountEmail: string): Calend
     location: event.location ?? undefined,
     accountEmail,
   };
+}
+
+/** Whether an event occupies any part of a requested London calendar day.
+ * Date-only Google events use [start.date, end.date), while timed events use
+ * instants.  Keeping these representations distinct prevents midnight UTC
+ * from shifting an all-day event into the previous BST date. */
+export function eventIntersectsRange(event: CalendarEventRecord, range: DateRange): boolean {
+  if (event.allDay) return event.start < range.endDate && event.end > range.startDate;
+  return new Date(event.start) < range.end && new Date(event.end) > range.start;
 }
 
 /**
@@ -80,7 +100,10 @@ export async function listEvents(env: GoogleAccountEnv, range: DateRange): Promi
       singleEvents: true,
       orderBy: "startTime",
     });
-    return (res.data.items ?? []).map((e) => mapEvent(e, env.email)).filter((e): e is CalendarEventRecord => e !== undefined);
+    return (res.data.items ?? [])
+      .map((event) => mapCalendarEvent(event, env.email))
+      .filter((event): event is CalendarEventRecord => event !== undefined)
+      .filter((event) => eventIntersectsRange(event, range));
   } catch (error) {
     if (isGoogleAuthError(error)) throw new GoogleReconnectRequiredError(error);
     throw error;
@@ -173,7 +196,7 @@ export async function createEvent(env: GoogleAccountEnv, input: NewEventInput): 
 
   try {
     const res = await calendar.events.insert({ calendarId: "primary", requestBody });
-    const mapped = mapEvent(res.data, env.email);
+    const mapped = mapCalendarEvent(res.data, env.email);
     if (!mapped) throw new Error("Google returned an event that couldn't be parsed");
     return mapped;
   } catch (error) {

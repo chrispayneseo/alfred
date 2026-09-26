@@ -5,7 +5,8 @@
 import { ensureSchema, getSql, type Env } from "../db.js";
 import { logModelCall } from "../costTracking/callLog.js";
 import type { GoogleAccountEnv } from "../google/accounts.js";
-import { listEventsAllAccounts, type CalendarEventRecord } from "../google/calendar.js";
+import { getCalendarDateRange, listEventsAllAccounts, type CalendarEventRecord } from "../google/calendar.js";
+import { londonDateFor } from "../shared/londonTime.js";
 import { getFlaggedEmails } from "../google/gmailStore.js";
 import type { LlmEnv } from "../llm/env.js";
 import { routedComplete } from "../llm/routedComplete.js";
@@ -183,7 +184,10 @@ async function generateAndStore(
   repo: NotionRepo,
   weekKey: string
 ): Promise<WeeklyDigestResult> {
-  const weekRange = { start: new Date(), end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) };
+  const startDate = londonDateFor(new Date());
+  const endDate = new Date(`${startDate}T00:00:00Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + 7);
+  const weekRange = getCalendarDateRange(startDate, endDate.toISOString().slice(0, 10));
 
   const [eventsResult, allTasks, flaggedEmails, captured] = await Promise.all([
     accounts.length > 0 ? listEventsAllAccounts(dbEnv, accounts, weekRange).catch(() => ({ events: [], failedAccounts: [] })) : Promise.resolve({ events: [], failedAccounts: [] }),

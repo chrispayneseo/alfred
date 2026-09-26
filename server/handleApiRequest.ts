@@ -13,6 +13,7 @@ import type { Env } from "./db.js";
 import { connectAccount, listAccountsWithHealth, loadGoogleAccounts, removeAccount } from "./google/accounts.js";
 import {
   createEvent,
+  getCalendarDateRange,
   getTodayEventsAllAccounts,
   getTomorrowEventsAllAccounts,
   listEvents,
@@ -455,10 +456,10 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResult> {
       let existingEvents: CalendarEventRecord[] = [];
       if (range) {
         try {
-          existingEvents = await listEvents(account, {
-            start: new Date(`${range.start}T00:00:00`),
-            end: new Date(`${range.end}T23:59:59`),
-          });
+          const start = range.start;
+          const end = new Date(`${range.end}T00:00:00Z`);
+          end.setUTCDate(end.getUTCDate() + 1);
+          existingEvents = await listEvents(account, getCalendarDateRange(start, end.toISOString().slice(0, 10)));
         } catch (error) {
           if (error instanceof GoogleReconnectRequiredError) return json(409, { error: "reconnect_required" });
           throw error;
