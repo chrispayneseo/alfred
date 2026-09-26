@@ -161,6 +161,24 @@ async def orchestrate(
                 )
                 return result.to_dict()
 
+            if state == "completed" and isinstance(execution.get("verification"), dict) and execution["verification"].get("ok") is True:
+                payload = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+                if mutation_plan.action == "calendar.events.create":
+                    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+                    reply = f"Done — I added {event.get('summary', 'the event')} to your calendar for {event.get('start', mutation_plan.arguments.get('start', 'the requested time'))}."
+                else:
+                    reply = "Done — the requested change completed and was verified."
+                record_turn(conversation_id, "assistant", reply, request_id=request_id)
+                result = OrchestrationResult(
+                    request_id=request_id, conversation_id=conversation_id, route="tool",
+                    reply=reply, provider=provider, reason=mutation_plan.reason,
+                    memory_sent=False, tool_action=mutation_plan.action,
+                    integration=mutation_plan.integration,
+                )
+                transition_request(request_id, "completed", route="tool", provider=provider)
+                record_audit("request.tool_completed", {"action": mutation_plan.action, "integration": mutation_plan.integration}, request_id, conversation_id)
+                return result.to_dict()
+
             error = execution.get("error") or "The requested integration change was denied."
             reply = error
             record_turn(conversation_id, "assistant", reply, request_id=request_id)
