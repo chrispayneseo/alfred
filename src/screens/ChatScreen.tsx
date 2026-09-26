@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 import { ModelTag } from "../components/ModelTag";
 import { AppIcon } from "../components/AppIcon";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
-import { askLocalGateway, resolveToolApproval, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
+import { askLocalGateway, LocalGatewayUnavailableError, resolveToolApproval, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
 import { useLiveLocation } from "../hooks/useLiveLocation";
 import { makeId } from "../lib/id";
-import { planGatewayDecision } from "../lib/gatewayDecision";
+import { planGatewayDecision, planSearchConsoleFallback } from "../lib/gatewayDecision";
 import { CONTENT_MAX_WIDTH, CONTENT_PADDING_X } from "../lib/layout";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type { ChatMessage, EventProposal, LocationReminderProposal, MealType, RecipeProposal } from "../types";
@@ -111,6 +111,25 @@ export function ChatScreen() {
         createdAt: new Date().toISOString(),
       }]);
     } catch (error) {
+      if (error instanceof LocalGatewayUnavailableError) {
+        const plan = planSearchConsoleFallback(text);
+        if (plan) {
+          setMessages((prev) => [...prev, {
+            id: makeId(), role: "assistant", text: plan.reason,
+            cloudPrompt: plan.prompt, cloudScope: plan.scope, cloudFallback: true,
+            cloudStatus: "pending",
+            createdAt: new Date().toISOString(),
+          }]);
+          return;
+        }
+        setMessages((prev) => [...prev, {
+          id: makeId(), role: "assistant",
+          text: "Alfred Local isn't available right now. Connect to Tailscale and try again.",
+          isError: true,
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
       setMessages((prev) => [
         ...prev,
         {
@@ -353,8 +372,10 @@ export function ChatScreen() {
                   <div className="mt-3 flex gap-3">
                     <button onClick={() => handleApproveCloud(message.id, message.cloudPrompt!, message.cloudScope ?? "prompt_only", message.cloudLocation)}
                       className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">{message.cloudScope === "connected" ? "Use connected account" : "Send to cloud"}</button>
-                    <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!)}
-                      className="text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudScope === "connected" ? "Answer without account" : "Answer locally"}</button>
+                    {!message.cloudFallback && (
+                      <button onClick={() => handleKeepLocal(message.id, message.cloudPrompt!)}
+                        className="text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudScope === "connected" ? "Answer without account" : "Answer locally"}</button>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">{message.cloudStatus === "sending" ? "Working…" : message.cloudStatus === "sent" ? "Sent with your approval." : "Answered locally."}</p>

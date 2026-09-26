@@ -45,6 +45,8 @@ export interface ChatMessage {
   sources?: import("../integrations/llm/api").RecallSource[];
   cloudPrompt?: string;
   cloudScope?: "prompt_only" | "connected";
+  /** No Dell route is available for this approved cloud fallback. */
+  cloudFallback?: boolean;
   cloudLocation?: { lat: number; lon: number };
   cloudStatus?: "pending" | "sending" | "sent" | "cancelled" | "error";
   toolApprovalId?: string;
