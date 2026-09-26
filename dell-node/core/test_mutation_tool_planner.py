@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import config, db, inbox_api, mutation_tool_planner, orchestrator, task_service
+from app import config, db, inbox_api, integration_adapters, mutation_tool_planner, orchestrator, task_service
 
 
 class MutationToolPlannerTests(unittest.TestCase):
@@ -125,6 +125,11 @@ class MutationToolPlannerTests(unittest.TestCase):
         with (
             patch.object(config, "settings", configured_write),
             patch.object(orchestrator, "execute_cloud_request", new=AsyncMock(side_effect=AssertionError("cloud should not run"))),
+            patch.object(integration_adapters, "google_calendar_create_event", new=AsyncMock(return_value={
+                "ok": True, "event": {"id": "event-routine", "summary": "Dentist",
+                "start": "2026-10-01T10:00+01:00", "end": "2026-10-01T10:30+01:00",
+                "all_day": False, "status": "confirmed"}
+            })),
         ):
             result = asyncio.run(orchestrator.orchestrate(
                 channel="api",
@@ -133,7 +138,7 @@ class MutationToolPlannerTests(unittest.TestCase):
                     "to 2026-10-01T10:30+01:00"
                 ),
             ))
-        self.assertEqual(result["decision"], "tool_failed")
+        self.assertEqual(result["decision"], "tool")
         self.assertEqual(result["tool_action"], "calendar.events.create")
         self.assertNotIn("approval", result)
 
