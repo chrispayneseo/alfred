@@ -216,7 +216,7 @@ def plan_read_tool(message: str, *, now: datetime | None = None) -> ReadToolPlan
             "Read a bounded Calendar window.",
         )
 
-    if any(term in lowered for term in ("github", "repositories", "repos")):
+    if any(term in lowered for term in ("github", "repositories", "repos", "repo")):
         repo_match = re.search(r"\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\b", clean)
         if repo_match and any(term in lowered for term in ("repo", "repository", "about", "status", "details")):
             return _validated("github.repo.get", {"full_name": repo_match.group(1)}, "Read repository metadata from GitHub.")
