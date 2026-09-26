@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import config, db, inbox_api, mutation_tool_planner, orchestrator, task_service
+from app import config, db, inbox_api, integration_adapters, mutation_tool_planner, orchestrator, task_service
 
 
 class MutationToolPlannerTests(unittest.TestCase):
@@ -113,7 +113,7 @@ class MutationToolPlannerTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM approvals WHERE request_id = ?", (result["request_id"],)
             ).fetchone()[0], 0)
 
-    def test_calendar_write_enabled_still_only_proposes_approval(self):
+    def test_calendar_write_enabled_executes_explicit_routine_create(self):
         configured_write = replace(
             config.settings,
             google_client_id="client",
@@ -125,6 +125,11 @@ class MutationToolPlannerTests(unittest.TestCase):
         with (
             patch.object(config, "settings", configured_write),
             patch.object(orchestrator, "execute_cloud_request", new=AsyncMock(side_effect=AssertionError("cloud should not run"))),
+            patch.object(integration_adapters, "google_calendar_create_event", new=AsyncMock(return_value={
+                "ok": True, "event": {"id": "event-routine", "summary": "Dentist",
+                "start": "2026-10-01T10:00+01:00", "end": "2026-10-01T10:30+01:00",
+                "all_day": False, "status": "confirmed"}
+            })),
         ):
             result = asyncio.run(orchestrator.orchestrate(
                 channel="api",
@@ -133,9 +138,9 @@ class MutationToolPlannerTests(unittest.TestCase):
                     "to 2026-10-01T10:30+01:00"
                 ),
             ))
-        self.assertEqual(result["decision"], "approval_required")
+        self.assertEqual(result["decision"], "tool")
         self.assertEqual(result["tool_action"], "calendar.events.create")
-        self.assertEqual(result["approval"]["risk_level"], "external")
+        self.assertNotIn("approval", result)
 
     def test_ambiguous_mutation_falls_through_without_creating_approval(self):
         with patch.object(orchestrator, "ollama_chat", new=AsyncMock(return_value="Please specify the exact details.")):

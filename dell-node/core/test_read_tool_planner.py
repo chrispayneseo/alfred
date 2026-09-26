@@ -168,5 +168,22 @@ class ReadToolPlannerTests(unittest.TestCase):
         self.assertIn("not configured", result["reason"].casefold())
 
 
+    def test_named_month_gig_query_routes_to_calendar(self):
+        now = datetime(2026, 9, 26, 12, 0, tzinfo=ZoneInfo("Europe/London"))
+        plan = read_tool_planner.plan_read_tool("what gigs do i have coming up in november?", now=now)
+        self.assertEqual(plan.action, "calendar.events.list")
+        self.assertEqual(plan.arguments["start"], "2026-11-01T00:00:00+00:00")
+        self.assertEqual(plan.arguments["end"], "2026-12-01T00:00:00+00:00")
+
+    def test_github_and_vercel_account_reads_are_planned(self):
+        github = read_tool_planner.plan_read_tool("show me my GitHub repos")
+        self.assertEqual(github.action, "github.repos.list")
+        repo = read_tool_planner.plan_read_tool("show details for repo chrispayneseo/alfred")
+        self.assertEqual(repo.action, "github.repo.get")
+        self.assertEqual(repo.arguments["full_name"], "chrispayneseo/alfred")
+        vercel = read_tool_planner.plan_read_tool("show my Vercel projects")
+        self.assertEqual(vercel.action, "vercel.projects.list")
+
+
 if __name__ == "__main__":
     unittest.main()

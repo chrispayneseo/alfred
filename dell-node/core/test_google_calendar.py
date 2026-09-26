@@ -66,20 +66,19 @@ class GoogleCalendarTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM approvals WHERE request_id = ?", ("req-calendar-write-off",)).fetchone()[0], 0)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM core_executions WHERE request_id = ?", ("req-calendar-write-off",)).fetchone()[0], 0)
 
-    def test_calendar_create_requires_exact_approval_and_verifies_event(self):
+    def test_calendar_create_is_routine_reversible_and_verifies_event(self):
         configured = self._configured(write_enabled=True)
         arguments = {"summary": "Dentist", "start": "2026-10-01T10:00:00+01:00", "end": "2026-10-01T10:30:00+01:00"}
         payload = {"ok": True, "event": {"id": "event-2", "summary": "Dentist", "start": arguments["start"], "end": arguments["end"], "all_day": False, "status": "confirmed"}}
-        with patch.object(config, "settings", configured):
-            first = asyncio.run(execution.execute_tool(request_id="req-calendar-create", action="calendar.events.create", arguments=arguments))
-            self.assertEqual(first["state"], "approval_required")
-            self.assertEqual(first["approval"]["risk_level"], "external")
-            db.resolve_approval(first["approval"]["id"], True)
-            with patch.object(integration_adapters, "google_calendar_create_event", new=AsyncMock(return_value=payload)):
-                second = asyncio.run(execution.execute_tool(request_id="req-calendar-create", action="calendar.events.create", arguments=arguments))
-        self.assertEqual(second["state"], "completed")
-        self.assertTrue(second["verification"]["ok"])
-        self.assertEqual(second["verification"]["method"], "calendar_event")
+        with (
+            patch.object(config, "settings", configured),
+            patch.object(integration_adapters, "google_calendar_create_event", new=AsyncMock(return_value=payload)),
+        ):
+            result = asyncio.run(execution.execute_tool(request_id="req-calendar-create", action="calendar.events.create", arguments=arguments))
+        self.assertEqual(result["state"], "completed")
+        self.assertIsNone(result["approval"])
+        self.assertTrue(result["verification"]["ok"])
+        self.assertEqual(result["verification"]["method"], "calendar_event")
 
     def test_calendar_mutation_validation_is_bounded(self):
         with self.assertRaisesRegex(ValueError, "timezone"):

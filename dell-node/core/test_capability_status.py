@@ -85,7 +85,7 @@ class CapabilityStatusTests(unittest.TestCase):
         gmail = {item["action"]: item for item in integrations["gmail"]["capabilities"]}
         self.assertTrue(calendar["calendar.events.list"]["enabled"])
         self.assertFalse(calendar["calendar.events.create"]["enabled"])
-        self.assertEqual(calendar["calendar.events.create"]["permission"], "confirm")
+        self.assertEqual(calendar["calendar.events.create"]["permission"], "auto")
         self.assertFalse(gmail["email.draft.create"]["enabled"])
         self.assertEqual(gmail["email.draft.create"]["risk"], "external")
 

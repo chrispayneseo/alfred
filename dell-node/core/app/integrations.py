@@ -96,6 +96,29 @@ DEFINITIONS: tuple[IntegrationDefinition, ...] = (
         ),
     ),
     IntegrationDefinition(
+        id="github",
+        name="GitHub",
+        category="development",
+        boundary="cloud",
+        capabilities=(
+            Capability("github.repos.list", "List repositories available to Alfred", "read", True, ("repository_metadata",)),
+            Capability("github.repo.get", "Read repository metadata", "read", True, ("repository_metadata",)),
+            Capability("github.issue.create", "Create a repository issue", "write", True, ("repository_metadata", "issue")),
+            Capability("github.branch.create", "Create a repository branch", "write", True, ("repository_metadata", "git_ref")),
+        ),
+    ),
+    IntegrationDefinition(
+        id="vercel",
+        name="Vercel",
+        category="development",
+        boundary="cloud",
+        capabilities=(
+            Capability("vercel.projects.list", "List Vercel projects", "read", True, ("project_metadata",)),
+            Capability("vercel.deployments.list", "List project deployments", "read", True, ("deployment_metadata",)),
+            Capability("vercel.deployment.redeploy", "Redeploy an existing deployment", "action", True, ("deployment_metadata",)),
+        ),
+    ),
+    IntegrationDefinition(
         id="controlled_browser",
         name="Controlled Browser",
         category="web",
@@ -126,6 +149,10 @@ def _configured(integration_id: str) -> bool:
         return bool(settings.google_client_id and settings.google_client_secret and settings.google_refresh_token and settings.google_calendar_id)
     if integration_id == "gmail":
         return bool(settings.gmail_client_id and settings.gmail_client_secret and settings.gmail_refresh_token and settings.gmail_user_id)
+    if integration_id == "github":
+        return bool(settings.github_token and settings.github_owner)
+    if integration_id == "vercel":
+        return bool(settings.vercel_token)
     if integration_id == "controlled_browser":
         return bool(settings.browser_enabled and settings.browser_worker_url and settings.browser_worker_token)
     return False

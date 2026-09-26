@@ -60,7 +60,6 @@ _EXACT_APPROVAL_ACTIONS = {
     "tasks.update",
     "tasks.complete",
     "tasks.delete",
-    "calendar.events.create",
     "calendar.events.update",
     "calendar.events.delete",
     "email.draft.create",
@@ -170,7 +169,7 @@ def acceptance_status() -> dict:
     checks.append(_check(
         "consequential_actions_require_confirmation",
         not approval_failures,
-        "Registered consequential actions remain behind deterministic owner confirmation.",
+        "Destructive, communication and consequential mutations remain behind deterministic owner confirmation; explicitly routine reversible actions may be automatic.",
     ))
 
     recipe_actions = {
