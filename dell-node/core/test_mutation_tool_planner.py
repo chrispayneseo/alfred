@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from app import config, db, inbox_api, integration_adapters, mutation_tool_planner, orchestrator, task_service
+from app.core import decide
 
 
 class MutationToolPlannerTests(unittest.TestCase):
@@ -154,6 +155,74 @@ class MutationToolPlannerTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM approvals WHERE request_id = ?", (result["request_id"],)
             ).fetchone()[0], 0)
 
+
+    def test_calendar_delete_resolves_unique_event_and_requires_confirmation(self):
+        async def fake_list_events(start, end, limit=20):
+            return {
+                "ok": True,
+                "events": [{
+                    "id": "calendar-test-event-123",
+                    "summary": "Alfred Calendar Write Test",
+                    "start": "2026-09-26T16:00:00+01:00",
+                    "end": "2026-09-26T16:15:00+01:00",
+                }],
+            }
+
+        with patch.object(
+            mutation_tool_planner.google_calendar,
+            "list_events",
+            side_effect=fake_list_events,
+        ):
+            plan = asyncio.run(
+                mutation_tool_planner.resolve_calendar_mutation(
+                    "Delete the Alfred Calendar Write Test event from my calendar today"
+                )
+            )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.action, "calendar.events.delete")
+        self.assertEqual(
+            plan.arguments,
+            {"event_id": "calendar-test-event-123"},
+        )
+        self.assertEqual(plan.integration, "google_calendar")
+        self.assertEqual(
+            decide(plan.action).decision,
+            "confirm",
+        )
+
+    def test_calendar_delete_fails_closed_when_event_match_is_ambiguous(self):
+        async def fake_list_events(start, end, limit=20):
+            return {
+                "ok": True,
+                "events": [
+                    {
+                        "id": "event-1",
+                        "summary": "Alfred Calendar Write Test",
+                        "start": "2026-09-26T16:00:00+01:00",
+                        "end": "2026-09-26T16:15:00+01:00",
+                    },
+                    {
+                        "id": "event-2",
+                        "summary": "Alfred Calendar Write Test",
+                        "start": "2026-09-26T17:00:00+01:00",
+                        "end": "2026-09-26T17:15:00+01:00",
+                    },
+                ],
+            }
+
+        with patch.object(
+            mutation_tool_planner.google_calendar,
+            "list_events",
+            side_effect=fake_list_events,
+        ):
+            plan = asyncio.run(
+                mutation_tool_planner.resolve_calendar_mutation(
+                    "Delete the Alfred Calendar Write Test event from my calendar today"
+                )
+            )
+
+        self.assertIsNone(plan)
 
 if __name__ == "__main__":
     unittest.main()

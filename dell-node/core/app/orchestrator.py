@@ -20,7 +20,7 @@ from .db import record_audit
 from .execution import execute_tool
 from .lifecycle import begin_request, transition_request
 from .memory_service import retrieve_context
-from .mutation_tool_planner import plan_mutation_tool
+from .mutation_tool_planner import plan_mutation_tool, resolve_calendar_mutation
 from .privacy import cloud_requested, explicit_cloud, needs_connected_data
 from .read_bundle import execute_read_bundle, plan_read_tools
 from .read_tool_planner import plan_read_tool, render_result as render_tool_result, sources_for_result
@@ -109,6 +109,8 @@ async def orchestrate(
 
     try:
         mutation_plan = plan_mutation_tool(clean)
+        if mutation_plan is None:
+            mutation_plan = await resolve_calendar_mutation(clean)
         if mutation_plan is not None:
             provider = f"integration:{mutation_plan.integration}"
             proposal_plan_id = f"mutation:{request_id}"
