@@ -47,6 +47,10 @@ export interface ChatMessage {
   cloudScope?: "prompt_only" | "connected";
   cloudLocation?: { lat: number; lon: number };
   cloudStatus?: "pending" | "sending" | "sent" | "cancelled" | "error";
+  toolApprovalId?: string;
+  toolApprovalAction?: string;
+  toolApprovalIntegration?: string;
+  toolApprovalStatus?: "pending" | "sending" | "approved" | "rejected" | "error";
   isError?: boolean;
   createdAt: string;
   eventProposal?: EventProposal;

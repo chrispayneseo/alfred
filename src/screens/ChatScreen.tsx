@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ModelTag } from "../components/ModelTag";
 import { createCalendarEvent } from "../integrations/google-calendar/api";
-import { askLocalGateway, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
+import { askLocalGateway, resolveToolApproval, sendChatMessage, sendLocalOnly, sendPlainCloudMessage, type ChatApiResult } from "../integrations/llm/api";
 import { createLocationReminder } from "../integrations/notion/api";
 import { createRecipe } from "../integrations/recipes/api";
 import { useLiveLocation } from "../hooks/useLiveLocation";
@@ -95,6 +95,15 @@ export function ChatScreen() {
         }]);
         return;
       }
+      if (plan.kind === "tool_approval") {
+        setMessages((prev) => [...prev, {
+          id: makeId(), role: "assistant", text: plan.reason,
+          toolApprovalId: plan.approvalId, toolApprovalAction: plan.action,
+          toolApprovalIntegration: plan.integration, toolApprovalStatus: "pending",
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
       setMessages((prev) => [...prev, {
         id: makeId(), role: "assistant", text: plan.reply, model: "local",
         sources: plan.sources,
@@ -132,6 +141,24 @@ export function ChatScreen() {
       recipeProposalMealType: result.recipeProposal?.mealType ?? "Dinner",
       createdAt: new Date().toISOString(),
     };
+  }
+
+  async function handleToolApproval(messageId: string, approvalId: string, approved: boolean) {
+    setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, toolApprovalStatus: "sending" } : m));
+    try {
+      const result = await resolveToolApproval(approvalId, approved);
+      const completed = approved && result.state === "completed" && result.execution?.verification?.ok === true;
+      setMessages((prev) => prev.map((m) => m.id === messageId ? {
+        ...m,
+        toolApprovalStatus: approved ? (completed ? "approved" : "error") : "rejected",
+        note: approved && !completed ? "Alfred could not verify that the approved action completed." : m.note,
+      } : m));
+    } catch (error) {
+      setMessages((prev) => prev.map((m) => m.id === messageId ? {
+        ...m, toolApprovalStatus: "error",
+        note: error instanceof Error ? error.message : "Action approval failed",
+      } : m));
+    }
   }
 
   async function handleApproveCloud(messageId: string, prompt: string, scope: "prompt_only" | "connected", location?: { lat: number; lon: number }) {
@@ -297,6 +324,26 @@ export function ChatScreen() {
                     {source.kind === "memory" ? "Note" : source.kind === "task" ? "Task" : "Reminder"}: {source.title}{source.due ? ` · ${source.due}` : ""}
                   </Link>;
                 })}
+              </div>
+            )}
+            {message.toolApprovalId && (
+              <div className="mt-2 max-w-xl rounded-2xl border border-line p-3 text-left dark:border-line-dark">
+                <p className="text-xs text-ink-soft dark:text-ink-soft-dark">
+                  This action will be performed by Alfred Core. No cloud model is involved.
+                </p>
+                <p className="mt-2 text-sm text-ink dark:text-ink-dark">{message.text}</p>
+                {message.toolApprovalStatus === "pending" || message.toolApprovalStatus === "error" ? (
+                  <div className="mt-3 flex gap-3">
+                    <button onClick={() => handleToolApproval(message.id, message.toolApprovalId!, true)}
+                      className="rounded-full bg-ink px-3 py-1.5 text-xs text-paper dark:bg-ink-dark dark:text-paper-dark">Approve</button>
+                    <button onClick={() => handleToolApproval(message.id, message.toolApprovalId!, false)}
+                      className="text-xs text-ink-soft dark:text-ink-soft-dark">Cancel</button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-ink-soft dark:text-ink-soft-dark">
+                    {message.toolApprovalStatus === "sending" ? "Working…" : message.toolApprovalStatus === "approved" ? "Completed and verified." : "Cancelled."}
+                  </p>
+                )}
               </div>
             )}
             {message.cloudPrompt && (
