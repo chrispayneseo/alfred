@@ -25,6 +25,10 @@ from .local_files import (
     read_file as local_files_read_file,
     search_files as local_files_search_files,
 )
+from .developer_platforms import (
+    github_list_repos, github_get_repo, github_create_issue, github_create_branch,
+    vercel_list_projects, vercel_list_deployments, vercel_redeploy,
+)
 from . import task_service
 
 
@@ -162,6 +166,27 @@ async def _calendar_update(arguments: dict, _: str) -> dict:
 async def _calendar_delete(arguments: dict, _: str) -> dict:
     return await google_calendar_delete_event(_require(arguments, "event_id"))
 
+
+async def _github_repos(arguments: dict, _: str) -> dict:
+    return await github_list_repos(arguments.get("limit", 100))
+
+async def _github_repo(arguments: dict, _: str) -> dict:
+    return await github_get_repo(_require(arguments, "full_name"))
+
+async def _github_issue(arguments: dict, _: str) -> dict:
+    return await github_create_issue(_require(arguments, "full_name"), _require(arguments, "title"), arguments.get("body", ""))
+
+async def _github_branch(arguments: dict, _: str) -> dict:
+    return await github_create_branch(_require(arguments, "full_name"), _require(arguments, "branch"), arguments.get("from_ref", "main"))
+
+async def _vercel_projects(arguments: dict, _: str) -> dict:
+    return await vercel_list_projects(arguments.get("limit", 100))
+
+async def _vercel_deployments(arguments: dict, _: str) -> dict:
+    return await vercel_list_deployments(_require(arguments, "project_id"), arguments.get("limit", 20))
+
+async def _vercel_redeploy(arguments: dict, _: str) -> dict:
+    return await vercel_redeploy(_require(arguments, "deployment_id"))
 
 async def _gmail_search(arguments: dict, _: str) -> dict:
     query = _require(arguments, "query")
@@ -345,6 +370,23 @@ def _verify_email_draft(result: dict) -> dict:
     }
 
 
+def _verify_list(result: dict, key: str, method: str) -> dict:
+    items = result.get(key)
+    return {"ok": result.get("ok") is True and isinstance(items, list), "method": method,
+            "item_count": len(items) if isinstance(items, list) else 0}
+
+def _verify_github_repo(result: dict) -> dict:
+    item=result.get("repo"); return {"ok":result.get("ok") is True and isinstance(item,dict) and bool(item.get("full_name")),"method":"github_repo"}
+
+def _verify_github_issue(result: dict) -> dict:
+    item=result.get("issue"); return {"ok":result.get("ok") is True and isinstance(item,dict) and isinstance(item.get("number"),int),"method":"github_issue"}
+
+def _verify_github_branch(result: dict) -> dict:
+    return {"ok":result.get("ok") is True and all(isinstance(result.get(k),str) and result.get(k) for k in ("repo","branch","sha")),"method":"github_branch"}
+
+def _verify_vercel_deployment(result: dict) -> dict:
+    item=result.get("deployment"); return {"ok":result.get("ok") is True and isinstance(item,dict) and bool(item.get("id")),"method":"vercel_deployment"}
+
 ADAPTERS: dict[str, Adapter] = {
     adapter.action: adapter for adapter in (
         Adapter("tasks.list", _tasks_list, _verify_task_list),
@@ -361,6 +403,13 @@ ADAPTERS: dict[str, Adapter] = {
         Adapter("calendar.events.create", _calendar_create, _verify_calendar_event),
         Adapter("calendar.events.update", _calendar_update, _verify_calendar_event),
         Adapter("calendar.events.delete", _calendar_delete, _verify_calendar_deleted),
+        Adapter("github.repos.list", _github_repos, lambda r: _verify_list(r, "repos", "github_repo_list")),
+        Adapter("github.repo.get", _github_repo, _verify_github_repo),
+        Adapter("github.issue.create", _github_issue, _verify_github_issue),
+        Adapter("github.branch.create", _github_branch, _verify_github_branch),
+        Adapter("vercel.projects.list", _vercel_projects, lambda r: _verify_list(r, "projects", "vercel_project_list")),
+        Adapter("vercel.deployments.list", _vercel_deployments, lambda r: _verify_list(r, "deployments", "vercel_deployment_list")),
+        Adapter("vercel.deployment.redeploy", _vercel_redeploy, _verify_vercel_deployment),
         Adapter("email.messages.search", _gmail_search, _verify_email_search),
         Adapter("email.message.get", _gmail_get, _verify_email_message),
         Adapter("email.draft.create", _gmail_draft_create, _verify_email_draft),
