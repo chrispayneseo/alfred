@@ -21,26 +21,67 @@ export interface DateRange {
   end: Date;
 }
 
-function startOfDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+export const DEFAULT_TIME_ZONE = "Europe/London";
+
+const londonDate = new Intl.DateTimeFormat("en-GB", {
+  timeZone: DEFAULT_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+});
+const londonDateTime = new Intl.DateTimeFormat("en-GB", {
+  timeZone: DEFAULT_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+});
+
+function parts(date: Date, formatter: Intl.DateTimeFormat): Record<string, number> {
+  return Object.fromEntries(formatter.formatToParts(date)
+    .filter((part) => part.type !== "literal")
+    .map((part) => [part.type, Number(part.value)]));
 }
 
-function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
+function dateKey(date: Date): string {
+  const { year, month, day } = parts(date, londonDate);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export function getTodayRange(): DateRange {
-  const start = startOfDay(new Date());
-  return { start, end: addDays(start, 1) };
+function addCalendarDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
-export function getTomorrowRange(): DateRange {
-  const start = addDays(startOfDay(new Date()), 1);
-  return { start, end: addDays(start, 1) };
+/** Midnight in London is an instant; successive midnights can be 23 or 25 hours apart. */
+function londonMidnight(date: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const wallMidnight = Date.UTC(year, month - 1, day);
+  let instant = wallMidnight;
+  for (let i = 0; i < 3; i++) {
+    const local = parts(new Date(instant), londonDateTime);
+    const wall = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second);
+    instant += wallMidnight - wall;
+  }
+  return new Date(instant);
+}
+
+export function getDayRange(date: string): DateRange {
+  return { start: londonMidnight(date), end: londonMidnight(addCalendarDays(date, 1)) };
+}
+
+export function getTodayRange(now = new Date()): DateRange {
+  return getDayRange(dateKey(now));
+}
+
+export function getTomorrowRange(now = new Date()): DateRange {
+  return getDayRange(addCalendarDays(dateKey(now), 1));
+}
+
+/** Google all-day end.date is exclusive; date-only values are never instants. */
+export function eventOverlapsRange(event: CalendarEventRecord, range: DateRange): boolean {
+  if (event.allDay) {
+    const firstDay = dateKey(range.start);
+    const exclusiveLastDay = addCalendarDays(dateKey(new Date(range.end.getTime() - 1)), 1);
+    return event.start < exclusiveLastDay && event.end > firstDay;
+  }
+  return new Date(event.start).getTime() < range.end.getTime()
+    && new Date(event.end).getTime() > range.start.getTime();
 }
 
 function mapEvent(event: calendar_v3.Schema$Event, accountEmail: string): CalendarEventRecord | undefined {
@@ -80,7 +121,8 @@ export async function listEvents(env: GoogleAccountEnv, range: DateRange): Promi
       singleEvents: true,
       orderBy: "startTime",
     });
-    return (res.data.items ?? []).map((e) => mapEvent(e, env.email)).filter((e): e is CalendarEventRecord => e !== undefined);
+    return (res.data.items ?? []).map((e) => mapEvent(e, env.email))
+      .filter((e): e is CalendarEventRecord => e !== undefined && eventOverlapsRange(e, range));
   } catch (error) {
     if (isGoogleAuthError(error)) throw new GoogleReconnectRequiredError(error);
     throw error;
@@ -128,12 +170,8 @@ function rruleForDate(dateStr: string, frequency: "WEEKLY" | "MONTHLY" | "YEARLY
 // so Google resolves DST correctly — safer than doing UTC math by hand,
 // which would silently be an hour off in summer if this ever ran somewhere
 // that defaults to UTC (e.g. a serverless function).
-export const DEFAULT_TIME_ZONE = "Europe/London";
-
 function addOneDay(dateStr: string): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return addCalendarDays(dateStr, 1);
 }
 
 function addOneHour(time: string): string {
