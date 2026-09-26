@@ -80,10 +80,10 @@ def _calendar_window(message: str, now: datetime | None = None) -> tuple[str, st
     lowered = message.casefold()
     month_names = {name.casefold(): index for index, name in enumerate(calendar.month_name) if name}
     named_month = next(((name, index) for name, index in month_names.items()
-                        if re.search(rf"\\b{name}\\b", lowered)), None)
+                        if re.search(rf"\b{name}\b", lowered)), None)
     if named_month is not None:
         month = named_month[1]
-        year_match = re.search(r"\\b(20\\d{2})\\b", lowered)
+        year_match = re.search(r"\b(20\d{2})\b", lowered)
         year = int(year_match.group(1)) if year_match else (local.year if month >= local.month else local.year + 1)
         start = datetime(year, month, 1, tzinfo=local.tzinfo)
         end = datetime(year + 1, 1, 1, tzinfo=local.tzinfo) if month == 12 else datetime(year, month + 1, 1, tzinfo=local.tzinfo)
@@ -217,7 +217,7 @@ def plan_read_tool(message: str, *, now: datetime | None = None) -> ReadToolPlan
         )
 
     if any(term in lowered for term in ("github", "repositories", "repos")):
-        repo_match = re.search(r"\\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\\b", clean)
+        repo_match = re.search(r"\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\b", clean)
         if repo_match and any(term in lowered for term in ("repo", "repository", "about", "status", "details")):
             return _validated("github.repo.get", {"full_name": repo_match.group(1)}, "Read repository metadata from GitHub.")
         return _validated("github.repos.list", {"limit": 100}, "List repositories available to Alfred's GitHub account token.")
