@@ -37,7 +37,7 @@ TOOLS = {
     "files.search": {"risk": "read", "permission": "auto", "verification": "file_search"},
     "files.read": {"risk": "read", "permission": "auto", "verification": "file_content"},
     "calendar.events.list": {"risk": "read", "permission": "auto", "verification": "calendar_events"},
-    "calendar.events.create": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
+    "calendar.events.create": {"risk": "reversible", "permission": "auto", "verification": "calendar_event"},
     "calendar.events.update": {"risk": "external", "permission": "confirm", "verification": "calendar_event"},
     "calendar.events.delete": {"risk": "external", "permission": "confirm", "verification": "calendar_event_deleted"},
     "email.messages.search": {"risk": "read", "permission": "auto", "verification": "email_search"},
@@ -50,6 +50,13 @@ TOOLS = {
     "browser.form.prepare": {"risk": "reversible", "permission": "auto", "verification": "browser_offline_form_state"},
     "browser.submit": {"risk": "high_impact", "permission": "confirm", "verification": "browser_submission_dispatch"},
     "browser.session.close": {"risk": "reversible", "permission": "auto", "verification": "browser_session_closed"},
+    "github.repos.list": {"risk": "read", "permission": "auto", "verification": "github_repo_list"},
+    "github.repo.get": {"risk": "read", "permission": "auto", "verification": "github_repo"},
+    "github.issue.create": {"risk": "external", "permission": "confirm", "verification": "github_issue"},
+    "github.branch.create": {"risk": "reversible", "permission": "confirm", "verification": "github_branch"},
+    "vercel.projects.list": {"risk": "read", "permission": "auto", "verification": "vercel_project_list"},
+    "vercel.deployments.list": {"risk": "read", "permission": "auto", "verification": "vercel_deployment_list"},
+    "vercel.deployment.redeploy": {"risk": "external", "permission": "confirm", "verification": "vercel_deployment"},
 }
 
 def decide(action: str, confirmed: bool = False) -> PolicyDecision:
@@ -58,6 +65,7 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
         "memory.read", "memory.candidate.list", "tasks.list", "home_assistant.state",
         "files.list", "files.search", "files.read",
         "calendar.events.list", "email.messages.search", "email.message.get",
+        "github.repos.list", "github.repo.get", "vercel.projects.list", "vercel.deployments.list",
         "browser.session.open", "browser.authenticated.session.open", "browser.navigate", "browser.page.inspect",
         "recall.search", "chat.local", "route",
     }:
@@ -85,11 +93,22 @@ def decide(action: str, confirmed: bool = False) -> PolicyDecision:
             "auto",
             "This changes only the ephemeral browser session and cannot submit external data.",
         )
-    if action in {"calendar.events.create", "calendar.events.update", "calendar.events.delete"}:
+    if action == "calendar.events.create":
+        return PolicyDecision(
+            "reversible", "auto",
+            "Creating an explicitly specified calendar event is a routine reversible owner action.",
+        )
+    if action in {"calendar.events.update", "calendar.events.delete"}:
         return PolicyDecision(
             "external",
             "auto" if confirmed else "confirm",
             "Changing an external calendar requires explicit confirmation.",
+        )
+    if action in {"github.issue.create", "github.branch.create", "vercel.deployment.redeploy"}:
+        return PolicyDecision(
+            "external" if action != "github.branch.create" else "reversible",
+            "auto" if confirmed else "confirm",
+            "Development-platform mutations require exact-scope Core approval.",
         )
     if action == "email.draft.create":
         return PolicyDecision(
