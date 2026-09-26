@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planGatewayDecision } from "../../src/lib/gatewayDecision.js";
+import { planGatewayDecision, planSearchConsoleFallback } from "../../src/lib/gatewayDecision.js";
 
 test("gateway cloud prompt cannot replace the user's approved text", () => {
   const plan = planGatewayDecision({
@@ -56,4 +56,14 @@ test("Core tool approvals never become cloud consent", () => {
     action: "calendar.events.delete",
     integration: "google_calendar",
   });
+});
+
+test("an unavailable Dell offers a consented fallback for Search Console only", () => {
+  assert.deepEqual(planSearchConsoleFallback("Compare Peacock Search's clicks this month with last month."), {
+    kind: "approval",
+    reason: "Alfred Local isn't available right now. You can still run this read-only Search Console query with your connected Google account. Dell memory and your location will stay private.",
+    prompt: "Compare Peacock Search's clicks this month with last month.",
+    scope: "connected",
+  });
+  assert.equal(planSearchConsoleFallback("Delete tomorrow's calendar event"), undefined);
 });

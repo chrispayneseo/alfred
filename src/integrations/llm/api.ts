@@ -33,14 +33,26 @@ export type GatewayResult =
   | { decision: "cloud_ready"; reason: string; cloud_prompt: string; memory_sent: false }
   | { decision: "approval_required"; reply: string; reason: string; approval: { id: string; summary?: string; risk_level?: string }; tool_action: string; integration: string; memory_sent: false };
 
+export class LocalGatewayUnavailableError extends Error {
+  constructor() {
+    super("Alfred Local is unavailable.");
+    this.name = "LocalGatewayUnavailableError";
+  }
+}
+
 export async function askLocalGateway(message: string): Promise<GatewayResult> {
-  const res = await fetch(LOCAL_GATEWAY, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  });
-  if (!res.ok) throw new Error(`Local gateway unavailable (${res.status})`);
-  return await res.json() as GatewayResult;
+  try {
+    const res = await fetch(LOCAL_GATEWAY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    if (!res.ok) throw new LocalGatewayUnavailableError();
+    return await res.json() as GatewayResult;
+  } catch (error) {
+    if (error instanceof LocalGatewayUnavailableError) throw error;
+    throw new LocalGatewayUnavailableError();
+  }
 }
 
 export async function resolveToolApproval(approvalId: string, approved: boolean): Promise<{ state: string; reply?: string; execution?: { verification?: { ok?: boolean } } }> {
