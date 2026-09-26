@@ -277,21 +277,6 @@ def sources_for_result(action: str, result: dict) -> list[dict]:
     if action == "vercel.deployments.list":
         items = result.get("deployments")
         return items if isinstance(items, list) else []
-    if action == "github.repos.list":
-        items = result.get("repos") if isinstance(result.get("repos"), list) else []
-        labels = [item.get("full_name", item.get("name", "(unnamed)")) for item in items[:20]]
-        return f"I found {len(items)} GitHub repositor{'ies' if len(items) != 1 else 'y'}: " + "; ".join(labels) + "."
-    if action == "github.repo.get":
-        item = result.get("repo") if isinstance(result.get("repo"), dict) else {}
-        return f"{item.get('full_name', 'Repository')}: default branch {item.get('default_branch', 'unknown')}, {item.get('open_issues_count', 0)} open issues, updated {item.get('updated_at', 'unknown')}."
-    if action == "vercel.projects.list":
-        items = result.get("projects") if isinstance(result.get("projects"), list) else []
-        labels = [item.get("name", "(unnamed)") for item in items[:20]]
-        return f"I found {len(items)} Vercel project{'s' if len(items) != 1 else ''}: " + "; ".join(labels) + "."
-    if action == "vercel.deployments.list":
-        items = result.get("deployments") if isinstance(result.get("deployments"), list) else []
-        labels = [f"{item.get('name','deployment')} — {item.get('state','unknown')}" for item in items[:20]]
-        return f"I found {len(items)} Vercel deployment{'s' if len(items) != 1 else ''}: " + "; ".join(labels) + "."
     if action == "email.messages.search":
         messages = result.get("messages")
         return messages if isinstance(messages, list) else []
@@ -328,6 +313,22 @@ def render_result(action: str, result: dict) -> str:
             return "I found no calendar events in that time window."
         labels = [f"{event.get('summary', '(untitled)')} — {event.get('start', '')}" for event in events[:8]]
         return f"I found {len(events)} calendar event{'s' if len(events) != 1 else ''}: " + "; ".join(labels) + "."
+
+    if action == "github.repos.list":
+        items = result.get("repos") if isinstance(result.get("repos"), list) else []
+        labels = [item.get("full_name", item.get("name", "(unnamed)")) for item in items[:20]]
+        return f"I found {len(items)} GitHub repositor{'ies' if len(items) != 1 else 'y'}: " + "; ".join(labels) + "."
+    if action == "github.repo.get":
+        item = result.get("repo") if isinstance(result.get("repo"), dict) else {}
+        return f"{item.get('full_name', 'Repository')}: default branch {item.get('default_branch', 'unknown')}, {item.get('open_issues_count', 0)} open issues, updated {item.get('updated_at', 'unknown')}."
+    if action == "vercel.projects.list":
+        items = result.get("projects") if isinstance(result.get("projects"), list) else []
+        labels = [item.get("name", "(unnamed)") for item in items[:20]]
+        return f"I found {len(items)} Vercel project{'s' if len(items) != 1 else ''}: " + "; ".join(labels) + "."
+    if action == "vercel.deployments.list":
+        items = result.get("deployments") if isinstance(result.get("deployments"), list) else []
+        labels = [f"{item.get('name','deployment')} — {item.get('state','unknown')}" for item in items[:20]]
+        return f"I found {len(items)} Vercel deployment{'s' if len(items) != 1 else ''}: " + "; ".join(labels) + "."
 
     if action == "email.messages.search":
         messages = result.get("messages") if isinstance(result.get("messages"), list) else []
