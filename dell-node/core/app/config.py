@@ -100,5 +100,12 @@ class Settings:
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-opus-5")
     cloud_timeout_seconds: float = float(os.getenv("ALFRED_CLOUD_TIMEOUT_SECONDS", "120"))
 
+    # Account-level development platforms. Tokens remain private in the Dell env.
+    github_token: str = os.getenv("GITHUB_TOKEN", "")
+    github_owner: str = os.getenv("GITHUB_OWNER", "")
+    vercel_token: str = os.getenv("VERCEL_TOKEN", "")
+    vercel_team_id: str = os.getenv("VERCEL_TEAM_ID", "")
+    developer_platform_timeout_seconds: float = float(os.getenv("ALFRED_DEVELOPER_PLATFORM_TIMEOUT_SECONDS", "25"))
+
 
 settings = Settings()
