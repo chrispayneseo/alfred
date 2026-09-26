@@ -51,7 +51,7 @@ def _validated(action: str, arguments: dict, reason: str) -> MutationToolPlan | 
     if not definition:
         return None
     policy = decide(action)
-    if policy.decision != "confirm" or policy.level not in {"safe_write", "reversible", "external"}:
+    if policy.decision not in {"auto", "confirm"} or policy.level not in {"safe_write", "reversible", "external"}:
         return None
     return MutationToolPlan(
         action=action,
@@ -98,7 +98,7 @@ def plan_mutation_tool(message: str) -> MutationToolPlan | None:
         return _validated(
             "calendar.events.create",
             {"summary": summary[:500], "start": event.group(2), "end": event.group(3)},
-            "Create the explicitly specified Calendar event after owner confirmation.",
+            "Create the explicitly specified routine Calendar event.",
         )
 
     draft = EMAIL_DRAFT_RE.fullmatch(clean)
