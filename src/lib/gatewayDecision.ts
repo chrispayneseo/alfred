@@ -8,6 +8,7 @@ export type GatewayPlan =
 export function planGatewayDecision(gateway: GatewayResult, userText: string): GatewayPlan {
   switch (gateway.decision) {
     case "local":
+    case "tool":
       return { kind: "local", reply: gateway.reply, memoriesUsed: gateway.memories_used,
         ...(gateway.sources ? { sources: gateway.sources } : {}) };
     case "connection_needed":
