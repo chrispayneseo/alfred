@@ -113,7 +113,7 @@ class MutationToolPlannerTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM approvals WHERE request_id = ?", (result["request_id"],)
             ).fetchone()[0], 0)
 
-    def test_calendar_write_enabled_still_only_proposes_approval(self):
+    def test_calendar_write_enabled_executes_explicit_routine_create(self):
         configured_write = replace(
             config.settings,
             google_client_id="client",
@@ -133,9 +133,9 @@ class MutationToolPlannerTests(unittest.TestCase):
                     "to 2026-10-01T10:30+01:00"
                 ),
             ))
-        self.assertEqual(result["decision"], "approval_required")
+        self.assertEqual(result["decision"], "tool_failed")
         self.assertEqual(result["tool_action"], "calendar.events.create")
-        self.assertEqual(result["approval"]["risk_level"], "external")
+        self.assertNotIn("approval", result)
 
     def test_ambiguous_mutation_falls_through_without_creating_approval(self):
         with patch.object(orchestrator, "ollama_chat", new=AsyncMock(return_value="Please specify the exact details.")):
