@@ -38,3 +38,22 @@ test("local recall keeps source links without creating cloud approval", () => {
     kind: "local", reply: "In the drawer", memoriesUsed: 1, sources,
   });
 });
+
+
+test("Core tool approvals never become cloud consent", () => {
+  assert.deepEqual(planGatewayDecision({
+    decision: "approval_required",
+    reply: "I can do that, but this change needs your confirmation first.",
+    reason: "Delete the uniquely resolved calendar event after owner confirmation.",
+    approval: { id: "approval-123", summary: "Delete calendar event", risk_level: "external" },
+    tool_action: "calendar.events.delete",
+    integration: "google_calendar",
+    memory_sent: false,
+  }, "Delete the event"), {
+    kind: "tool_approval",
+    reason: "Delete the uniquely resolved calendar event after owner confirmation.",
+    approvalId: "approval-123",
+    action: "calendar.events.delete",
+    integration: "google_calendar",
+  });
+});
