@@ -28,13 +28,13 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 SERVICES = {
     "calendar": {
-        "scope": "https://www.googleapis.com/auth/calendar.readonly",
+        "scope": "https://www.googleapis.com/auth/calendar",
         "env": {
             "GOOGLE_CLIENT_ID": "client_id",
             "GOOGLE_CLIENT_SECRET": "client_secret",
             "GOOGLE_REFRESH_TOKEN": "refresh_token",
             "GOOGLE_CALENDAR_ID": "primary",
-            "GOOGLE_CALENDAR_WRITE_ENABLED": "false",
+            "GOOGLE_CALENDAR_WRITE_ENABLED": "true",
         },
     },
     "gmail": {
