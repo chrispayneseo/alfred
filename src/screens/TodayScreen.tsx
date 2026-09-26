@@ -387,7 +387,7 @@ export function TodayScreen() {
 
   return (
     <Screen
-      title="Today"
+      title="Home"
       subtitle={formatDate()}
       headerAction={
         <Link
