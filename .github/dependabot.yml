@@ -8,6 +8,14 @@ updates:
       time: "06:00"
       timezone: Europe/London
     open-pull-requests-limit: 5
+    ignore:
+      # vite 8 and @vitejs/plugin-react 6 must move together, and plugin-react 6
+      # currently conflicts on Babel peer dependencies (and vite-plugin-pwa needs
+      # a major bump too). Revisit once the ecosystem settles, then remove this.
+      - dependency-name: vite
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
     groups:
       production-dependencies:
         dependency-type: production
