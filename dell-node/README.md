@@ -43,3 +43,10 @@ writable. Keep `.env`, collector tokens, databases, and model data out of Git.
 To run the inbox tests locally, install `core/requirements.txt` into a virtual
 environment and run `python -m unittest discover -p 'test_*.py' -v` from
 `core/`.
+
+## Further documentation
+
+Per-phase design notes, acceptance criteria and feature guides live in [`docs/`](docs/):
+
+- Phases: [6 daily utility](docs/PHASE6_DAILY_UTILITY.md), [7 personal agent experience](docs/PHASE7_PERSONAL_AGENT_EXPERIENCE.md), [8 secure authenticated web](docs/PHASE8_SECURE_AUTHENTICATED_WEB.md) ([release notes](docs/PHASE8_RELEASE_NOTES.md)), [9 deep memory](docs/PHASE9_DEEP_MEMORY.md), [10 proactive intelligence](docs/PHASE10_PROACTIVE_INTELLIGENCE.md), [11 life and work operations](docs/PHASE11_LIFE_WORK_OPERATIONS.md), [12 autonomous projects](docs/PHASE12_AUTONOMOUS_PROJECTS.md), [13 specialist orchestration](docs/PHASE13_SPECIALIST_ORCHESTRATION.md)
+- Guides: [agent observability](docs/AGENT_OBSERVABILITY.md), [browser actions](docs/BROWSER_ACTIONS.md), [Google integrations](docs/GOOGLE_INTEGRATIONS.md), [hardening acceptance](docs/HARDENING_ACCEPTANCE.md), [reusable workflows](docs/REUSABLE_WORKFLOWS.md)
