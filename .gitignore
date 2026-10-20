@@ -16,3 +16,5 @@ dev-dist
 skills-lock.json
 whatsapp-ingress/collector.env
 whatsapp-ingress/collector-data/
+__pycache__/
+*.pyc
